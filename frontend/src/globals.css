@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Force modern font */
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    @apply antialiased;
+}
+
+/* ---- Premium UI System ---- */
+
+@layer utilities {
+
+    /* Glassmorphism card */
+    .glass-card {
+        background: rgba(255, 255, 255, 0.04);
+        backdrop-filter: blur(24px);
+        -webkit-backdrop-filter: blur(24px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow:
+            0 8px 32px rgba(0, 0, 0, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .glass-card-bright {
+        background: rgba(255, 255, 255, 0.06);
+        backdrop-filter: blur(28px);
+        -webkit-backdrop-filter: blur(28px);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        box-shadow:
+            0 12px 48px rgba(0, 0, 0, 0.4),
+            inset 0 1px 0 rgba(255, 255, 255, 0.1),
+            0 0 60px -12px rgba(0, 255, 255, 0.06);
+    }
+
+    /* Glassmorphism nav */
+    .glass-nav {
+        background: rgba(0, 0, 0, 0.2);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        box-shadow:
+            0 4px 24px rgba(0, 0, 0, 0.2),
+            inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+}
+
+/* Breathing background gradient */
+.breathing-bg {
+    background-size: 300% 300%;
+    animation: breathing 8s ease-in-out infinite;
+}
+
+/* Glow sweep overlay for buttons */
+.glow-sweep-btn {
+    position: relative;
+    overflow: hidden;
+}
+
+.glow-sweep-btn::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 60%;
+    height: 100%;
+    background: linear-gradient(90deg,
+            transparent,
+            rgba(255, 255, 255, 0.15),
+            transparent);
+    transition: left 0.6s ease;
+}
+
+.glow-sweep-btn:hover::after {
+    left: 100%;
+}
+
+/* Custom scrollbar for chat */
+.chat-scrollbar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.chat-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
