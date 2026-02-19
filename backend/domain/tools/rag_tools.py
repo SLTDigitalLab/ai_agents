@@ -52,7 +52,7 @@ def search_knowledge_base(
         )
 
         # --- Similarity search (top 8 chunks) ----------------------------
-        results = vector_store.similarity_search(query=query, k=8)
+        results = vector_store.similarity_search(query=query, k=7)
 
         if not results:
             return "No relevant documents found."

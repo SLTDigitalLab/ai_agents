@@ -1,9 +1,11 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useMsal } from "@azure/msal-react";
 import { motion } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
 import LifestoreForm from './forms/LifestoreForm';
 import EnterpriseForm from './forms/EnterpriseForm';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Generative UI trigger tokens emitted by the backend
 const FORM_TOKENS = {
@@ -11,34 +13,98 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
-/**
- * Get or create a unique thread_id for this agent session.
- * Stored in sessionStorage so it survives page refreshes but
- * is unique per agent (e.g. "thread_askhr", "thread_askfinance").
- */
-const getOrCreateThreadId = (agentId) => {
-    const storageKey = `thread_${agentId}`;
-    let threadId = sessionStorage.getItem(storageKey);
-    if (!threadId) {
-        threadId = uuidv4();
-        sessionStorage.setItem(storageKey, threadId);
-    }
-    return threadId;
-};
+
 
 const ChatInterface = ({ agentConfig }) => {
     const { accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
 
-    // Stable thread ID for this agent – survives re-renders and page refreshes
-    const threadId = useMemo(() => getOrCreateThreadId(agentConfig.id), [agentConfig.id]);
+    // State for thread ID and messages
+    const [threadId, setThreadId] = useState('');
+    const [messages, setMessages] = useState([]);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
-    const [messages, setMessages] = useState([
-        {
-            type: 'bot',
-            text: `Hello ${user.name.split(" ")[0]}! I am your ${agentConfig.title} assistant. How can I help you today?`
-        }
-    ]);
+    // Effect to handle Agent switching: 
+    // 1. Get/Create thread_id for the specific agent
+    // 2. Load history if exists, else reset messages
+    useEffect(() => {
+        if (!agentConfig?.id) return;
+
+        // ── CRITICAL: Immediately clear stale state to prevent race conditions ──
+        // Without this, the OLD agent's threadId stays in state until the async
+        // work below finishes, which can cause cross-contamination if the user
+        // sends a message during the transition.
+        setThreadId('');          // Guard: handleSend checks for empty threadId
+        setMessages([]);          // Clear previous agent's messages
+        setIsLoadingHistory(true); // Show spinner during transition
+
+        const loadAgentState = async () => {
+            const storageKey = `thread_${agentConfig.id}`;
+            const storedThreadId = sessionStorage.getItem(storageKey);
+            const isExistingSession = !!storedThreadId;
+
+            // Resolve thread ID: reuse existing or generate new
+            const currentThreadId = storedThreadId || uuidv4();
+            if (!isExistingSession) {
+                sessionStorage.setItem(storageKey, currentThreadId);
+            }
+
+            // Set the correct threadId for this agent
+            setThreadId(currentThreadId);
+
+            if (isExistingSession) {
+                // Existing session -> Fetch History from backend
+                try {
+                    const response = await fetch(`http://localhost:8000/api/v1/chat/${agentConfig.id}/${currentThreadId}`);
+                    if (!response.ok) throw new Error("Failed to fetch history");
+
+                    const data = await response.json();
+                    if (data.messages && data.messages.length > 0) {
+                        const mappedMessages = data.messages.map(msg => {
+                            let text = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+                            // Re-apply form detection logic for history
+                            let formType = null;
+                            for (const [token, type] of Object.entries(FORM_TOKENS)) {
+                                if (text.includes(token)) {
+                                    formType = type;
+                                    text = text.replace(token, '').trim();
+                                    break;
+                                }
+                            }
+                            return {
+                                type: msg.type === 'human' ? 'user' : 'bot',
+                                text,
+                                formType,
+                            };
+                        });
+                        setMessages(mappedMessages);
+                    } else {
+                        // Existing thread but empty history (rare)
+                        setMessages([{
+                            type: 'bot',
+                            text: `Hello ${user.name.split(" ")[0]}! I am your ${agentConfig.title} assistant. How can I help you today?`
+                        }]);
+                    }
+                } catch (error) {
+                    console.error("Error fetching history:", error);
+                    setMessages([{
+                        type: 'bot',
+                        text: `Welcome back! I had trouble retrieving our last conversation, but I'm ready to help.`
+                    }]);
+                }
+            } else {
+                // New session -> Default greeting
+                setMessages([{
+                    type: 'bot',
+                    text: `Hello ${user.name.split(" ")[0]}! I am your ${agentConfig.title} assistant. How can I help you today?`
+                }]);
+            }
+
+            setIsLoadingHistory(false);
+        };
+
+        loadAgentState();
+    }, [agentConfig.id, agentConfig.title, user.name]);
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef(null);
@@ -55,7 +121,7 @@ const ChatInterface = ({ agentConfig }) => {
     // Handle Sending Message
     const handleSend = async (e) => {
         e.preventDefault();
-        if (!input.trim()) return;
+        if (!input.trim() || !threadId || isLoadingHistory) return;
 
         // 1. Add User Message to UI
         const userMessage = { type: 'user', text: input };
@@ -149,7 +215,12 @@ const ChatInterface = ({ agentConfig }) => {
                 <div className="relative bg-white w-full h-full rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
 
                     {/* Messages Area */}
-                    <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-5 chat-scrollbar">
+                    <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-5 chat-scrollbar relative">
+                        {isLoadingHistory && (
+                            <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                            </div>
+                        )}
                         {messages.map((msg, index) => (
                             <motion.div
                                 key={index}
@@ -162,7 +233,31 @@ const ChatInterface = ({ agentConfig }) => {
                                     ? `bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md shadow-lg`
                                     : 'bg-gray-50 border border-gray-100 text-gray-700 rounded-tl-md shadow-sm'
                                     }`}>
-                                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                                    <div className="prose prose-sm max-w-none text-inherit dark:prose-invert">
+                                        <ReactMarkdown
+                                            remarkPlugins={[remarkGfm]}
+                                            components={{
+                                                p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                                                a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                                ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                                ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                                                li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                                code: ({ node, inline, className, children, ...props }) => {
+                                                    return inline ? (
+                                                        <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
+                                                            {children}
+                                                        </code>
+                                                    ) : (
+                                                        <code className="block bg-gray-100 p-2 rounded text-sm font-mono overflow-x-auto my-2" {...props}>
+                                                            {children}
+                                                        </code>
+                                                    );
+                                                }
+                                            }}
+                                        >
+                                            {msg.text}
+                                        </ReactMarkdown>
+                                    </div>
                                     {/* Render Generative UI form if triggered */}
                                     {msg.formType === 'lifestore' && <LifestoreForm />}
                                     {msg.formType === 'enterprise' && <EnterpriseForm />}
@@ -193,7 +288,7 @@ const ChatInterface = ({ agentConfig }) => {
                             />
                             <button
                                 type="submit"
-                                disabled={!input.trim() || isLoading}
+                                disabled={!input.trim() || isLoading || !threadId || isLoadingHistory}
                                 className="absolute right-2 p-2.5 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 sm:w-6 sm:h-6">

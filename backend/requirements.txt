@@ -21,3 +21,4 @@ pymupdf4llm
 psycopg[binary]
 psycopg_pool
 langgraph-checkpoint-postgres
+O365

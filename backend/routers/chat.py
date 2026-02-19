@@ -1,5 +1,5 @@
 """
-Chat router – connects the React frontend to the LangGraph agent system.
+Chat router - connects the React frontend to the LangGraph agent system.
 
 POST /api/v1/chat  →  Compiles the agent graph on-the-fly with a per-request
 database connection to ensure clean resource cleanup.

@@ -18,7 +18,7 @@ from domain.tools.rag_tools import search_knowledge_base
 
 # ── LLM setup ────────────────────────────────────────────────────────────
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
+    model="gemini-3-flash-preview",
     google_api_key=settings.GOOGLE_API_KEY,
 )
 
@@ -54,11 +54,12 @@ STRICT RULES FOR FACTUAL QUESTIONS:
     # but the full history stays in state for the checkpointer to persist.
     trimmed = trim_messages(
         state["messages"],
-        max_tokens=5,
+        max_tokens=10,
         strategy="last",
         token_counter=len,
         include_system=True,
         allow_partial=False,
+        start_on="human",
     )
 
     # Prepend the system prompt to the trimmed messages

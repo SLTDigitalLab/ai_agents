@@ -35,3 +35,5 @@ yarn-error.log*
 
 # Project specific
 backend/temp_files/
+backend/o365_token.txt
+data/

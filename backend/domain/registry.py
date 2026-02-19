@@ -1,5 +1,5 @@
 """
-Agent Registry – maps frontend ``agent_id`` values to LangGraph builder functions.
+Agent Registry - maps frontend ``agent_id`` values to LangGraph builder functions.
 
 Instead of caching compiled graphs globally (which would hold stale DB connections),
 this registry returns the *builder function* so that the router can compile a fresh

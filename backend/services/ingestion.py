@@ -1,5 +1,5 @@
 """
-Ingestion service – converts PDFs and web pages into semantically chunked
+Ingestion service - converts PDFs and web pages into semantically chunked
 vectors stored in Qdrant.
 
 Uses **pymupdf4llm** to extract Markdown-formatted text from PDFs, then
@@ -46,8 +46,8 @@ class IngestionService:
 
         # 4. Secondary splitter for chunks that are still too large
         self.recursive_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=150,
+            chunk_size=1200,
+            chunk_overlap=200,
         )
 
     async def _ensure_collection_exists(self, collection_name: str):
@@ -157,3 +157,90 @@ class IngestionService:
             "status": "success",
             "message": f"Ingested {len(docs)} chunks from {url} for agent {agent_name}",
         }
+
+    async def ingest_onedrive_folder(self, folder_id: str, access_token: str, agent_name: str):
+        """
+        Ingest PDFs from a OneDrive folder using a direct Graph API token.
+        Downloads files -> Semantically chunks them -> Upserts to Qdrant.
+        """
+        import requests 
+
+        # 1. List files in the folder
+        # We try '/me/drive/items/{id}/children' assuming a delegated user token.
+        # If it fails, we might need to know the Drive ID, but usually /me/drive covers it.
+        headers = {"Authorization": f"Bearer {access_token}"}
+        url = f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
+        
+        resp = requests.get(url, headers=headers)
+        if resp.status_code != 200:
+            return {
+                "status": "error",
+                "message": f"Graph API Error: {resp.status_code} {resp.text}",
+            }
+
+        items = resp.json().get("value", [])
+        pdf_items = [
+            item for item in items 
+            if item.get("file") and item.get("name", "").lower().endswith(".pdf")
+        ]
+
+        if not pdf_items:
+            return {
+                "status": "warning",
+                "message": f"No PDF files found in folder {folder_id}",
+            }
+
+        # 2. Download and process each file
+        temp_dir = "temp_onedrive"
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        total_chunks = 0
+        processed_files = []
+
+        try:
+            # Define Collection Name
+            collection_name = f"{agent_name}_docs"
+            await self._ensure_collection_exists(collection_name)
+            
+            # Initialize Vector Store once
+            vector_store = Qdrant(
+                client=self.client,
+                collection_name=collection_name,
+                embeddings=self.embeddings,
+            )
+
+            for item in pdf_items:
+                file_name = item["name"]
+                # Use @microsoft.graph.downloadUrl
+                download_url = item.get("@microsoft.graph.downloadUrl")
+                if not download_url:
+                    continue
+
+                file_path = os.path.join(temp_dir, file_name)
+                
+                # Download
+                print(f"Downloading {file_name}...")
+                file_resp = requests.get(download_url)
+                if file_resp.status_code == 200:
+                    with open(file_path, "wb") as f:
+                        f.write(file_resp.content)
+                    
+                    # Chunk using semantic logic
+                    docs = self._semantic_chunk_pdf(file_path)
+                    if docs:
+                        vector_store.add_documents(docs)
+                        total_chunks += len(docs)
+                        processed_files.append(file_name)
+                    
+                    # Clean up individual file
+                    os.remove(file_path)
+
+            return {
+                "status": "success",
+                "message": f"Ingested {total_chunks} chunks from {len(processed_files)} files in folder {folder_id}",
+                "files": processed_files
+            }
+
+        finally:
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir, ignore_errors=True)
