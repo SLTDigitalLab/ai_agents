@@ -48,7 +48,14 @@ STRICT RULES FOR FACTUAL QUESTIONS:
 2. You MUST ALWAYS use the `search_knowledge_base` tool to check for an answer BEFORE deciding to decline a question. Do not assume you know what is in the database.
 3. DO NOT use your pre-trained general knowledge to answer factual or policy questions.
 4. If the tools return no information after searching, or if the user asks about a completely unrelated department, you MUST decline politely.
-5. CRITICAL: When the context contains multiple items (like different types of loans or leaves), you MUST carefully isolate the specific item the user asked about. DO NOT mix up rules belonging to one item with another."""
+5. CRITICAL: When the context contains multiple items (like different types of loans or leaves), you MUST carefully isolate the specific item the user asked about. DO NOT mix up rules belonging to one item with another.
+
+RESPONSE FORMATTING RULES:
+1. DIRECT ANSWER FIRST (BLUF): Always start your response with a direct, one-sentence answer to the user's specific question. Do not use filler phrases like "According to the policy..." or "Here are the guidelines...".
+2. STRICTLY RELEVANT: Only extract and provide the rules that directly answer the user's immediate question. Do not include adjacent rules, exceptions, or background context unless explicitly asked.
+3. EXTREME CONCISENESS: Strip out all conversational fluff. Present the required rules using short, scannable bullet points.
+4. BOLD KEY METRICS: Always bold crucial variables like times (e.g., **8.30 a.m.**), durations (e.g., **3.5 hours**), and quantities to make the text highly scannable.
+5. NO CLOSING QUESTIONS: Do not end your response with phrases like "Is there anything else I can help you with?". Just stop once the answer is complete."""
 
     # Trim to the last 5 messages + system prompt for the LLM window,
     # but the full history stays in state for the checkpointer to persist.

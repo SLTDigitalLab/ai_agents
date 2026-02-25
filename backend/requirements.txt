@@ -22,3 +22,8 @@ psycopg[binary]
 psycopg_pool
 langgraph-checkpoint-postgres
 O365
+langchain-unstructured
+unstructured[pdf,docx,pptx,xlsx]
+fastapi-mail
+httpx
+pytesseract

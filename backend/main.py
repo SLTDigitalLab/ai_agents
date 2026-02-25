@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat  # Ensure chat is imported
+from routers import admin, chat, orders, enterprise
+from services.ingestion import router as ingestion_router
 
 app = FastAPI(title="Ask SLT API")
 
@@ -16,6 +17,9 @@ app.add_middleware(
 # --- 2. Register Routers ---
 app.include_router(admin.router)
 app.include_router(chat.router)  # Connect the new chat endpoint
+app.include_router(orders.router)  # LifeStore order submissions
+app.include_router(enterprise.router)  # Enterprise lead → Bitrix24
+app.include_router(ingestion_router)
 
 @app.get("/")
 def read_root():

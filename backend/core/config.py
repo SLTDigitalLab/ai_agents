@@ -1,12 +1,52 @@
+import os
+from pathlib import Path
+from typing import Optional
+
+from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+from fastapi_mail import ConnectionConfig
+
+# backend/core/config.py → backend/core → backend → project root
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+load_dotenv(ROOT_DIR / ".env")
+
 
 class Settings(BaseSettings):
     GOOGLE_API_KEY: str
     QDRANT_URL: str
     POSTGRES_URL: str
 
+    # Bitrix24 CRM
+    BITRIX24_WEBHOOK_URL: str = ""
+
+    # Email / SMTP (used by fastapi-mail)
+    MAIL_USERNAME: Optional[str] = None
+    MAIL_PASSWORD: Optional[str] = None
+    MAIL_FROM: Optional[str] = None
+    MAIL_PORT: int = 587
+    MAIL_SERVER: str = "smtp.gmail.com"
+    MAIL_STARTTLS: bool = True
+    MAIL_SSL_TLS: bool = False
+
     class Config:
         env_file = ".env"
         extra = "ignore"
 
+
 settings = Settings()
+
+
+def get_mail_config() -> ConnectionConfig:
+    """Return a fastapi-mail ConnectionConfig built from env vars."""
+    return ConnectionConfig(
+        MAIL_USERNAME=os.getenv("MAIL_USERNAME"),
+        MAIL_PASSWORD=os.getenv("MAIL_PASSWORD"),
+        MAIL_FROM=os.getenv("MAIL_FROM"),
+        MAIL_PORT=int(os.getenv("MAIL_PORT", "587")),
+        MAIL_SERVER=os.getenv("MAIL_SERVER", "smtp.gmail.com"),
+        MAIL_STARTTLS=os.getenv("MAIL_STARTTLS", "True").lower() in ("true", "1", "t"),
+        MAIL_SSL_TLS=os.getenv("MAIL_SSL_TLS", "False").lower() in ("true", "1", "t"),
+        USE_CREDENTIALS=True,
+        VALIDATE_CERTS=True,
+    )
+

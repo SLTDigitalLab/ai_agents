@@ -9,15 +9,10 @@ class UrlIngestRequest(BaseModel):
     url: str
     agent_name: str
 
-@router.post("/ingest-file")
-async def ingest_file(
-    file: UploadFile = File(...),
-    agent_name: str = Form(...)
-):
-    """
-    Ingest a PDF file and store embeddings in Qdrant.
-    """
-    return await ingestion_service.ingest_file(file, agent_name)
+class OneDriveIngestRequest(BaseModel):
+    folder_id: str
+    token: str
+    agent_name: str
 
 @router.post("/ingest-url")
 async def ingest_url(request: UrlIngestRequest):
@@ -26,16 +21,15 @@ async def ingest_url(request: UrlIngestRequest):
     """
     return await ingestion_service.ingest_website(request.url, request.agent_name)
 
-class OneDriveIngestRequest(BaseModel):
-    folder_id: str
-    token: str
-    agent_name: str
-
 @router.post("/ingest-onedrive")
-async def ingest_onedrive(request: OneDriveIngestRequest):
+async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
     """
-    Ingest PDFs from a OneDrive folder using a Graph API access token.
+    Process Onedrive Ingestion Api - Ingest PDFs, Word docs, Powerpoint and Excel 
+    from a OneDrive folder using the Graph API.
     """
-    return await ingestion_service.ingest_onedrive_folder(
-        request.folder_id, request.token, request.agent_name
+    return await ingestion_service.process_onedrive_ingestion(
+        folder_id=request.folder_id,
+        access_token=request.token,
+        agent_name=request.agent_name
     )
+

@@ -242,6 +242,14 @@ const ChatInterface = ({ agentConfig }) => {
                                                 ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
                                                 ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
                                                 li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                                table: ({ node, ...props }) => (
+                                                    <div className="overflow-x-auto my-4 rounded-lg border border-gray-200">
+                                                        <table className="w-full text-sm text-left border-collapse" {...props} />
+                                                    </div>
+                                                ),
+                                                th: ({ node, ...props }) => <th className="bg-purple-50 px-4 py-2 font-semibold border-b border-gray-200" {...props} />,
+                                                td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100" {...props} />,
+                                                tr: ({ node, ...props }) => <tr className="even:bg-gray-50 hover:bg-gray-100 transition-colors" {...props} />,
                                                 code: ({ node, inline, className, children, ...props }) => {
                                                     return inline ? (
                                                         <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
