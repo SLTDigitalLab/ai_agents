@@ -43,6 +43,16 @@ def get_employee_leave_balance(
     Returns:
         A human-readable summary of the employee's leave balance.
     """
+    # --- HARDCODED FOR DEMO ---
+    return (
+        "Your Leave Balance:\n"
+        "Annual Leave: 10 days available (out of 10)\n"
+        "Sick Leave: 14 days available (out of 14)\n"
+        "Casual Leave: 7 days available (out of 7)\n"
+        "Union Leave: 1 days available (out of 1)"
+    )
+    # --------------------------
+
     # Extract the numeric SID from the email / user_id
     sid = _extract_sid_from_email(user_id)
     if not sid:
