@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     libxcb1 \
     poppler-utils \
     tesseract-ocr \
+    tesseract-ocr-sin \
     libmagic-dev \
     libgl1 \
     libglib2.0-0 \

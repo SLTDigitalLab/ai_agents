@@ -1,5 +1,5 @@
 """
-Archetype 1 – Knowledge-Base-only agent graph.
+Archetype 1 - Knowledge-Base-only agent graph.
 
 Used by: Ask Finance, Ask Admin, Ask Process.
 

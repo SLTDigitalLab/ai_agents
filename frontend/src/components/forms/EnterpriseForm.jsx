@@ -18,9 +18,11 @@ const EnterpriseForm = () => {
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
+    const [referenceNumber, setReferenceNumber] = useState(null);
     const [formData, setFormData] = useState({
         company_name: '',
         business_registration_number: '',
+        email: '',
         contact_person: '',
         contact_number: '',
         select_service: '',
@@ -35,12 +37,14 @@ const EnterpriseForm = () => {
         setFormData({
             company_name: '',
             business_registration_number: '',
+            email: '',
             contact_person: '',
             contact_number: '',
             select_service: '',
             remarks: '',
         });
         setError('');
+        setReferenceNumber(null);
     };
 
     const handleSubmit = async (e) => {
@@ -50,6 +54,7 @@ const EnterpriseForm = () => {
         // Client-side required-field validation
         if (
             !formData.company_name.trim() ||
+            !formData.email.trim() ||
             !formData.contact_person.trim() ||
             !formData.contact_number.trim() ||
             !formData.select_service
@@ -68,6 +73,11 @@ const EnterpriseForm = () => {
 
             if (!response.ok) {
                 throw new Error(`Server error: ${response.status}`);
+            }
+
+            const data = await response.json();
+            if (data?.bitrix_response?.result) {
+                setReferenceNumber(data.bitrix_response.result);
             }
 
             // Success
@@ -97,6 +107,12 @@ const EnterpriseForm = () => {
                     <p className="text-sm text-blue-600 mt-1">
                         Thank you. The Enterprise team will contact you shortly.
                     </p>
+                    {referenceNumber && (
+                        <div className="mt-4 p-3 bg-white rounded-lg border border-blue-100 shadow-sm w-full max-w-xs block mx-auto">
+                            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Your Reference Number</p>
+                            <p className="text-xl font-mono font-bold text-blue-700">{referenceNumber}</p>
+                        </div>
+                    )}
                 </div>
             </motion.div>
         );
@@ -149,6 +165,22 @@ const EnterpriseForm = () => {
                             placeholder="e.g. PV 12345"
                             value={formData.business_registration_number}
                             onChange={handleChange}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
+                        />
+                    </div>
+
+                    {/* Email (required) */}
+                    <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                            Email <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="email"
+                            name="email"
+                            placeholder="e.g. contact@company.com"
+                            value={formData.email}
+                            onChange={handleChange}
+                            required
                             className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
                         />
                     </div>

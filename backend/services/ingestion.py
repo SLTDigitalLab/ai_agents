@@ -140,7 +140,7 @@ class IngestionService:
             }
 
         items = resp.json().get("value", [])
-        ALLOWED_EXTENSIONS = ('.pdf', '.docx', '.pptx', '.xlsx')
+        ALLOWED_EXTENSIONS = ('.pdf', '.docx', '.pptx', '.xlsx', '.png', '.jpg', '.jpeg', '.eml')
         matching_items = [
             item for item in items 
             if item.get("file") and item.get("name", "").lower().endswith(ALLOWED_EXTENSIONS)

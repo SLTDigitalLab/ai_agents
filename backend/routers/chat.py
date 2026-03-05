@@ -105,10 +105,28 @@ async def get_history(agent_id: str, thread_id: str):
             # snapshot.values['messages'] is a list of LangChain objects
             messages = []
             for msg in snapshot.values.get("messages", []):
-                messages.append({
-                    "type": msg.type,
-                    "content": msg.content
-                })
+                # Only expose Human and AI messages to the frontend
+                if msg.type not in ("human", "ai"):
+                    continue
+
+                content = msg.content
+                if isinstance(content, list):
+                    text_parts = []
+                    for block in content:
+                        if isinstance(block, str):
+                            text_parts.append(block)
+                        elif isinstance(block, dict) and "text" in block:
+                            text_parts.append(block["text"])
+                    content = " ".join(text_parts).strip()
+                elif not isinstance(content, str):
+                    content = str(content).strip()
+                
+                # Skip empty messages (e.g., AI messages that only performed a tool call but had no text)
+                if content:
+                    messages.append({
+                        "type": msg.type,
+                        "content": content
+                    })
             
             return {"messages": messages}
 
