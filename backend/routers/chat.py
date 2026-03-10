@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from core.checkpointer import get_postgres_checkpointer
 from domain.registry import get_agent_builder
 from schemas.chat import ChatRequest
+from langchain_core.tracers.context import tracing_v2_enabled
 
 # Removed trailing slash from prefix if it acts as base
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
@@ -51,7 +52,10 @@ async def chat(request: ChatRequest):
                 "next_node": "",
             }
 
-            result = graph.invoke(state, config=config)
+            # Wrap the invocation to dynamically separate traces
+            project_name = f"Ask SLT - {request.agent_id.upper()}"
+            with tracing_v2_enabled(project_name=project_name):
+                result = graph.invoke(state, config=config)
 
             # Extract the final message
             final_message = result["messages"][-1].content

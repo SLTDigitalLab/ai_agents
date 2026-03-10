@@ -78,7 +78,7 @@ RESPONSE FORMATTING RULES:
 
 # ── Build the (uncompiled) workflow ──────────────────────────────────────
 def build_kb_workflow() -> StateGraph:
-    """Return an uncompiled StateGraph – registry.py will compile it
+    """Return an uncompiled StateGraph - registry.py will compile it
     with the correct per-agent checkpointer."""
     workflow = StateGraph(AgentState)
 

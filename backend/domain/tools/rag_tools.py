@@ -51,8 +51,8 @@ def search_knowledge_base(
             embedding=embeddings,
         )
 
-        # --- Similarity search (top 8 chunks) ----------------------------
-        results = vector_store.similarity_search(query=query, k=7)
+        # --- Similarity search (top 5 chunks) ----------------------------
+        results = vector_store.similarity_search(query=query, k=5)
 
         if not results:
             return "No relevant documents found."
