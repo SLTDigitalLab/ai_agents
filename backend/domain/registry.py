@@ -26,21 +26,15 @@ from domain.archetypes.kb_form_agent import build_kb_form_workflow
 AGENT_BUILDERS: dict[str, callable] = {
     # Archetype 1 – Knowledge Base only
     "finance": build_kb_workflow,
-    "askfinance": build_kb_workflow,
     "admin": build_kb_workflow,
-    "askadmin": build_kb_workflow,
     "process": build_kb_workflow,
-    "askprocess": build_kb_workflow,
 
     # Archetype 2 – KB + API
     "hr": build_kb_api_workflow,
-    "askhr": build_kb_api_workflow,
 
     # Archetype 3 – KB + Form (Generative UI)
     "lifestore": build_kb_form_workflow,
-    "asklifestore": build_kb_form_workflow,
     "enterprise": build_kb_form_workflow,
-    "askenterprise": build_kb_form_workflow,
 }
 
 
@@ -48,7 +42,7 @@ def get_agent_builder(agent_id: str):
     """Return the StateGraph builder function for the given agent.
 
     Args:
-        agent_id: Identifier sent by the frontend (e.g. ``"askhr"``).
+        agent_id: Identifier sent by the frontend (e.g. ``"hr"``).
 
     Returns:
         A callable that returns an uncompiled ``StateGraph``.

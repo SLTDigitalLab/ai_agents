@@ -8,7 +8,7 @@ from fastapi import APIRouter, UploadFile
 from pydantic import BaseModel
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_core.documents import Document
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from core.llm import get_embedding_model
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_unstructured import UnstructuredLoader
 from langchain_qdrant import QdrantVectorStore
@@ -30,11 +30,8 @@ router = APIRouter()
 
 class IngestionService:
     def __init__(self):
-        # 1. Initialize the SOTA Gemini Embedding Model
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001",
-            google_api_key=settings.GOOGLE_API_KEY,
-        )
+        # 1. Initialize the Embedding Model from Factory
+        self.embeddings = get_embedding_model()
 
         # 2. Initialize Qdrant Client
         self.client = QdrantClient(url=settings.QDRANT_URL)
@@ -51,11 +48,11 @@ class IngestionService:
             self.client.get_collection(collection_name)
         except Exception:
             print(f"Collection '{collection_name}' not found. Creating it manually...")
-            # gemini-embedding-001 outputs 3072 dimensions
+            # Use the dimension size from settings (default 3072 for Gemini)
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=models.VectorParams(
-                    size=3072,
+                    size=settings.EMBEDDING_DIMENSIONS,
                     distance=models.Distance.COSINE,
                 ),
             )

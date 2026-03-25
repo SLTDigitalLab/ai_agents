@@ -1,5 +1,5 @@
 """
-Archetype 2 – Knowledge-Base + API agent graph (tool-calling supervisor).
+Archetype 2 - Knowledge-Base + API agent graph (tool-calling supervisor).
 
 Used by: Ask HR.
 
@@ -12,20 +12,17 @@ Flow:
 """
 
 from langchain_core.messages import trim_messages
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from core.config import settings
+from core.llm import get_chat_model
 from domain.state import AgentState
 from domain.tools.api_tools import get_employee_leave_balance
 from domain.tools.rag_tools import search_knowledge_base
 
 # ── LLM setup ────────────────────────────────────────────────────────────
-llm = ChatGoogleGenerativeAI(
-    model="gemini-3-flash-preview",
-    google_api_key=settings.GOOGLE_API_KEY,
-)
+llm = get_chat_model()
 
 # Bind BOTH tools so the LLM can choose which one to call
 tools = [search_knowledge_base, get_employee_leave_balance]
@@ -53,9 +50,10 @@ STRICT RULES FOR FACTUAL QUESTIONS:
 RESPONSE FORMATTING RULES:
 1. DIRECT ANSWER FIRST (BLUF): Always start your response with a direct, one-sentence answer to the user's specific question. Do not use filler phrases like "According to the policy..." or "Here are the guidelines...".
 2. STRICTLY RELEVANT: Only extract and provide the rules that directly answer the user's immediate question. Do not include adjacent rules, exceptions, or background context unless explicitly asked.
-3. EXTREME CONCISENESS: Strip out all conversational fluff. Present the required rules using short, scannable bullet points.
+3. EXTREME CONCISENESS: Strip out all conversational fluff. Present the required rules using standard Markdown bullet points (`*` or `-`), starting each point on a NEW line.
 4. BOLD KEY METRICS: Always bold crucial variables like times (e.g., **8.30 a.m.**), durations (e.g., **3.5 hours**), and quantities to make the text highly scannable.
-5. NO CLOSING QUESTIONS: Do not end your response with phrases like "Is there anything else I can help you with?". Just stop once the answer is complete."""
+5. MARKDOWN SPACING: Use a double newline (blank line) between the direct answer and the bulleted list to ensure proper rendering. Do NOT use non-standard bullet characters like `•`.
+6. NO CLOSING QUESTIONS: Do not end your response with phrases like "Is there anything else I can help you with?". Just stop once the answer is complete."""
 
     # Trim to the last 5 messages + system prompt for the LLM window,
     # but the full history stays in state for the checkpointer to persist.

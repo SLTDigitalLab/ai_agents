@@ -10,12 +10,12 @@ the top-k document chunks as a single concatenated context string.
 from typing import Annotated
 
 from langchain_core.tools import tool
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langgraph.prebuilt import InjectedState
 from qdrant_client import QdrantClient
 
 from core.config import settings
+from core.llm import get_embedding_model
 
 
 @tool
@@ -35,11 +35,8 @@ def search_knowledge_base(
         or an informational message when no documents are found.
     """
     try:
-        # --- Embeddings (Gemini embedding-001, 3072 dimensions) -----------
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001",
-            google_api_key=settings.GOOGLE_API_KEY,
-        )
+        # --- Embeddings ---------------------------------------------------
+        embeddings = get_embedding_model()
 
         # --- Qdrant client & collection ----------------------------------
         client = QdrantClient(url=settings.QDRANT_URL)

@@ -12,7 +12,21 @@ load_dotenv(ROOT_DIR / ".env")
 
 
 class Settings(BaseSettings):
-    GOOGLE_API_KEY: str
+    GOOGLE_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
+    
+    # LLM and Embedding Configuration
+    LLM_PROVIDER: str = "gemini" # 'gemini', 'openai'
+    LLM_MODEL: str = "gemini-3-flash-preview"
+    LLM_API_KEY: Optional[str] = None
+    LLM_BASE_URL: Optional[str] = None
+    
+    EMBEDDING_PROVIDER: str = "gemini" # 'gemini', 'openai'
+    EMBEDDING_MODEL: str = "models/gemini-embedding-001"
+    EMBEDDING_DIMENSIONS: int = 3072
+    EMBEDDING_API_KEY: Optional[str] = None
+    EMBEDDING_BASE_URL: Optional[str] = None
+
     QDRANT_URL: str
     POSTGRES_URL: str
 

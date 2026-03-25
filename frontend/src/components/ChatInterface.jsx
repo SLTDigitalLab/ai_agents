@@ -186,7 +186,8 @@ const ChatInterface = ({ agentConfig }) => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
-            className="flex-1 flex flex-col w-full max-w-6xl mx-auto px-4 z-10 pt-6 pb-0 min-h-0 overflow-hidden"
+            /* Chatbox Width adjustment */
+            className="flex-1 flex flex-col w-full max-w-[1250px] mx-auto px-4 z-10 pt-6 pb-0 min-h-0 overflow-hidden"
         >
             {/* Title Section */}
             <motion.div
@@ -204,107 +205,122 @@ const ChatInterface = ({ agentConfig }) => {
                 initial={{ opacity: 0, y: 25, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.3 }}
-                className="relative h-[63vh] min-h-0 rounded-2xl sm:rounded-3xl overflow-hidden"
-                style={{
-                    boxShadow: `0 0 0 1px rgba(255,255,255,0.06), 0 0 40px -10px rgba(255,255,255,0.05), inset 0 1px 0 rgba(255,255,255,0.04)`
-                }}
+                className="relative flex-1 mb-4 sm:mb-8 min-h-0 rounded-2xl sm:rounded-3xl z-10"
             >
-                {/* Inset glass container */}
-                <div className="absolute inset-0 bg-white/[0.03] backdrop-blur-sm rounded-2xl sm:rounded-3xl pointer-events-none" />
+                {/* ── LIQUID GLASS AMBIENT AURA ── (Neon glow casting outward from behind the white interface) */}
+                <div className={`absolute -inset-2 blur-[30px] opacity-30 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 transition-colors duration-700 pointer-events-none`} />
 
-                <div className="relative bg-white w-full h-full rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+                {/* ── SOLID WHITE GLASS WINDOW ── (Highly polished professional inner reading area) */}
+                <div className="relative bg-[#fbfcff] w-full h-full rounded-2xl sm:rounded-3xl border border-white/80 shadow-[0_20px_50px_-10px_rgba(0,0,0,0.2),inset_0_1px_1px_rgba(255,255,255,1)] flex flex-col overflow-hidden">
 
-                    {/* Messages Area */}
-                    <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-5 chat-scrollbar relative">
-                        {isLoadingHistory && (
-                            <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
-                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                            </div>
-                        )}
-                        {messages.map((msg, index) => (
-                            <motion.div
-                                key={index}
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                transition={{ duration: 0.35, ease: 'easeOut' }}
-                                className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                            >
-                                <div className={`max-w-[75%] sm:max-w-[70%] rounded-2xl px-5 sm:px-6 py-3.5 sm:py-4 text-[0.9375rem] leading-relaxed ${msg.type === 'user'
-                                    ? `bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md shadow-lg`
-                                    : 'bg-gray-50 border border-gray-100 text-gray-700 rounded-tl-md shadow-sm'
-                                    }`}>
-                                    <div className="prose prose-sm max-w-none text-inherit dark:prose-invert">
-                                        <ReactMarkdown
-                                            remarkPlugins={[remarkGfm]}
-                                            components={{
-                                                p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                                                a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                                                ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
-                                                ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
-                                                li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-                                                table: ({ node, ...props }) => (
-                                                    <div className="overflow-x-auto my-4 rounded-lg border border-gray-200">
-                                                        <table className="w-full text-sm text-left border-collapse" {...props} />
-                                                    </div>
-                                                ),
-                                                th: ({ node, ...props }) => <th className="bg-purple-50 px-4 py-2 font-semibold border-b border-gray-200" {...props} />,
-                                                td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100" {...props} />,
-                                                tr: ({ node, ...props }) => <tr className="even:bg-gray-50 hover:bg-gray-100 transition-colors" {...props} />,
-                                                code: ({ node, inline, className, children, ...props }) => {
-                                                    return inline ? (
-                                                        <code className="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
-                                                            {children}
-                                                        </code>
-                                                    ) : (
-                                                        <code className="block bg-gray-100 p-2 rounded text-sm font-mono overflow-x-auto my-2" {...props}>
-                                                            {children}
-                                                        </code>
-                                                    );
-                                                }
-                                            }}
-                                        >
-                                            {msg.text}
-                                        </ReactMarkdown>
+                    {/* Messages Area Wrapper */}
+                    <div className="flex-1 flex flex-col relative z-0 pt-3 sm:pt-5 min-h-0">
+                        <div className="flex-1 overflow-y-auto px-6 sm:px-8 space-y-5 chat-scrollbar min-h-0 relative transform-gpu will-change-transform">
+                            {isLoadingHistory && (
+                                <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                                </div>
+                            )}
+                            {messages.map((msg, index) => (
+                                <motion.div
+                                    key={index}
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ duration: 0.35, ease: 'easeOut' }}
+                                    className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                                >
+                                    {/* Chatbubble width adjustment */}
+                                    <div className={`max-w-[80%] sm:max-w-[75%] rounded-2xl px-5 sm:px-6 py-3.5 sm:py-4 text-[0.9375rem] leading-relaxed shadow-sm ${msg.type === 'user'
+                                        ? `bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`
+                                        : 'bg-white/95 border border-gray-100/60 text-gray-700 rounded-tl-md'
+                                        }`}>
+                                        <div className="prose prose-sm max-w-none text-inherit">
+                                            <ReactMarkdown
+                                                remarkPlugins={[remarkGfm]}
+                                                components={{
+                                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                                                    a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                                                    li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                                    table: ({ node, ...props }) => (
+                                                        <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
+                                                            <table className="w-full text-sm text-left border-collapse" {...props} />
+                                                        </div>
+                                                    ),
+                                                    th: ({ node, ...props }) => <th className="bg-gray-50 px-4 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />,
+                                                    td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />,
+                                                    tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 hover:bg-gray-50 transition-colors" {...props} />,
+                                                    code: ({ node, inline, className, children, ...props }) => {
+                                                        return inline ? (
+                                                            <code className="bg-white border border-gray-100 shadow-sm px-1.5 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
+                                                                {children}
+                                                            </code>
+                                                        ) : (
+                                                            <code className="block bg-gray-50 p-3 rounded-xl text-sm font-mono overflow-x-auto my-2 border border-gray-100 shadow-inner text-gray-700" {...props}>
+                                                                {children}
+                                                            </code>
+                                                        );
+                                                    }
+                                                }}
+                                            >
+                                                {msg.text}
+                                            </ReactMarkdown>
+                                        </div>
+                                        {/* Render Generative UI form if triggered */}
+                                        {msg.formType === 'lifestore' && <LifestoreForm />}
+                                        {msg.formType === 'enterprise' && <EnterpriseForm />}
                                     </div>
-                                    {/* Render Generative UI form if triggered */}
-                                    {msg.formType === 'lifestore' && <LifestoreForm />}
-                                    {msg.formType === 'enterprise' && <EnterpriseForm />}
+                                </motion.div>
+                            ))}
+                            {isLoading && (
+                                <div className="flex justify-start">
+                                    <div className="bg-gray-50/80 backdrop-blur-md border border-gray-100/60 rounded-2xl rounded-tl-md px-6 py-4 shadow-sm flex gap-1.5 items-center">
+                                        <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce" />
+                                        <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce [animation-delay:150ms]" />
+                                        <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce [animation-delay:300ms]" />
+                                    </div>
                                 </div>
-                            </motion.div>
-                        ))}
-                        {isLoading && (
-                            <div className="flex justify-start">
-                                <div className="bg-gray-50 border border-gray-100 rounded-2xl rounded-tl-md px-6 py-4 shadow-sm flex gap-1.5 items-center">
-                                    <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce" />
-                                    <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce [animation-delay:150ms]" />
-                                    <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce [animation-delay:300ms]" />
-                                </div>
-                            </div>
-                        )}
-                        <div ref={messagesEndRef} />
+                            )}
+                            <div ref={messagesEndRef} className="h-1 sm:h-2" />
+                        </div>
+                        
+                        {/* ── FIXED FOG VEIL (Fixed to bottom of window, clears scrollbar) ── */}
+                        <div className="absolute bottom-0 left-0 right-4 h-10 sm:h-14 bg-gradient-to-t from-[#fbfcff] via-[#fbfcff]/80 to-transparent pointer-events-none z-10" />
                     </div>
 
-                    {/* Input Area */}
-                    <div className="p-4 sm:p-6 bg-white border-t border-gray-100/80">
-                        <form onSubmit={handleSend} className="relative flex items-center">
-                            <input
-                                type="text"
-                                value={input}
-                                onChange={(e) => setInput(e.target.value)}
-                                placeholder="Type a message..."
-                                className="w-full bg-gray-50/80 text-gray-800 rounded-2xl pl-5 sm:pl-6 pr-14 py-3.5 sm:py-4 focus:outline-none focus:ring-2 focus:ring-gray-200/80 transition-all border border-gray-200/70 placeholder:text-gray-400 text-[0.9375rem]"
-                            />
-                            <button
-                                type="submit"
-                                disabled={!input.trim() || isLoading || !threadId || isLoadingHistory}
-                                className="absolute right-2 p-2.5 rounded-xl text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 sm:w-6 sm:h-6">
-                                    <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
-                                </svg>
-                            </button>
+                    {/* ── DOCKED INPUT AREA ── */}
+                    <div className="w-full px-2 sm:px-6 pb-1.5 pt-0.5 bg-[#fbfcff] z-20 flex flex-col justify-end border-t border-gray-50/50">
+                        <form onSubmit={handleSend} className="relative flex items-center w-full pointer-events-auto group">
+
+                            {/* Inner Solid Pill Component (Grey Border / Full Width) */}
+                            <div className="relative flex items-center w-full bg-[#fbfcff]/95 backdrop-blur-3xl rounded-full border border-gray-200/80 shadow-[0_12px_40px_-10px_rgba(0,0,0,0.1),inset_0_2px_4px_rgba(255,255,255,1)] p-0.5 focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.15)] focus-within:ring-2 focus-within:ring-gray-200/50 transition-shadow">
+
+                                <input
+                                    type="text"
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
+                                    placeholder={`${agentConfig.title} anything...`}
+                                    className="flex-1 bg-transparent text-gray-800 placeholder:text-gray-400 text-[0.9375rem] pl-4 py-1.5 sm:py-[0.375rem] outline-none"
+                                />
+
+                                <button
+                                    type="submit"
+                                    disabled={!input.trim() || isLoading || !threadId || isLoadingHistory}
+                                    className={`relative p-1.5 rounded-full transition-all duration-300 flex items-center justify-center shrink-0 ml-1.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]
+                                        ${input.trim()
+                                            ? `bg-gradient-to-tr ${agentConfig.color} text-white shadow-md hover:shadow-lg hover:scale-105`
+                                            : 'bg-black/5 text-gray-400 hover:text-gray-600 hover:bg-black/10'
+                                        } disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none`}
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-[1.125rem] h-[1.125rem] sm:w-5 sm:h-5">
+                                        <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
+                                    </svg>
+                                </button>
+                            </div>
                         </form>
-                        <p className="text-center text-xs text-gray-400/80 mt-3 font-light">
+
+                        <p className="text-center text-[0.65rem] text-gray-400/80 mt-1 font-light pointer-events-auto">
                             {agentConfig.disclaimer}
                         </p>
                     </div>
