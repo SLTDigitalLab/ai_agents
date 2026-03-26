@@ -130,13 +130,13 @@ const ChatInterface = ({ agentConfig }) => {
         setIsLoading(true);
 
         try {
-            // 2. Send to Real FastAPI Backend
+            // 2. Send to Real FastAPI Backend with Streaming
             const response = await fetch('http://localhost:8000/api/v1/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message: userMessage.text,
-                    agent_id: agentConfig.id, // e.g., "finance"
+                    agent_id: agentConfig.id,
                     user_id: user.username || "anonymous",
                     thread_id: threadId
                 })
@@ -146,32 +146,46 @@ const ChatInterface = ({ agentConfig }) => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            const data = await response.json();
-
-            // 3. Add AI Response to UI
-            // Ensure the response is a string to prevent React rendering crashes
-            let safeText = data.response;
-            if (typeof safeText !== 'string') {
-                console.warn("Received non-string response from backend:", safeText);
-                safeText = JSON.stringify(safeText);
-            }
-
-            // Detect and strip Generative UI trigger tokens
+            // --- STREAMING LOGIC ---
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let accumulatedText = "";
             let formType = null;
-            for (const [token, type] of Object.entries(FORM_TOKENS)) {
-                if (safeText.includes(token)) {
-                    formType = type;
-                    safeText = safeText.replace(token, '').trim();
-                    break;
-                }
-            }
 
-            const botMessage = {
-                type: 'bot',
-                text: safeText,
-                formType: formType,
-            };
-            setMessages(prev => [...prev, botMessage]);
+            // Add an initial empty bot message
+            setMessages(prev => [...prev, { type: 'bot', text: "", formType: null }]);
+            // setIsLoading(false); // REMOVED: Keep loading dots until we have content
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                accumulatedText += chunk;
+
+                // Detect and strip Generative UI trigger tokens
+                let currentFormType = null;
+                let cleanText = accumulatedText;
+                for (const [token, type] of Object.entries(FORM_TOKENS)) {
+                    if (cleanText.includes(token)) {
+                        currentFormType = type;
+                        cleanText = cleanText.replace(token, '').trim();
+                        break;
+                    }
+                }
+
+                // Update the last message (the bot message) with the new text
+                setMessages(prev => {
+                    const newMessages = [...prev];
+                    const lastIdx = newMessages.length - 1;
+                    newMessages[lastIdx] = {
+                        ...newMessages[lastIdx],
+                        text: cleanText,
+                        formType: currentFormType || newMessages[lastIdx].formType
+                    };
+                    return newMessages;
+                });
+            }
 
         } catch (error) {
             console.error("Error:", error);
@@ -273,7 +287,7 @@ const ChatInterface = ({ agentConfig }) => {
                                     </div>
                                 </motion.div>
                             ))}
-                            {isLoading && (
+                            {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
                                 <div className="flex justify-start">
                                     <div className="bg-gray-50/80 backdrop-blur-md border border-gray-100/60 rounded-2xl rounded-tl-md px-6 py-4 shadow-sm flex gap-1.5 items-center">
                                         <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce" />

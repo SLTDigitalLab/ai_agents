@@ -41,6 +41,7 @@ def get_chat_model():
         return ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=final_api_key,
+            streaming=True,
         )
     else:
         raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")

@@ -30,7 +30,7 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # ── Graph nodes ──────────────────────────────────────────────────────────
-def call_model(state: AgentState) -> dict:
+async def call_model(state: AgentState) -> dict:
     """Invoke the LLM with a strict HR-scoped system prompt."""
     system_prompt = """You are the Ask HR AI assistant for SLTMobitel.
 Your primary purpose is to answer HR-related questions. At SLTMobitel, HR handles Leave Policies, Employee Benefits, and all Staff Loans (Distress, Motorcycle, Car, Education).
@@ -70,7 +70,7 @@ RESPONSE FORMATTING RULES:
     # Prepend the system prompt to the trimmed messages
     messages = [{"role": "system", "content": system_prompt}] + trimmed
 
-    response = llm_with_tools.invoke(messages)
+    response = await llm_with_tools.ainvoke(messages)
     return {"messages": [response]}
 
 

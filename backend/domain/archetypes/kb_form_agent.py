@@ -30,7 +30,7 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # ── Graph nodes ──────────────────────────────────────────────────────────
-def call_model(state: AgentState) -> dict:
+async def call_model(state: AgentState) -> dict:
     """Invoke the LLM with a Generative-UI-aware system prompt."""
     agent_id = state["agent_id"]
 
@@ -82,7 +82,7 @@ Example Purchase Response: "I can certainly help you order a Peo TV connection! 
     # Prepend the system prompt to the trimmed messages
     messages = [{"role": "system", "content": system_prompt}] + trimmed
 
-    response = llm_with_tools.invoke(messages)
+    response = await llm_with_tools.ainvoke(messages)
     return {"messages": [response]}
 
 

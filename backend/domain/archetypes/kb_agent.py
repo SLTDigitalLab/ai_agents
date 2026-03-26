@@ -25,7 +25,7 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # ── Graph nodes ──────────────────────────────────────────────────────────
-def call_model(state: AgentState) -> dict:
+async def call_model(state: AgentState) -> dict:
     """Invoke the LLM with a system prompt tailored to the active agent."""
     agent_id = state["agent_id"]
 
@@ -70,7 +70,7 @@ RESPONSE FORMATTING RULES:
     # Prepend the system prompt to the trimmed messages
     messages = [{"role": "system", "content": system_prompt}] + trimmed
 
-    response = llm_with_tools.invoke(messages)
+    response = await llm_with_tools.ainvoke(messages)
     return {"messages": [response]}
 
 
