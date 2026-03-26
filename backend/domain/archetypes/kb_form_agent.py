@@ -64,6 +64,11 @@ RESPONSE FORMATTING RULES:
 5. MARKDOWN SPACING: Use a double newline (blank line) between the direct answer and the bulleted list to ensure proper rendering. Do NOT use non-standard bullet characters like `•`.
 6. NO CLOSING QUESTIONS: Do not end your response with phrases like "Is there anything else I can help you with?". Just stop once the answer is complete.
 
+CITATIONS:
+1. You may see `[Source: ... | Link: ...]` tags in the retrieved context. 
+2. You MUST IGNORE these tags.
+3. DO NOT include any "Sources:" section or links in your response.
+
 Example Purchase Response: "I can certainly help you order a Peo TV connection! Please fill out the secure request form below to get started. {form_token}"
 """
 

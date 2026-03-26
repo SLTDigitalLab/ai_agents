@@ -54,8 +54,14 @@ async def search_knowledge_base(
         if not results:
             return "No relevant documents found."
 
-        context = "\n\n---\n\n".join(doc.page_content for doc in results)
-        return context
+        # Include source metadata in the context
+        context_parts = []
+        for doc in results:
+            source = doc.metadata.get("source", "Unknown Source")
+            link = doc.metadata.get("link", "#")
+            context_parts.append(f"[Source: {source} | Link: {link}]\n{doc.page_content}")
+
+        return "\n\n---\n\n".join(context_parts)
 
     except Exception as e:
         # Collection may not exist yet, or Qdrant may be unreachable
