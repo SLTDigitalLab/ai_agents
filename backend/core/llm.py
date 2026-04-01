@@ -30,6 +30,7 @@ def get_chat_model():
             model=model_name,
             api_key=final_api_key,
             base_url=base_url,
+            temperature=0,
         )
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -42,6 +43,7 @@ def get_chat_model():
             model=model_name,
             google_api_key=final_api_key,
             streaming=True,
+            temperature=0,
         )
     else:
         raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")

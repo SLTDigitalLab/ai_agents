@@ -1,10 +1,8 @@
 """
 Chat router - connects the React frontend to the LangGraph agent system with streaming support.
-Includes input guardrails (LLM-based intent classification) running in parallel with the agent.
+Includes input guardrails (LLM-based intent + sentiment classification) run before the agent.
 """
 
-import asyncio
-import json
 import logging
 from typing import AsyncGenerator
 
@@ -35,18 +33,51 @@ async def chat(request: ChatRequest):
         try:
             # Thread config enables LangGraph memory/checkpointing per conversation
             config = {"configurable": {"thread_id": request.thread_id}}
-            
-            # ── Start guardrail classifier IN PARALLEL with agent ────────
-            classify_task = asyncio.create_task(classify_intent(request.message))
 
-            # Initial state (sentiment will be updated once classifier finishes)
+            # ── Run guardrail classifier FIRST ──────────────────────────
+            # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
+            # and lets us pass real sentiment into the agent state.
+            guardrail = await classify_intent(request.message)
+
+            if guardrail.action == "BLOCK":
+                logger.info(
+                    f"Guardrail BLOCK | reason={guardrail.reason}"
+                )
+                # Save the blocked exchange to chat history
+                try:
+                    async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
+                        workflow = builder_fn()
+                        graph = workflow.compile(checkpointer=checkpointer)
+                        blocked_state = {
+                            "messages": [
+                                HumanMessage(content=request.message),
+                                AIMessage(content=BLOCK_MESSAGE),
+                            ],
+                            "agent_id": request.agent_id,
+                            "user_id": request.user_id,
+                            "form_slots": {},
+                            "next_node": "",
+                            "sentiment": guardrail.sentiment,
+                        }
+                        await graph.aupdate_state(config, blocked_state)
+                except Exception as e:
+                    logger.warning(f"Failed to save blocked exchange: {e}")
+                yield BLOCK_MESSAGE
+                return
+
+            logger.info(
+                f"Guardrail PASS | sentiment={guardrail.sentiment} | "
+                f"reason={guardrail.reason}"
+            )
+
+            # Build initial state with real sentiment from classifier
             state = {
                 "messages": [("user", request.message)],
                 "agent_id": request.agent_id,
                 "user_id": request.user_id,
                 "form_slots": {},
                 "next_node": "",
-                "sentiment": "neutral",
+                "sentiment": guardrail.sentiment,
             }
 
             # Use the ASYNC checkpointer for streaming – required by astream_events
@@ -56,81 +87,21 @@ async def chat(request: ChatRequest):
 
                 project_name = f"Ask SLT - {request.agent_id.upper()}"
                 with tracing_v2_enabled(project_name=project_name):
-                    buffer = []             # holds tokens until classifier finishes
-                    classifier_done = False
-
                     # We use astream_events (v2) for fine-grained streaming
                     async for event in graph.astream_events(state, config, version="v2"):
-                        # ── Check classifier on each event ───────────
-                        if not classifier_done and classify_task.done():
-                            guardrail = classify_task.result()
-                            classifier_done = True
-                            if guardrail.action == "BLOCK":
-                                # Save the block response to chat history
-                                # (user message is already checkpointed by astream_events)
-                                try:
-                                    await graph.aupdate_state(
-                                        config,
-                                        {"messages": [AIMessage(content=BLOCK_MESSAGE)]},
-                                    )
-                                except Exception as e:
-                                    logger.warning(f"Failed to save blocked exchange: {e}")
-                                yield BLOCK_MESSAGE
-                                return
-                            logger.info(
-                                f"Guardrail PASS | sentiment={guardrail.sentiment} | "
-                                f"reason={guardrail.reason}"
-                            )
-                            # Flush buffered tokens now that we have PASS
-                            for tok in buffer:
-                                yield tok
-                            buffer.clear()
-
                         # ── Extract tokens from stream events ────────
                         kind = event["event"]
                         if kind == "on_chat_model_stream":
                             content = event["data"]["chunk"].content
                             if content:
-                                # If it's a list of blocks, extract text
                                 if isinstance(content, list):
                                     for block in content:
                                         if isinstance(block, dict) and "text" in block:
-                                            token = block["text"]
+                                            yield block["text"]
                                         elif isinstance(block, str):
-                                            token = block
-                                        else:
-                                            continue
-                                        if classifier_done:
-                                            yield token
-                                        else:
-                                            buffer.append(token)
+                                            yield block
                                 else:
-                                    token = str(content)
-                                    if classifier_done:
-                                        yield token
-                                    else:
-                                        buffer.append(token)
-
-                    # ── Final check if classifier hasn't finished yet ──
-                    if not classifier_done:
-                        guardrail = await classify_task
-                        if guardrail.action == "BLOCK":
-                            # Graph already checkpointed the agent response;
-                            # append the block message so history reflects what the user saw
-                            try:
-                                await graph.aupdate_state(
-                                    config,
-                                    {"messages": [AIMessage(content=BLOCK_MESSAGE)]},
-                                )
-                            except Exception as e:
-                                logger.warning(f"Failed to save blocked exchange: {e}")
-                            yield BLOCK_MESSAGE
-                            return
-                        logger.info(
-                            f"Guardrail PASS (late) | sentiment={guardrail.sentiment}"
-                        )
-                        for tok in buffer:
-                            yield tok
+                                    yield str(content)
 
         except Exception as exc:
             import traceback
