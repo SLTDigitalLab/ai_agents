@@ -10,6 +10,7 @@ from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage, AIMessage
 
 from core.checkpointer import get_postgres_checkpointer, get_async_postgres_checkpointer
 from domain.registry import get_agent_builder
@@ -19,6 +20,8 @@ from langchain_core.tracers.context import tracing_v2_enabled
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
+
+BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
 
 @router.post("")
 async def chat(request: ChatRequest):
@@ -63,7 +66,16 @@ async def chat(request: ChatRequest):
                             guardrail = classify_task.result()
                             classifier_done = True
                             if guardrail.action == "BLOCK":
-                                yield "I'm sorry, but I'm unable to help with that request."
+                                # Save the block response to chat history
+                                # (user message is already checkpointed by astream_events)
+                                try:
+                                    await graph.aupdate_state(
+                                        config,
+                                        {"messages": [AIMessage(content=BLOCK_MESSAGE)]},
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Failed to save blocked exchange: {e}")
+                                yield BLOCK_MESSAGE
                                 return
                             logger.info(
                                 f"Guardrail PASS | sentiment={guardrail.sentiment} | "
@@ -103,7 +115,16 @@ async def chat(request: ChatRequest):
                     if not classifier_done:
                         guardrail = await classify_task
                         if guardrail.action == "BLOCK":
-                            yield "I'm sorry, but I'm unable to help with that request."
+                            # Graph already checkpointed the agent response;
+                            # append the block message so history reflects what the user saw
+                            try:
+                                await graph.aupdate_state(
+                                    config,
+                                    {"messages": [AIMessage(content=BLOCK_MESSAGE)]},
+                                )
+                            except Exception as e:
+                                logger.warning(f"Failed to save blocked exchange: {e}")
+                            yield BLOCK_MESSAGE
                             return
                         logger.info(
                             f"Guardrail PASS (late) | sentiment={guardrail.sentiment}"
