@@ -13,7 +13,50 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
+const SourceBadge = ({ name, url, color }) => (
+    <motion.a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        whileHover={{ scale: 1.05, y: -2 }}
+        whileTap={{ scale: 0.95 }}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-100 shadow-sm transition-all hover:shadow-md hover:border-gray-200 group`}
+    >
+        <div className={`p-1 rounded-full bg-gradient-to-br ${color} text-white`}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+                <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
+            </svg>
+        </div>
+        <span className="text-xs font-medium text-gray-600 group-hover:text-gray-900 truncate max-w-[150px]">
+            {name}
+        </span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-gray-300 group-hover:text-gray-500">
+            <path fillRule="evenodd" d="M5.22 14.78a.75.75 0 001.06 0l7.22-7.22v5.69a.75.75 0 001.5 0v-7.5a.75.75 0 00-.75-.75h-7.5a.75.75 0 000 1.5h5.69l-7.22 7.22a.75.75 0 000 1.06z" clipRule="evenodd" />
+        </svg>
+    </motion.a>
+);
 
+const SourcesSection = ({ sources, color }) => {
+    if (!sources || sources.length === 0) return null;
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 pt-3 border-t border-gray-100/60"
+        >
+            <div className="flex items-center gap-2 mb-2.5">
+                <div className={`w-1 h-3.5 rounded-full bg-gradient-to-b ${color}`} />
+                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400">Sources</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+                {sources.map((src, i) => (
+                    <SourceBadge key={i} name={src.name} url={src.url} color={color} />
+                ))}
+            </div>
+        </motion.div>
+    );
+};
 
 // ── Feedback Buttons Component ──────────────────────────────────────
 const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRating, onFeedback }) => {
