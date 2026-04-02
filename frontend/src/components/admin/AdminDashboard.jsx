@@ -26,17 +26,24 @@ const DEFAULT_COLOR = { bg: 'from-cyan-500/10 to-cyan-600/5', border: 'border-cy
 const AdminDashboard = () => {
     const navigate = useNavigate();
     const [stats, setStats] = useState(null);
+    const [feedbackStats, setFeedbackStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
     useEffect(() => {
-        fetch(`${API_BASE}/stats`)
-            .then(res => {
+        Promise.all([
+            fetch(`${API_BASE}/stats`).then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
-            })
-            .then(data => {
-                setStats(data);
+            }),
+            fetch(`${API_BASE}/feedback`).then(res => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            }).catch(() => null),
+        ])
+            .then(([statsData, fbData]) => {
+                setStats(statsData);
+                setFeedbackStats(fbData);
                 setLoading(false);
             })
             .catch(err => {
@@ -78,7 +85,7 @@ const AdminDashboard = () => {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-10"
+                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10"
                 >
                     <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-5">
                         <p className="text-white/40 text-xs uppercase tracking-wider font-medium">Total Sessions</p>
@@ -93,6 +100,21 @@ const AdminDashboard = () => {
                             {loading ? '—' : stats?.agent_count ?? 0}
                         </p>
                         <p className="text-white/25 text-xs mt-1">deployed & running</p>
+                    </div>
+                    <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-5">
+                        <p className="text-white/40 text-xs uppercase tracking-wider font-medium">User Feedback</p>
+                        <div className="flex items-center gap-3 mt-2">
+                            <span className="text-2xl font-bold text-emerald-400">
+                                {loading ? '—' : feedbackStats?.thumbs_up ?? 0}
+                            </span>
+                            <span className="text-white/20">/</span>
+                            <span className="text-2xl font-bold text-red-400">
+                                {loading ? '—' : feedbackStats?.thumbs_down ?? 0}
+                            </span>
+                        </div>
+                        <p className="text-white/25 text-xs mt-1">
+                            {loading ? '' : `${feedbackStats?.total_feedback ?? 0} total ratings`}
+                        </p>
                     </div>
                     <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-5">
                         <p className="text-white/40 text-xs uppercase tracking-wider font-medium">Status</p>
@@ -116,7 +138,7 @@ const AdminDashboard = () => {
                     className="mb-10"
                 >
                     <h2 className="text-lg font-semibold text-white/70 mb-4">Quick Actions</h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
 
                         {/* Chat History Card */}
                         <button
@@ -141,6 +163,33 @@ const AdminDashboard = () => {
                                 </span>
                                 <span className="text-xs font-medium bg-white/[0.06] text-white/50 px-2.5 py-1 rounded-full">
                                     {loading ? '...' : `${stats?.agent_count ?? 0} agents`}
+                                </span>
+                            </div>
+                        </button>
+
+                        {/* Feedback Card */}
+                        <button
+                            onClick={() => navigate('/admin/feedback')}
+                            className="group bg-white/[0.02] border border-white/[0.06] rounded-2xl p-6 text-left hover:bg-white/[0.05] hover:border-emerald-500/20 transition-all duration-300 cursor-pointer"
+                        >
+                            <div className="flex items-start justify-between">
+                                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 group-hover:bg-emerald-500/20 transition-colors">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 text-emerald-400">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M6.633 10.25c.806 0 1.533-.446 2.031-1.08a9.041 9.041 0 012.861-2.4c.723-.384 1.35-.956 1.653-1.715a4.498 4.498 0 00.322-1.672V2.75a.75.75 0 01.75-.75 2.25 2.25 0 012.25 2.25c0 1.152-.26 2.243-.723 3.218-.266.558.107 1.282.725 1.282h3.126c1.026 0 1.945.694 2.054 1.715.045.422.068.85.068 1.285a11.95 11.95 0 01-2.649 7.521c-.388.482-.987.729-1.605.729H14.23c-.483 0-.964-.078-1.423-.23l-3.114-1.04a4.501 4.501 0 00-1.423-.23H5.904m.729-10.055a3 3 0 00-2.346-1.174H3.75A1.5 1.5 0 002.25 6v9.75A1.5 1.5 0 003.75 17.25h.537a3 3 0 012.346 1.126l.177.222" />
+                                    </svg>
+                                </div>
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-white/20 group-hover:text-emerald-400 group-hover:translate-x-1 transition-all">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                                </svg>
+                            </div>
+                            <h3 className="text-white font-semibold text-lg mt-4 group-hover:text-emerald-300 transition-colors">User Feedback</h3>
+                            <p className="text-white/40 text-sm mt-1">Review thumbs up/down ratings from users on AI responses</p>
+                            <div className="mt-4 flex items-center gap-2">
+                                <span className="text-xs font-medium bg-emerald-500/10 text-emerald-400/70 px-2.5 py-1 rounded-full">
+                                    {loading ? '...' : `${feedbackStats?.thumbs_up ?? 0} positive`}
+                                </span>
+                                <span className="text-xs font-medium bg-red-500/10 text-red-400/70 px-2.5 py-1 rounded-full">
+                                    {loading ? '...' : `${feedbackStats?.thumbs_down ?? 0} negative`}
                                 </span>
                             </div>
                         </button>

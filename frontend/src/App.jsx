@@ -8,6 +8,7 @@ import ChatInterface from './components/ChatInterface';
 import ChatBrowser from './components/admin/ChatBrowser';
 import AdminDashboard from './components/admin/AdminDashboard';
 import IngestionPanel from './components/admin/IngestionPanel';
+import FeedbackPanel from './components/admin/FeedbackPanel';
 import AdminRoute from './components/admin/AdminRoute';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
@@ -345,6 +346,7 @@ function App() {
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/chats" element={<ChatBrowser />} />
             <Route path="/admin/ingestion" element={<IngestionPanel />} />
+            <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>

@@ -15,6 +15,84 @@ const FORM_TOKENS = {
 
 
 
+// ── Feedback Buttons Component ──────────────────────────────────────
+const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRating, onFeedback }) => {
+    const [rating, setRating] = useState(existingRating || null);
+    const [submitting, setSubmitting] = useState(false);
+
+    useEffect(() => {
+        setRating(existingRating || null);
+    }, [existingRating]);
+
+    const handleFeedback = async (newRating) => {
+        if (submitting) return;
+
+        // Toggle off if same rating clicked
+        const finalRating = rating === newRating ? null : newRating;
+
+        if (!finalRating) {
+            setRating(null);
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            const res = await fetch('http://localhost:8000/api/v1/feedback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_id: agentId,
+                    thread_id: threadId,
+                    message_index: messageIndex,
+                    rating: finalRating,
+                    user_id: userId,
+                }),
+            });
+            if (res.ok) {
+                setRating(finalRating);
+                onFeedback?.(messageIndex, finalRating);
+            }
+        } catch (err) {
+            console.error('Feedback submission failed:', err);
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="flex items-center gap-2 mt-2 -mb-1">
+            <button
+                onClick={() => handleFeedback('up')}
+                disabled={submitting}
+                className={`p-1.5 rounded-md transition-all duration-200 ${
+                    rating === 'up'
+                        ? 'text-emerald-500 bg-emerald-50'
+                        : 'text-gray-300 hover:text-emerald-400 hover:bg-emerald-50/50'
+                }`}
+                title="Helpful"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                    <path d="M1 8.998a1 1 0 011-1h.764a1.483 1.483 0 00-.076.506v5.996a1.483 1.483 0 00.076.506H2a1 1 0 01-1-1V8.998zM5.25 7.726a2 2 0 01.944-1.697l3.476-2.14a1.5 1.5 0 012.33 1.25v2.363h2.5a2 2 0 011.96 2.4l-.782 3.908A2 2 0 0113.72 15.5H5.25V7.726z" />
+                </svg>
+            </button>
+            <button
+                onClick={() => handleFeedback('down')}
+                disabled={submitting}
+                className={`p-1.5 rounded-md transition-all duration-200 ${
+                    rating === 'down'
+                        ? 'text-red-400 bg-red-50'
+                        : 'text-gray-300 hover:text-red-400 hover:bg-red-50/50'
+                }`}
+                title="Not helpful"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                    <path d="M19 11.002a1 1 0 01-1 1h-.764a1.483 1.483 0 00.076-.506V5.5a1.483 1.483 0 00-.076-.506H18a1 1 0 011 1v5.008zM14.75 12.274a2 2 0 01-.944 1.697l-3.476 2.14a1.5 1.5 0 01-2.33-1.25V12.5h-2.5a2 2 0 01-1.96-2.4l.782-3.908A2 2 0 016.28 4.5h8.47v7.774z" />
+                </svg>
+            </button>
+        </div>
+    );
+};
+
 const ChatInterface = ({ agentConfig }) => {
     const { accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
@@ -23,6 +101,7 @@ const ChatInterface = ({ agentConfig }) => {
     const [threadId, setThreadId] = useState('');
     const [messages, setMessages] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    const [feedbackMap, setFeedbackMap] = useState({}); // { messageIndex: rating }
 
     // Effect to handle Agent switching: 
     // 1. Get/Create thread_id for the specific agent
@@ -36,6 +115,7 @@ const ChatInterface = ({ agentConfig }) => {
         // sends a message during the transition.
         setThreadId('');          // Guard: handleSend checks for empty threadId
         setMessages([]);          // Clear previous agent's messages
+        setFeedbackMap({});       // Clear previous agent's feedback
         setIsLoadingHistory(true); // Show spinner during transition
 
         const loadAgentState = async () => {
@@ -78,6 +158,24 @@ const ChatInterface = ({ agentConfig }) => {
                             };
                         });
                         setMessages(mappedMessages);
+
+                        // Load existing feedback for this thread
+                        try {
+                            const fbRes = await fetch(`http://localhost:8000/api/v1/feedback/${agentConfig.id}/${currentThreadId}`);
+                            if (fbRes.ok) {
+                                const fbData = await fbRes.json();
+                                const userId = user.username || "anonymous";
+                                const map = {};
+                                for (const [idx, users] of Object.entries(fbData.feedback || {})) {
+                                    if (users[userId]) {
+                                        map[idx] = users[userId];
+                                    }
+                                }
+                                setFeedbackMap(map);
+                            }
+                        } catch (fbErr) {
+                            console.error("Error fetching feedback:", fbErr);
+                        }
                     } else {
                         // Existing thread but empty history (rare)
                         setMessages([{
@@ -222,56 +320,88 @@ const ChatInterface = ({ agentConfig }) => {
                                 </div>
                             )}
                             {messages.map((msg, index) => (
-                                <motion.div
-                                    key={index}
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: 0.35, ease: 'easeOut' }}
-                                    className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                                >
-                                    {/* Chatbubble width adjustment */}
-                                    <div className={`max-w-[80%] sm:max-w-[75%] rounded-2xl px-5 sm:px-6 py-3.5 sm:py-4 text-[0.9375rem] leading-relaxed shadow-sm ${msg.type === 'user'
-                                        ? `bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`
-                                        : 'bg-white/95 border border-gray-100/60 text-gray-700 rounded-tl-md'
-                                        }`}>
-                                        <div className="prose prose-sm max-w-none text-inherit">
-                                            <ReactMarkdown
-                                                remarkPlugins={[remarkGfm]}
-                                                components={{
-                                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                                                    a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                                                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
-                                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
-                                                    li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-                                                    table: ({ node, ...props }) => (
-                                                        <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
-                                                            <table className="w-full text-sm text-left border-collapse" {...props} />
-                                                        </div>
-                                                    ),
-                                                    th: ({ node, ...props }) => <th className="bg-gray-50 px-4 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />,
-                                                    td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />,
-                                                    tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 hover:bg-gray-50 transition-colors" {...props} />,
-                                                    code: ({ node, inline, className, children, ...props }) => {
-                                                        return inline ? (
-                                                            <code className="bg-white border border-gray-100 shadow-sm px-1.5 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
-                                                                {children}
-                                                            </code>
-                                                        ) : (
-                                                            <code className="block bg-gray-50 p-3 rounded-xl text-sm font-mono overflow-x-auto my-2 border border-gray-100 shadow-inner text-gray-700" {...props}>
-                                                                {children}
-                                                            </code>
-                                                        );
-                                                    }
-                                                }}
-                                            >
-                                                {msg.text}
-                                            </ReactMarkdown>
+                                (msg.type === 'user' || msg.text || msg.formType) && (
+                                    <motion.div
+                                        key={index}
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.35, ease: 'easeOut' }}
+                                        className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                                    >
+                                        {/* Chatbubble width adjustment */}
+                                        <div className={`max-w-[80%] sm:max-w-[75%] rounded-2xl px-5 sm:px-6 py-3.5 sm:py-4 text-[0.9375rem] leading-relaxed shadow-sm ${msg.type === 'user'
+                                            ? `bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`
+                                            : 'bg-white/95 border border-gray-100/60 text-gray-700 rounded-tl-md'
+                                            }`}>
+                                            <div className="prose prose-sm max-w-none text-inherit">
+                                                {(() => {
+                                                    // Logic to separate text from sources
+                                                    const parts = msg.text.split(/(Sources:)/);
+                                                    const mainText = parts[0];
+                                                    const sourcesPart = parts.length > 2 ? parts.slice(2).join("") : "";
+
+                                                    // Parse sources list: "[Name](URL), [Name](URL)"
+                                                    const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
+                                                    const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
+
+                                                    return (
+                                                        <>
+                                                            <ReactMarkdown
+                                                                remarkPlugins={[remarkGfm]}
+                                                                components={{
+                                                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                                                                    a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                                                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                                                                    li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                                                    table: ({ node, ...props }) => (
+                                                                        <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
+                                                                            <table className="w-full text-sm text-left border-collapse" {...props} />
+                                                                        </div>
+                                                                    ),
+                                                                    th: ({ node, ...props }) => <th className="bg-gray-50 px-4 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />,
+                                                                    td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />,
+                                                                    tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 hover:bg-gray-50 transition-colors" {...props} />,
+                                                                    code: ({ node, inline, className, children, ...props }) => {
+                                                                        return inline ? (
+                                                                            <code className="bg-white border border-gray-100 shadow-sm px-1.5 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
+                                                                                {children}
+                                                                            </code>
+                                                                        ) : (
+                                                                            <code className="block bg-gray-50 p-3 rounded-xl text-sm font-mono overflow-x-auto my-2 border border-gray-100 shadow-inner text-gray-700" {...props}>
+                                                                                {children}
+                                                                            </code>
+                                                                        );
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {mainText}
+                                                            </ReactMarkdown>
+                                                            {msg.type === 'bot' && (
+                                                                <SourcesSection sources={sources} color={agentConfig.color} />
+                                                            )}
+                                                        </>
+                                                    );
+                                                })()}
+                                            </div>
+                                            {/* Render Generative UI form if triggered */}
+                                            {msg.formType === 'lifestore' && <LifestoreForm />}
+                                            {msg.formType === 'enterprise' && <EnterpriseForm />}
+
+                                            {/* Feedback buttons for bot messages (not for greeting/first message) */}
+                                            {msg.type === 'bot' && index > 0 && msg.text && !isLoading && (
+                                                <FeedbackButtons
+                                                    messageIndex={index}
+                                                    agentId={agentConfig.id}
+                                                    threadId={threadId}
+                                                    userId={user.username || "anonymous"}
+                                                    existingRating={feedbackMap[index] || null}
+                                                    onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
+                                                />
+                                            )}
                                         </div>
-                                        {/* Render Generative UI form if triggered */}
-                                        {msg.formType === 'lifestore' && <LifestoreForm />}
-                                        {msg.formType === 'enterprise' && <EnterpriseForm />}
-                                    </div>
-                                </motion.div>
+                                    </motion.div>
+                                )
                             ))}
                             {isLoading && (
                                 <div className="flex justify-start">
