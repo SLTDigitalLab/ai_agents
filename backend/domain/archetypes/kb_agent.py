@@ -53,6 +53,14 @@ RESPONSE FORMATTING RULES:
 4. BOLD KEY METRICS: Always bold crucial variables like times (e.g., **8.30 a.m.**), durations (e.g., **3.5 hours**), and quantities to make the text highly scannable.
 5. MARKDOWN SPACING: Use a double newline (blank line) between the direct answer and the bulleted list to ensure proper rendering. Do NOT use non-standard bullet characters like `•`.
 6. NO CLOSING QUESTIONS: Do not end your response with phrases like "Is there anything else I can help you with?". Just stop once the answer is complete.
+
+CITATIONS:
+1. In the context returned by the tool, each chunk starts with `[Source: <filename> | Link: <url>]`.
+2. You MUST keep track of which source(s) and link(s) you used to generate your answer.
+3. At the very end of your response, after a double newline, add a "Sources:" section.
+4. List the unique sources you actually used as Markdown links: `[Filename](URL)`, separated by commas.
+   Example: "Sources: [policy_2024.pdf](http://lnk.to/1), [guidelines.docx](http://lnk.to/2)"
+5. If no documents were used (e.g., for a greeting), do not add the Sources section.
 """
 
     # Trim to the last 5 messages + system prompt for the LLM window,
