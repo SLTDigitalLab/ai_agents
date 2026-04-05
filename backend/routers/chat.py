@@ -1,87 +1,115 @@
 """
-Chat router - connects the React frontend to the LangGraph agent system.
-
-POST /api/v1/chat  →  Compiles the agent graph on-the-fly with a per-request
-database connection to ensure clean resource cleanup.
+Chat router - connects the React frontend to the LangGraph agent system with streaming support.
+Includes input guardrails (LLM-based intent + sentiment classification) run before the agent.
 """
 
-from fastapi import APIRouter, HTTPException
+import logging
+from typing import AsyncGenerator
 
-from core.checkpointer import get_postgres_checkpointer
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage, AIMessage
+
+from core.checkpointer import get_postgres_checkpointer, get_async_postgres_checkpointer
 from domain.registry import get_agent_builder
+from domain.guardrails import classify_intent
 from schemas.chat import ChatRequest
 from langchain_core.tracers.context import tracing_v2_enabled
 
-# Removed trailing slash from prefix if it acts as base
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
+logger = logging.getLogger(__name__)
 
+BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
 
-@router.post("")  # Mounts at /api/v1/chat (no trailing slash)
+@router.post("")
 async def chat(request: ChatRequest):
-    """Handle an incoming chat message from the frontend."""
+    """Handle an incoming chat message from the frontend with streaming."""
     try:
-        print(f"DEBUG: Received agent_id: {request.agent_id}")
         builder_fn = get_agent_builder(request.agent_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
-    # Build the uncompiled workflow
-    workflow = builder_fn()
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            # Thread config enables LangGraph memory/checkpointing per conversation
+            config = {"configurable": {"thread_id": request.thread_id}}
 
-    # Thread config enables LangGraph memory/checkpointing per conversation
-    config = {"configurable": {"thread_id": request.thread_id}}
+            # ── Run guardrail classifier FIRST ──────────────────────────
+            # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
+            # and lets us pass real sentiment into the agent state.
+            guardrail = await classify_intent(request.message)
 
-    try:
-        # ── The "With" Pattern ───────────────────────────────────────────────
-        # We open the DB connection pool & checkpointer HERE, use it, and
-        # let it close automatically when the block exits.
-        with get_postgres_checkpointer(request.agent_id) as checkpointer:
-            
-            # Compile the graph with this specific checkpointer instance
-            graph = workflow.compile(checkpointer=checkpointer)
+            if guardrail.action == "BLOCK":
+                logger.info(
+                    f"Guardrail BLOCK | reason={guardrail.reason}"
+                )
+                # Save the blocked exchange to chat history
+                try:
+                    async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
+                        workflow = builder_fn()
+                        graph = workflow.compile(checkpointer=checkpointer)
+                        blocked_state = {
+                            "messages": [
+                                HumanMessage(content=request.message),
+                                AIMessage(content=BLOCK_MESSAGE),
+                            ],
+                            "agent_id": request.agent_id,
+                            "user_id": request.user_id,
+                            "form_slots": {},
+                            "next_node": "",
+                            "sentiment": guardrail.sentiment,
+                        }
+                        await graph.aupdate_state(config, blocked_state)
+                except Exception as e:
+                    logger.warning(f"Failed to save blocked exchange: {e}")
+                yield BLOCK_MESSAGE
+                return
 
-            # Invoke using the standard LangGraph arguments
-            # Note: We must await if using async, but standard invoke is sync.
-            # If using asyncpg, we'd need a different pattern.
-            # psycopg 3 sync connection is fine for now.
+            logger.info(
+                f"Guardrail PASS | sentiment={guardrail.sentiment} | "
+                f"reason={guardrail.reason}"
+            )
+
+            # Build initial state with real sentiment from classifier
             state = {
                 "messages": [("user", request.message)],
                 "agent_id": request.agent_id,
                 "user_id": request.user_id,
                 "form_slots": {},
                 "next_node": "",
+                "sentiment": guardrail.sentiment,
             }
 
-            # Wrap the invocation to dynamically separate traces
-            project_name = f"Ask SLT - {request.agent_id.upper()}"
-            with tracing_v2_enabled(project_name=project_name):
-                result = graph.invoke(state, config=config)
+            # Use the ASYNC checkpointer for streaming – required by astream_events
+            async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
+                workflow = builder_fn()
+                graph = workflow.compile(checkpointer=checkpointer)
 
-            # Extract the final message
-            final_message = result["messages"][-1].content
+                project_name = f"Ask SLT - {request.agent_id.upper()}"
+                with tracing_v2_enabled(project_name=project_name):
+                    # We use astream_events (v2) for fine-grained streaming
+                    async for event in graph.astream_events(state, config, version="v2"):
+                        # ── Extract tokens from stream events ────────
+                        kind = event["event"]
+                        if kind == "on_chat_model_stream":
+                            content = event["data"]["chunk"].content
+                            if content:
+                                if isinstance(content, list):
+                                    for block in content:
+                                        if isinstance(block, dict) and "text" in block:
+                                            yield block["text"]
+                                        elif isinstance(block, str):
+                                            yield block
+                                else:
+                                    yield str(content)
 
-            # If Gemini returns a list of blocks (common after tool calls)
-            if isinstance(final_message, list):
-                text_parts = []
-                for block in final_message:
-                    if isinstance(block, str):
-                        text_parts.append(block)
-                    elif isinstance(block, dict) and "text" in block:
-                        text_parts.append(block["text"])
-                final_message = " ".join(text_parts)
-            elif not isinstance(final_message, str):
-                # Fallback for any other object type
-                final_message = str(final_message)
+        except Exception as exc:
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(f"Streaming error: {exc}\n{error_details}")
+            yield f"\n\n[ERROR]: {str(exc)}"
 
-            return {"response": final_message}
-
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Agent execution failed: {exc}",
-        )
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/{agent_id}/{thread_id}")
@@ -99,17 +127,13 @@ async def get_history(agent_id: str, thread_id: str):
         with get_postgres_checkpointer(agent_id) as checkpointer:
             graph = workflow.compile(checkpointer=checkpointer)
             
-            # Get the current state snapshot from the database
             snapshot = graph.get_state(config)
             
             if not snapshot.values:
                 return {"messages": []}
 
-            # return a simplified list of messages
-            # snapshot.values['messages'] is a list of LangChain objects
             messages = []
             for msg in snapshot.values.get("messages", []):
-                # Only expose Human and AI messages to the frontend
                 if msg.type not in ("human", "ai"):
                     continue
 
@@ -121,11 +145,10 @@ async def get_history(agent_id: str, thread_id: str):
                             text_parts.append(block)
                         elif isinstance(block, dict) and "text" in block:
                             text_parts.append(block["text"])
-                    content = " ".join(text_parts).strip()
+                    content = "".join(text_parts).strip()
                 elif not isinstance(content, str):
                     content = str(content).strip()
                 
-                # Skip empty messages (e.g., AI messages that only performed a tool call but had no text)
                 if content:
                     messages.append({
                         "type": msg.type,
@@ -135,4 +158,5 @@ async def get_history(agent_id: str, thread_id: str):
             return {"messages": messages}
 
     except Exception as exc:
+        logger.error(f"Error fetching history: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))

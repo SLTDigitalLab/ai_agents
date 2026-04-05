@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: Optional[str] = None
     EMBEDDING_BASE_URL: Optional[str] = None
 
+    # Guardrail Classifier (cheap/fast model for input safety)
+    GUARDRAIL_PROVIDER: str = "openai"
+    GUARDRAIL_MODEL: str = "gpt-4.1-nano"
+    GUARDRAIL_API_KEY: Optional[str] = None  # falls back to provider key
+
     QDRANT_URL: str
     POSTGRES_URL: str
 
