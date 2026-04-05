@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  db_postgres:
+    image: ankane/pgvector:latest
+    container_name: slt_postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U slt -d slt_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # No host ports — only reachable within the Docker network
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_USER: slt
+      POSTGRES_PASSWORD: slt123
+      POSTGRES_DB: slt_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+
+  db_qdrant:
+    image: qdrant/qdrant:latest
+    container_name: slt_qdrant
+    # No host ports — only reachable within the Docker network
+    expose:
+      - "6333"
+    volumes:
+      - qdrantdata:/qdrant/storage
+    restart: always
+
+  backend:
+    build:
+      context: ./backend
+    container_name: slt_backend
+    ports:
+      - "127.0.0.1:8100:8000"   # Only bind to localhost — Nginx will proxy
+    depends_on:
+      db_postgres:
+        condition: service_healthy
+      db_qdrant:
+        condition: service_started
+    environment:
+      PYTHONUNBUFFERED: 1
+      POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
+      QDRANT_URL: http://db_qdrant:6333
+    env_file:
+      - ./.env
+    volumes:
+      - ./backend:/app
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: slt_frontend
+    ports:
+      - "127.0.0.1:3100:3000"   # Only bind to localhost — Nginx will proxy
+    depends_on:
+      - backend
+    env_file:
+      - ./.env
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    restart: always
+
+volumes:
+  pgdata:
+  qdrantdata:
