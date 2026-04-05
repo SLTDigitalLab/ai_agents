@@ -13,7 +13,52 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
+// ── Source UI Components ──────────────────────────────────────
 
+const SourceBadge = ({ name, url, color }) => (
+    <motion.a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        whileHover={{ scale: 1.05, y: -2 }}
+        whileTap={{ scale: 0.95 }}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-100 shadow-sm transition-all hover:shadow-md hover:border-gray-200 group`}
+    >
+        <div className={`p-1 rounded-full bg-gradient-to-br ${color} text-white`}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+                <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
+            </svg>
+        </div>
+        <span className="text-xs font-medium text-gray-600 group-hover:text-gray-900 truncate max-w-[150px]">
+            {name}
+        </span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-gray-300 group-hover:text-gray-500">
+            <path fillRule="evenodd" d="M5.22 14.78a.75.75 0 001.06 0l7.22-7.22v5.69a.75.75 0 001.5 0v-7.5a.75.75 0 00-.75-.75h-7.5a.75.75 0 000 1.5h5.69l-7.22 7.22a.75.75 0 000 1.06z" clipRule="evenodd" />
+        </svg>
+    </motion.a>
+);
+
+const SourcesSection = ({ sources, color }) => {
+    if (!sources || sources.length === 0) return null;
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 pt-3 border-t border-gray-100/60"
+        >
+            <div className="flex items-center gap-2 mb-2.5">
+                <div className={`w-1 h-3.5 rounded-full bg-gradient-to-b ${color}`} />
+                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400">Sources</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+                {sources.map((src, i) => (
+                    <SourceBadge key={i} name={src.name} url={src.url} color={color} />
+                ))}
+            </div>
+        </motion.div>
+    );
+};
 
 const ChatInterface = ({ agentConfig }) => {
     const { accounts } = useMsal();
@@ -236,56 +281,76 @@ const ChatInterface = ({ agentConfig }) => {
                                 </div>
                             )}
                             {messages.map((msg, index) => (
-                                <motion.div
-                                    key={index}
-                                    initial={{ opacity: 0, y: 10 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    transition={{ duration: 0.35, ease: 'easeOut' }}
-                                    className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
-                                >
-                                    {/* Chatbubble width adjustment */}
-                                    <div className={`max-w-[80%] sm:max-w-[75%] rounded-2xl px-5 sm:px-6 py-3.5 sm:py-4 text-[0.9375rem] leading-relaxed shadow-sm ${msg.type === 'user'
-                                        ? `bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`
-                                        : 'bg-white/95 border border-gray-100/60 text-gray-700 rounded-tl-md'
-                                        }`}>
-                                        <div className="prose prose-sm max-w-none text-inherit">
-                                            <ReactMarkdown
-                                                remarkPlugins={[remarkGfm]}
-                                                components={{
-                                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                                                    a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                                                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
-                                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
-                                                    li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-                                                    table: ({ node, ...props }) => (
-                                                        <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
-                                                            <table className="w-full text-sm text-left border-collapse" {...props} />
-                                                        </div>
-                                                    ),
-                                                    th: ({ node, ...props }) => <th className="bg-gray-50 px-4 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />,
-                                                    td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />,
-                                                    tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 hover:bg-gray-50 transition-colors" {...props} />,
-                                                    code: ({ node, inline, className, children, ...props }) => {
-                                                        return inline ? (
-                                                            <code className="bg-white border border-gray-100 shadow-sm px-1.5 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
-                                                                {children}
-                                                            </code>
-                                                        ) : (
-                                                            <code className="block bg-gray-50 p-3 rounded-xl text-sm font-mono overflow-x-auto my-2 border border-gray-100 shadow-inner text-gray-700" {...props}>
-                                                                {children}
-                                                            </code>
-                                                        );
-                                                    }
-                                                }}
-                                            >
-                                                {msg.text}
-                                            </ReactMarkdown>
+                                (msg.type === 'user' || msg.text || msg.formType) && (
+                                    <motion.div
+                                        key={index}
+                                        initial={{ opacity: 0, y: 10 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        transition={{ duration: 0.35, ease: 'easeOut' }}
+                                        className={`flex ${msg.type === 'user' ? 'justify-end' : 'justify-start'}`}
+                                    >
+                                        {/* Chatbubble width adjustment */}
+                                        <div className={`max-w-[80%] sm:max-w-[75%] rounded-2xl px-5 sm:px-6 py-3.5 sm:py-4 text-[0.9375rem] leading-relaxed shadow-sm ${msg.type === 'user'
+                                            ? `bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`
+                                            : 'bg-white/95 border border-gray-100/60 text-gray-700 rounded-tl-md'
+                                            }`}>
+                                            <div className="prose prose-sm max-w-none text-inherit">
+                                                {(() => {
+                                                    // Logic to separate text from sources
+                                                    const parts = msg.text.split(/(Sources:)/);
+                                                    const mainText = parts[0];
+                                                    const sourcesPart = parts.length > 2 ? parts.slice(2).join("") : "";
+                                                    
+                                                    // Parse sources list: "[Name](URL), [Name](URL)"
+                                                    const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
+                                                    const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
+
+                                                    return (
+                                                        <>
+                                                            <ReactMarkdown
+                                                                remarkPlugins={[remarkGfm]}
+                                                                components={{
+                                                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
+                                                                    a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                                                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                                                    ol: ({ node, ...prefix }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...prefix} />,
+                                                                    li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                                                    table: ({ node, ...props }) => (
+                                                                        <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
+                                                                            <table className="w-full text-sm text-left border-collapse" {...props} />
+                                                                        </div>
+                                                                    ),
+                                                                    th: ({ node, ...props }) => <th className="bg-gray-50 px-4 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />,
+                                                                    td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />,
+                                                                    tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 hover:bg-gray-50 transition-colors" {...props} />,
+                                                                    code: ({ node, inline, className, children, ...props }) => {
+                                                                        return inline ? (
+                                                                            <code className="bg-white border border-gray-100 shadow-sm px-1.5 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
+                                                                                {children}
+                                                                            </code>
+                                                                        ) : (
+                                                                            <code className="block bg-gray-50 p-3 rounded-xl text-sm font-mono overflow-x-auto my-2 border border-gray-100 shadow-inner text-gray-700" {...props}>
+                                                                                {children}
+                                                                            </code>
+                                                                        );
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {mainText}
+                                                            </ReactMarkdown>
+                                                            {msg.type === 'bot' && (
+                                                                <SourcesSection sources={sources} color={agentConfig.color} />
+                                                            )}
+                                                        </>
+                                                    );
+                                                })()}
+                                            </div>
+                                            {/* Render Generative UI form if triggered */}
+                                            {msg.formType === 'lifestore' && <LifestoreForm />}
+                                            {msg.formType === 'enterprise' && <EnterpriseForm />}
                                         </div>
-                                        {/* Render Generative UI form if triggered */}
-                                        {msg.formType === 'lifestore' && <LifestoreForm />}
-                                        {msg.formType === 'enterprise' && <EnterpriseForm />}
-                                    </div>
-                                </motion.div>
+                                    </motion.div>
+                                )
                             ))}
                             {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
                                 <div className="flex justify-start">

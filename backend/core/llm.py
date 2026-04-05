@@ -30,6 +30,7 @@ def get_chat_model():
             model=model_name,
             api_key=final_api_key,
             base_url=base_url,
+            temperature=0,
         )
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -42,6 +43,7 @@ def get_chat_model():
             model=model_name,
             google_api_key=final_api_key,
             streaming=True,
+            temperature=0,
         )
     else:
         raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
@@ -83,3 +85,39 @@ def get_embedding_model():
         )
     else:
         raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {provider}")
+
+
+def get_guardrail_model():
+    """
+    Returns a lightweight, fast LLM for the guardrail intent classifier.
+    Uses GUARDRAIL_PROVIDER / GUARDRAIL_MODEL from settings.
+    Defaults to gpt-4.1-nano (OpenAI) — cheap and fast for classification.
+    """
+    provider = settings.GUARDRAIL_PROVIDER.lower().strip()
+    model_name = settings.GUARDRAIL_MODEL
+    api_key = settings.GUARDRAIL_API_KEY
+
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        final_api_key = api_key or settings.OPENAI_API_KEY
+
+        log.info(f"Initialized guardrail model (OpenAI): {model_name}")
+        return ChatOpenAI(
+            model=model_name,
+            api_key=final_api_key,
+            temperature=0,
+        )
+    elif provider == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        final_api_key = api_key or settings.GOOGLE_API_KEY
+
+        log.info(f"Initialized guardrail model (Gemini): {model_name}")
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=final_api_key,
+            temperature=0,
+        )
+    else:
+        raise ValueError(f"Unsupported GUARDRAIL_PROVIDER: {provider}")

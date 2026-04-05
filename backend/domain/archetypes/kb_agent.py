@@ -63,6 +63,14 @@ CITATIONS:
 5. If no documents were used (e.g., for a greeting), do not add the Sources section.
 """
 
+    # ── Sentiment-aware tone adjustment ──────────────────────────────
+    sentiment = state.get("sentiment", "neutral")
+    if sentiment in ("frustrated", "angry"):
+        system_prompt += f"""
+
+TONE ADJUSTMENT:
+The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledge their frustration before answering. Use a warm, understanding tone."""
+
     # Trim to the last 5 messages + system prompt for the LLM window,
     # but the full history stays in state for the checkpointer to persist.
     trimmed = trim_messages(

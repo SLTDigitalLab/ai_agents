@@ -1,21 +1,25 @@
 """
 Chat router - connects the React frontend to the LangGraph agent system with streaming support.
+Includes input guardrails (LLM-based intent + sentiment classification) run before the agent.
 """
 
-import json
 import logging
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage, AIMessage
 
 from core.checkpointer import get_postgres_checkpointer, get_async_postgres_checkpointer
 from domain.registry import get_agent_builder
+from domain.guardrails import classify_intent
 from schemas.chat import ChatRequest
 from langchain_core.tracers.context import tracing_v2_enabled
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
+
+BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
 
 @router.post("")
 async def chat(request: ChatRequest):
@@ -29,14 +33,51 @@ async def chat(request: ChatRequest):
         try:
             # Thread config enables LangGraph memory/checkpointing per conversation
             config = {"configurable": {"thread_id": request.thread_id}}
-            
-            # Initial state
+
+            # ── Run guardrail classifier FIRST ──────────────────────────
+            # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
+            # and lets us pass real sentiment into the agent state.
+            guardrail = await classify_intent(request.message)
+
+            if guardrail.action == "BLOCK":
+                logger.info(
+                    f"Guardrail BLOCK | reason={guardrail.reason}"
+                )
+                # Save the blocked exchange to chat history
+                try:
+                    async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
+                        workflow = builder_fn()
+                        graph = workflow.compile(checkpointer=checkpointer)
+                        blocked_state = {
+                            "messages": [
+                                HumanMessage(content=request.message),
+                                AIMessage(content=BLOCK_MESSAGE),
+                            ],
+                            "agent_id": request.agent_id,
+                            "user_id": request.user_id,
+                            "form_slots": {},
+                            "next_node": "",
+                            "sentiment": guardrail.sentiment,
+                        }
+                        await graph.aupdate_state(config, blocked_state)
+                except Exception as e:
+                    logger.warning(f"Failed to save blocked exchange: {e}")
+                yield BLOCK_MESSAGE
+                return
+
+            logger.info(
+                f"Guardrail PASS | sentiment={guardrail.sentiment} | "
+                f"reason={guardrail.reason}"
+            )
+
+            # Build initial state with real sentiment from classifier
             state = {
                 "messages": [("user", request.message)],
                 "agent_id": request.agent_id,
                 "user_id": request.user_id,
                 "form_slots": {},
                 "next_node": "",
+                "sentiment": guardrail.sentiment,
             }
 
             # Use the ASYNC checkpointer for streaming – required by astream_events
@@ -48,13 +89,11 @@ async def chat(request: ChatRequest):
                 with tracing_v2_enabled(project_name=project_name):
                     # We use astream_events (v2) for fine-grained streaming
                     async for event in graph.astream_events(state, config, version="v2"):
+                        # ── Extract tokens from stream events ────────
                         kind = event["event"]
-                        
-                        # 'on_chat_model_stream' is triggered for each token from the LLM
                         if kind == "on_chat_model_stream":
                             content = event["data"]["chunk"].content
                             if content:
-                                # If it's a list of blocks, extract text
                                 if isinstance(content, list):
                                     for block in content:
                                         if isinstance(block, dict) and "text" in block:
@@ -63,6 +102,7 @@ async def chat(request: ChatRequest):
                                             yield block
                                 else:
                                     yield str(content)
+
         except Exception as exc:
             import traceback
             error_details = traceback.format_exc()
