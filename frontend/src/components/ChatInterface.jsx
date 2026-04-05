@@ -68,6 +68,7 @@ const ChatInterface = ({ agentConfig }) => {
     const [threadId, setThreadId] = useState('');
     const [messages, setMessages] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+    const [feedbackMap, setFeedbackMap] = useState({}); // { messageIndex: rating }
 
     // Effect to handle Agent switching: 
     // 1. Get/Create thread_id for the specific agent
@@ -81,6 +82,7 @@ const ChatInterface = ({ agentConfig }) => {
         // sends a message during the transition.
         setThreadId('');          // Guard: handleSend checks for empty threadId
         setMessages([]);          // Clear previous agent's messages
+        setFeedbackMap({});       // Clear previous agent's feedback
         setIsLoadingHistory(true); // Show spinner during transition
 
         const loadAgentState = async () => {
@@ -123,6 +125,24 @@ const ChatInterface = ({ agentConfig }) => {
                             };
                         });
                         setMessages(mappedMessages);
+
+                        // Load existing feedback for this thread
+                        try {
+                            const fbRes = await fetch(`http://localhost:8000/api/v1/feedback/${agentConfig.id}/${currentThreadId}`);
+                            if (fbRes.ok) {
+                                const fbData = await fbRes.json();
+                                const userId = user.username || "anonymous";
+                                const map = {};
+                                for (const [idx, users] of Object.entries(fbData.feedback || {})) {
+                                    if (users[userId]) {
+                                        map[idx] = users[userId];
+                                    }
+                                }
+                                setFeedbackMap(map);
+                            }
+                        } catch (fbErr) {
+                            console.error("Error fetching feedback:", fbErr);
+                        }
                     } else {
                         // Existing thread but empty history (rare)
                         setMessages([{

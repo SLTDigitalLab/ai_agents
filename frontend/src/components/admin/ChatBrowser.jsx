@@ -17,6 +17,7 @@ const AGENT_LIST = Object.entries(AGENTS).map(([key, cfg]) => ({
 // ── Slide-over Detail Panel ─────────────────────────────────────────────
 const SessionDetail = ({ session, agent, onClose }) => {
     const [messages, setMessages] = useState([]);
+    const [feedback, setFeedback] = useState({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
@@ -24,14 +25,27 @@ const SessionDetail = ({ session, agent, onClose }) => {
         if (!session) return;
         setLoading(true);
         setError(null);
+        setFeedback({});
 
-        fetch(`${API_BASE}/sessions/${agent}/${session.session_id}`)
-            .then(res => {
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                return res.json();
-            })
-            .then(data => {
-                setMessages(data.messages || []);
+        Promise.all([
+            fetch(`${API_BASE}/sessions/${agent}/${session.session_id}`)
+                .then(res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                }),
+            fetch(`http://localhost:8000/api/v1/feedback/${agent}/${session.session_id}`)
+                .then(res => res.ok ? res.json() : { feedback: {} })
+                .catch(() => ({ feedback: {} })),
+        ])
+            .then(([msgData, fbData]) => {
+                setMessages(msgData.messages || []);
+                // Flatten feedback: { index: "up" | "down" } (take the first user's rating)
+                const fbMap = {};
+                for (const [idx, users] of Object.entries(fbData.feedback || {})) {
+                    const ratings = Object.values(users);
+                    if (ratings.length > 0) fbMap[idx] = ratings[0];
+                }
+                setFeedback(fbMap);
                 setLoading(false);
             })
             .catch(err => {
@@ -123,6 +137,21 @@ const SessionDetail = ({ session, agent, onClose }) => {
                                                 {msg.content}
                                             </ReactMarkdown>
                                         </div>
+                                        {/* Feedback indicator for AI messages */}
+                                        {msg.type === 'ai' && feedback[i] && (
+                                            <div className={`flex items-center gap-1 mt-2 text-xs ${feedback[i] === 'up' ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
+                                                {feedback[i] === 'up' ? (
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+                                                        <path d="M1 8.998a1 1 0 011-1h.764a1.483 1.483 0 00-.076.506v5.996a1.483 1.483 0 00.076.506H2a1 1 0 01-1-1V8.998zM5.25 7.726a2 2 0 01.944-1.697l3.476-2.14a1.5 1.5 0 012.33 1.25v2.363h2.5a2 2 0 011.96 2.4l-.782 3.908A2 2 0 0113.72 15.5H5.25V7.726z" />
+                                                    </svg>
+                                                ) : (
+                                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+                                                        <path d="M19 11.002a1 1 0 01-1 1h-.764a1.483 1.483 0 00.076-.506V5.5a1.483 1.483 0 00-.076-.506H18a1 1 0 011 1v5.008zM14.75 12.274a2 2 0 01-.944 1.697l-3.476 2.14a1.5 1.5 0 01-2.33-1.25V12.5h-2.5a2 2 0 01-1.96-2.4l.782-3.908A2 2 0 016.28 4.5h8.47v7.774z" />
+                                                    </svg>
+                                                )}
+                                                <span>{feedback[i] === 'up' ? 'Helpful' : 'Not helpful'}</span>
+                                            </div>
+                                        )}
                                     </div>
                                 </motion.div>
                             ))}
