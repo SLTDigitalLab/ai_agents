@@ -134,6 +134,39 @@ async def submit_feedback(req: FeedbackRequest):
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
 
 
+# ── Delete Feedback ───────────────────────────────────────────────────────
+
+@router.delete("/api/v1/feedback")
+async def delete_feedback(req: FeedbackRequest):
+    """Delete a user's feedback for a specific AI message."""
+    if req.agent_id not in VALID_AGENTS:
+        raise HTTPException(status_code=404, detail=f"Unknown agent '{req.agent_id}'")
+
+    _ensure_feedback_table()
+
+    try:
+        with psycopg.connect(settings.POSTGRES_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM public.feedback
+                    WHERE agent_id = %(agent_id)s
+                      AND thread_id = %(thread_id)s
+                      AND message_index = %(message_index)s
+                      AND user_id = %(user_id)s
+                """, {
+                    "agent_id": req.agent_id,
+                    "thread_id": req.thread_id,
+                    "message_index": req.message_index,
+                    "user_id": req.user_id,
+                })
+
+        return {"status": "deleted"}
+
+    except Exception as exc:
+        logger.error(f"Failed to delete feedback: {exc}")
+        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+
 # ── Get Feedback for a Conversation ───────────────────────────────────────
 
 @router.get("/api/v1/feedback/{agent_id}/{thread_id}")
