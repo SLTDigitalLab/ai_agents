@@ -13,6 +13,8 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
+// ── Source UI Components ──────────────────────────────────────
+
 const SourceBadge = ({ name, url, color }) => (
     <motion.a
         href={url}
@@ -55,84 +57,6 @@ const SourcesSection = ({ sources, color }) => {
                 ))}
             </div>
         </motion.div>
-    );
-};
-
-// ── Feedback Buttons Component ──────────────────────────────────────
-const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRating, onFeedback }) => {
-    const [rating, setRating] = useState(existingRating || null);
-    const [submitting, setSubmitting] = useState(false);
-
-    useEffect(() => {
-        setRating(existingRating || null);
-    }, [existingRating]);
-
-    const handleFeedback = async (newRating) => {
-        if (submitting) return;
-
-        // Toggle off if same rating clicked
-        const finalRating = rating === newRating ? null : newRating;
-
-        if (!finalRating) {
-            setRating(null);
-            return;
-        }
-
-        setSubmitting(true);
-        try {
-            const res = await fetch('http://localhost:8000/api/v1/feedback', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    agent_id: agentId,
-                    thread_id: threadId,
-                    message_index: messageIndex,
-                    rating: finalRating,
-                    user_id: userId,
-                }),
-            });
-            if (res.ok) {
-                setRating(finalRating);
-                onFeedback?.(messageIndex, finalRating);
-            }
-        } catch (err) {
-            console.error('Feedback submission failed:', err);
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    return (
-        <div className="flex items-center gap-2 mt-2 -mb-1">
-            <button
-                onClick={() => handleFeedback('up')}
-                disabled={submitting}
-                className={`p-1.5 rounded-md transition-all duration-200 ${
-                    rating === 'up'
-                        ? 'text-emerald-500 bg-emerald-50'
-                        : 'text-gray-300 hover:text-emerald-400 hover:bg-emerald-50/50'
-                }`}
-                title="Helpful"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                    <path d="M1 8.998a1 1 0 011-1h.764a1.483 1.483 0 00-.076.506v5.996a1.483 1.483 0 00.076.506H2a1 1 0 01-1-1V8.998zM5.25 7.726a2 2 0 01.944-1.697l3.476-2.14a1.5 1.5 0 012.33 1.25v2.363h2.5a2 2 0 011.96 2.4l-.782 3.908A2 2 0 0113.72 15.5H5.25V7.726z" />
-                </svg>
-            </button>
-            <button
-                onClick={() => handleFeedback('down')}
-                disabled={submitting}
-                className={`p-1.5 rounded-md transition-all duration-200 ${
-                    rating === 'down'
-                        ? 'text-red-400 bg-red-50'
-                        : 'text-gray-300 hover:text-red-400 hover:bg-red-50/50'
-                }`}
-                title="Not helpful"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                    <path d="M19 11.002a1 1 0 01-1 1h-.764a1.483 1.483 0 00.076-.506V5.5a1.483 1.483 0 00-.076-.506H18a1 1 0 011 1v5.008zM14.75 12.274a2 2 0 01-.944 1.697l-3.476 2.14a1.5 1.5 0 01-2.33-1.25V12.5h-2.5a2 2 0 01-1.96-2.4l.782-3.908A2 2 0 016.28 4.5h8.47v7.774z" />
-                </svg>
-            </button>
-        </div>
     );
 };
 
@@ -271,13 +195,13 @@ const ChatInterface = ({ agentConfig }) => {
         setIsLoading(true);
 
         try {
-            // 2. Send to Real FastAPI Backend
+            // 2. Send to Real FastAPI Backend with Streaming
             const response = await fetch('http://localhost:8000/api/v1/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     message: userMessage.text,
-                    agent_id: agentConfig.id, // e.g., "finance"
+                    agent_id: agentConfig.id,
                     user_id: user.username || "anonymous",
                     thread_id: threadId
                 })
@@ -287,32 +211,46 @@ const ChatInterface = ({ agentConfig }) => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            const data = await response.json();
-
-            // 3. Add AI Response to UI
-            // Ensure the response is a string to prevent React rendering crashes
-            let safeText = data.response;
-            if (typeof safeText !== 'string') {
-                console.warn("Received non-string response from backend:", safeText);
-                safeText = JSON.stringify(safeText);
-            }
-
-            // Detect and strip Generative UI trigger tokens
+            // --- STREAMING LOGIC ---
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let accumulatedText = "";
             let formType = null;
-            for (const [token, type] of Object.entries(FORM_TOKENS)) {
-                if (safeText.includes(token)) {
-                    formType = type;
-                    safeText = safeText.replace(token, '').trim();
-                    break;
-                }
-            }
 
-            const botMessage = {
-                type: 'bot',
-                text: safeText,
-                formType: formType,
-            };
-            setMessages(prev => [...prev, botMessage]);
+            // Add an initial empty bot message
+            setMessages(prev => [...prev, { type: 'bot', text: "", formType: null }]);
+            // setIsLoading(false); // REMOVED: Keep loading dots until we have content
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                accumulatedText += chunk;
+
+                // Detect and strip Generative UI trigger tokens
+                let currentFormType = null;
+                let cleanText = accumulatedText;
+                for (const [token, type] of Object.entries(FORM_TOKENS)) {
+                    if (cleanText.includes(token)) {
+                        currentFormType = type;
+                        cleanText = cleanText.replace(token, '').trim();
+                        break;
+                    }
+                }
+
+                // Update the last message (the bot message) with the new text
+                setMessages(prev => {
+                    const newMessages = [...prev];
+                    const lastIdx = newMessages.length - 1;
+                    newMessages[lastIdx] = {
+                        ...newMessages[lastIdx],
+                        text: cleanText,
+                        formType: currentFormType || newMessages[lastIdx].formType
+                    };
+                    return newMessages;
+                });
+            }
 
         } catch (error) {
             console.error("Error:", error);
@@ -382,7 +320,7 @@ const ChatInterface = ({ agentConfig }) => {
                                                     const parts = msg.text.split(/(Sources:)/);
                                                     const mainText = parts[0];
                                                     const sourcesPart = parts.length > 2 ? parts.slice(2).join("") : "";
-
+                                                    
                                                     // Parse sources list: "[Name](URL), [Name](URL)"
                                                     const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
                                                     const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
@@ -395,7 +333,7 @@ const ChatInterface = ({ agentConfig }) => {
                                                                     p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
                                                                     a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
                                                                     ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
-                                                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                                                                    ol: ({ node, ...prefix }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...prefix} />,
                                                                     li: ({ node, ...props }) => <li className="pl-1" {...props} />,
                                                                     table: ({ node, ...props }) => (
                                                                         <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
@@ -430,23 +368,11 @@ const ChatInterface = ({ agentConfig }) => {
                                             {/* Render Generative UI form if triggered */}
                                             {msg.formType === 'lifestore' && <LifestoreForm />}
                                             {msg.formType === 'enterprise' && <EnterpriseForm />}
-
-                                            {/* Feedback buttons for bot messages (not for greeting/first message) */}
-                                            {msg.type === 'bot' && index > 0 && msg.text && !isLoading && (
-                                                <FeedbackButtons
-                                                    messageIndex={index}
-                                                    agentId={agentConfig.id}
-                                                    threadId={threadId}
-                                                    userId={user.username || "anonymous"}
-                                                    existingRating={feedbackMap[index] || null}
-                                                    onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
-                                                />
-                                            )}
                                         </div>
                                     </motion.div>
                                 )
                             ))}
-                            {isLoading && (
+                            {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
                                 <div className="flex justify-start">
                                     <div className="bg-gray-50/80 backdrop-blur-md border border-gray-100/60 rounded-2xl rounded-tl-md px-6 py-4 shadow-sm flex gap-1.5 items-center">
                                         <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce" />

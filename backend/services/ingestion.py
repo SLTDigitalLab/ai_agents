@@ -78,6 +78,8 @@ class IngestionService:
             collection_name=collection_name,
             embedding=self.embeddings,
         )
+        for doc in docs:
+            doc.metadata["link"] = url
         vector_store.add_documents(docs)
 
         return {
@@ -187,6 +189,7 @@ class IngestionService:
                         if chunks:
                             for doc in chunks:
                                 doc.metadata["source"] = file_name
+                                doc.metadata["link"] = item.get("webUrl", "#")
                                 doc.metadata["onedrive_id"] = item.get("id", "unknown")
                                 doc.metadata["source_folder"] = folder_id
 

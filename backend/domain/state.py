@@ -30,3 +30,7 @@ class AgentState(TypedDict):
 
     # Set by the Supervisor node to tell the router where to go next.
     next_node: str
+
+    # Detected sentiment from input guardrails (e.g. "frustrated", "neutral").
+    # Used by agent nodes to adapt response tone.
+    sentiment: str
