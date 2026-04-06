@@ -103,7 +103,23 @@ class IngestionService:
             strategy="hi_res",
             languages=["eng", "sin"]
         )
-        return loader.load()
+        docs = loader.load()
+
+        # Prepend parent section title into each chunk's content so that
+        # isolated sub-sections (e.g. "Loan Amount") carry context about
+        # which parent topic they belong to (e.g. "Distress Loan").
+        # This prevents the vector search from confusing similarly-named
+        # sub-sections across different parent topics.
+        for doc in docs:
+            parent_title = (
+                doc.metadata.get("parent_title")
+                or doc.metadata.get("section")
+                or ""
+            )
+            if parent_title and not doc.page_content.startswith(parent_title):
+                doc.page_content = f"[Section: {parent_title}]\n{doc.page_content}"
+
+        return docs
 
     async def process_onedrive_ingestion(self, folder_id: str, access_token: str, agent_name: str):
         """
