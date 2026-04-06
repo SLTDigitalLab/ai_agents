@@ -9,10 +9,11 @@ export default defineConfig({
     postcss: './postcss.config.js',
   },
   server: {
-    host: '0.0.0.0', // Crucial for Docker
-    port: 3000,      // Forces Vite to use 3000 instead of 5173
+    host: '0.0.0.0',
+    port: 3000,
+    allowedHosts: ['aiagents.sltdigitallab.lk'],
     watch: {
-      usePolling: true // Helps with file changes in Docker on Windows
+      usePolling: true
     }
   }
 })
