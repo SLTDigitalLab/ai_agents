@@ -7,6 +7,8 @@ import EnterpriseForm from './forms/EnterpriseForm';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
 // Generative UI trigger tokens emitted by the backend
 const FORM_TOKENS = {
     '[RENDER_LIFESTORE_FORM]': 'lifestore',
@@ -79,7 +81,7 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
         try {
             if (!finalRating) {
                 // Remove feedback from database
-                const res = await fetch('http://localhost:8000/api/v1/feedback', {
+                const res = await fetch(`${API_URL}/api/v1/feedback`, {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -96,7 +98,7 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                 }
             } else {
                 // Submit or update feedback
-                const res = await fetch('http://localhost:8000/api/v1/feedback', {
+                const res = await fetch(`${API_URL}/api/v1/feedback`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -195,7 +197,7 @@ const ChatInterface = ({ agentConfig }) => {
             if (isExistingSession) {
                 // Existing session -> Fetch History from backend
                 try {
-                    const response = await fetch(`http://localhost:8000/api/v1/chat/${agentConfig.id}/${currentThreadId}`);
+                    const response = await fetch(`${API_URL}/api/v1/chat/${agentConfig.id}/${currentThreadId}`);
                     if (!response.ok) throw new Error("Failed to fetch history");
 
                     const data = await response.json();
@@ -221,7 +223,7 @@ const ChatInterface = ({ agentConfig }) => {
 
                         // Load existing feedback for this thread
                         try {
-                            const fbRes = await fetch(`http://localhost:8000/api/v1/feedback/${agentConfig.id}/${currentThreadId}`);
+                            const fbRes = await fetch(`${API_URL}/api/v1/feedback/${agentConfig.id}/${currentThreadId}`);
                             if (fbRes.ok) {
                                 const fbData = await fbRes.json();
                                 const userId = user.username || "anonymous";
@@ -289,7 +291,7 @@ const ChatInterface = ({ agentConfig }) => {
 
         try {
             // 2. Send to Real FastAPI Backend with Streaming
-            const response = await fetch('http://localhost:8000/api/v1/chat', {
+            const response = await fetch(`${API_URL}/api/v1/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

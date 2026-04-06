@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { AGENTS } from '../../config/agents';
 import { motion } from 'framer-motion';
 
-const API_BASE = 'http://localhost:8000/api/v1/admin/dashboard';
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/admin/dashboard`;
 
 const AGENT_MAP = {};
 Object.values(AGENTS).forEach(cfg => {
