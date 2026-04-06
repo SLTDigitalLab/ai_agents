@@ -1,6 +1,11 @@
-from fastapi import APIRouter, UploadFile, File, Form, Body
+from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException
 from pydantic import BaseModel
+import requests
+import logging
 from services.ingestion import IngestionService
+from domain.tools.api_tools import LEAVE_BALANCE_API_URL
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 ingestion_service = IngestionService()
@@ -13,6 +18,9 @@ class OneDriveIngestRequest(BaseModel):
     folder_id: str
     token: str
     agent_name: str
+
+class TestLeaveBalanceRequest(BaseModel):
+    sid: str
 
 @router.post("/ingest-url")
 async def ingest_url(request: UrlIngestRequest):
@@ -32,4 +40,42 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
         access_token=request.token,
         agent_name=request.agent_name
     )
+
+@router.post("/test-leave-balance")
+async def test_leave_balance(request: TestLeaveBalanceRequest):
+    """
+    Test the external SLTMobitel ERP leave balance API directly.
+    """
+    sid = request.sid
+    if not sid:
+        raise HTTPException(status_code=400, detail="Service ID (sid) is required.")
+
+    try:
+        response = requests.post(
+            LEAVE_BALANCE_API_URL,
+            json={"sid": sid},
+            timeout=10,
+            headers={"Content-Type": "application/json"},
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Leave API returned status {response.status_code}")
+            return {
+                "status": "error",
+                "message": f"Leave API returned status {response.status_code}",
+                "detail": response.text
+            }
+
+        data = response.json()
+        return {
+            "status": "success",
+            "data": data
+        }
+
+    except requests.Timeout:
+        logger.error("Leave API request timed out")
+        raise HTTPException(status_code=504, detail="The leave balance request timed out.")
+    except Exception as exc:
+        logger.error(f"Error fetching leave balance: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 

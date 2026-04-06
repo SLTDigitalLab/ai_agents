@@ -30,7 +30,7 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # ── Graph nodes ──────────────────────────────────────────────────────────
-def call_model(state: AgentState) -> dict:
+async def call_model(state: AgentState) -> dict:
     """Invoke the LLM with a Generative-UI-aware system prompt."""
     agent_id = state["agent_id"]
 
@@ -64,8 +64,21 @@ RESPONSE FORMATTING RULES:
 5. MARKDOWN SPACING: Use a double newline (blank line) between the direct answer and the bulleted list to ensure proper rendering. Do NOT use non-standard bullet characters like `•`.
 6. NO CLOSING QUESTIONS: Do not end your response with phrases like "Is there anything else I can help you with?". Just stop once the answer is complete.
 
+CITATIONS:
+1. You may see `[Source: ... | Link: ...]` tags in the retrieved context. 
+2. You MUST IGNORE these tags.
+3. DO NOT include any "Sources:" section or links in your response.
+
 Example Purchase Response: "I can certainly help you order a Peo TV connection! Please fill out the secure request form below to get started. {form_token}"
 """
+
+    # ── Sentiment-aware tone adjustment ──────────────────────────────
+    sentiment = state.get("sentiment", "neutral")
+    if sentiment in ("frustrated", "angry"):
+        system_prompt += f"""
+
+TONE ADJUSTMENT:
+The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledge their frustration before answering. Use a warm, understanding tone."""
 
     # Trim to the last 5 messages + system prompt for the LLM window,
     # but the full history stays in state for the checkpointer to persist.
@@ -82,7 +95,7 @@ Example Purchase Response: "I can certainly help you order a Peo TV connection! 
     # Prepend the system prompt to the trimmed messages
     messages = [{"role": "system", "content": system_prompt}] + trimmed
 
-    response = llm_with_tools.invoke(messages)
+    response = await llm_with_tools.ainvoke(messages)
     return {"messages": [response]}
 
 
