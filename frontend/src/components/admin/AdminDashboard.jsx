@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AGENTS } from '../../config/agents';
 import { motion } from 'framer-motion';
 
-const API_BASE = 'http://localhost:8000/api/v1/admin/dashboard';
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/admin/dashboard`;
 
 // Map agent IDs to their display config
 const AGENT_MAP = {};

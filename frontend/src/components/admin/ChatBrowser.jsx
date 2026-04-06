@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-const API_BASE = 'http://localhost:8000/api/v1/admin/dashboard';
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/admin/dashboard`;
 
 // Build a flat list of agents from the config
 const AGENT_LIST = Object.entries(AGENTS).map(([key, cfg]) => ({
@@ -33,7 +33,7 @@ const SessionDetail = ({ session, agent, onClose }) => {
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     return res.json();
                 }),
-            fetch(`http://localhost:8000/api/v1/feedback/${agent}/${session.session_id}`)
+            fetch(`${API_BASE.replace('/admin/dashboard', '')}/feedback/${agent}/${session.session_id}`)
                 .then(res => res.ok ? res.json() : { feedback: {} })
                 .catch(() => ({ feedback: {} })),
         ])

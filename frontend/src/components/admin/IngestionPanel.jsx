@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { AGENTS } from '../../config/agents';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const API_BASE = 'http://localhost:8000/api/v1/admin';
+const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/admin`;
 
 const AGENT_LIST = Object.values(AGENTS).map(cfg => ({
     id: cfg.id,
