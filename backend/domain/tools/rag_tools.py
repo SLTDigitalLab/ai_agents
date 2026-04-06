@@ -49,7 +49,7 @@ async def search_knowledge_base(
         )
 
         # --- Async Similarity search (top 5 chunks) ----------------------------
-        results = await vector_store.asimilarity_search(query=query, k=5)
+        results = await vector_store.asimilarity_search(query=query, k=3)
 
         if not results:
             return "No relevant documents found."
