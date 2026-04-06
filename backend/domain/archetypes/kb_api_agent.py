@@ -11,7 +11,8 @@ Flow:
     START ──► agent (LLM supervisor) ──► tools_condition ──► tools ──► agent ──► END
 """
 
-from langchain_core.messages import trim_messages
+from langchain_core.messages import AIMessage, trim_messages
+from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -33,8 +34,12 @@ llm_with_tools = llm.bind_tools(tools)
 
 
 # ── Graph nodes ──────────────────────────────────────────────────────────
-def call_model(state: AgentState) -> dict:
+def call_model(state: AgentState, config: RunnableConfig) -> dict:
     """Invoke the LLM with a strict HR-scoped system prompt."""
+    cached = (config.get("configurable") or {}).get("cached_response")
+    if cached:
+        return {"messages": [AIMessage(content=cached)]}
+
     system_prompt = """You are the Ask HR AI assistant for SLTMobitel.
 Your primary purpose is to answer HR-related questions. At SLTMobitel, HR handles Leave Policies, Employee Benefits, and all Staff Loans (Distress, Motorcycle, Car, Education).
 

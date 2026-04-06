@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     QDRANT_URL: str
     POSTGRES_URL: str
 
+    # Optional: unset disables Redis response caching (local dev without Redis).
+    REDIS_URL: Optional[str] = None
+
     # Bitrix24 CRM
     BITRIX24_WEBHOOK_URL: str = ""
 

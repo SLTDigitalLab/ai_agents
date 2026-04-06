@@ -12,3 +12,5 @@ class ChatRequest(BaseModel):
     agent_id: str
     user_id: str
     thread_id: Optional[str] = "default_thread"
+    # Set false to force a fresh LLM path (e.g. debugging).
+    use_cache: bool = True

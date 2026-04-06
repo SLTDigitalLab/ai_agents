@@ -1,14 +1,14 @@
-version: '3.8'
+version: "3.8"
 
 services:
   db_postgres:
     image: ankane/pgvector:latest
     container_name: slt_postgres
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U slt -d slt_db" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U slt -d slt_db"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
     ports:
       - "5433:5432"
     environment:
@@ -28,6 +28,13 @@ services:
       - ./data/qdrant:/qdrant/storage
     restart: always
 
+  db_redis:
+    image: redis:7-alpine
+    container_name: slt_redis
+    ports:
+      - "6379:6379"
+    restart: always
+
   backend:
     build:
       context: ./backend
@@ -39,10 +46,13 @@ services:
         condition: service_healthy
       db_qdrant:
         condition: service_started
+      db_redis:
+        condition: service_started
     environment:
       PYTHONUNBUFFERED: 1
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
       QDRANT_URL: http://slt_qdrant:6333
+      REDIS_URL: redis://db_redis:6379/0
     env_file:
       - ./.env
     volumes:
