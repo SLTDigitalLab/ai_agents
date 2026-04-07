@@ -131,23 +131,9 @@ class IngestionService:
             max_characters=2500,
             combine_text_under_n_chars=500,
             strategy="hi_res",
-            languages=["eng", "sin"]
+            languages=["eng", "sin"],
         )
         docs = loader.load()
-
-        # Prepend parent section title into each chunk's content so that
-        # isolated sub-sections (e.g. "Loan Amount") carry context about
-        # which parent topic they belong to (e.g. "Distress Loan").
-        # This prevents the vector search from confusing similarly-named
-        # sub-sections across different parent topics.
-        for doc in docs:
-            parent_title = (
-                doc.metadata.get("parent_title")
-                or doc.metadata.get("section")
-                or ""
-            )
-            if parent_title and not doc.page_content.startswith(parent_title):
-                doc.page_content = f"[Section: {parent_title}]\n{doc.page_content}"
 
         # Re-split any chunks that are still too large after semantic
         # chunking.  Oversized chunks dilute embedding precision because
