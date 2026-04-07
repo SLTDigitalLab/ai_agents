@@ -51,7 +51,7 @@ services:
     environment:
       PYTHONUNBUFFERED: 1
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
-      QDRANT_URL: http://slt_qdrant:6333
+      QDRANT_URL: http://db_qdrant:6333
       REDIS_URL: redis://db_redis:6379/0
     env_file:
       - ./.env
