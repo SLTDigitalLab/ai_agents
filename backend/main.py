@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, documents
 from services.ingestion import router as ingestion_router
 
 app = FastAPI(title="Ask SLT API")
@@ -21,6 +21,7 @@ app.include_router(orders.router)  # LifeStore order submissions
 app.include_router(enterprise.router)  # Enterprise lead → Bitrix24
 app.include_router(admin_dashboard.router)  # Admin dashboard panel
 app.include_router(feedback.router)  # Feedback (thumbs up/down)
+app.include_router(documents.router)  # OneDrive document proxy
 app.include_router(ingestion_router)
 
 @app.get("/")

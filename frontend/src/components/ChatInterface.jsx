@@ -418,7 +418,10 @@ const ChatInterface = ({ agentConfig }) => {
                                                     
                                                     // Parse sources list: "[Name](URL), [Name](URL)"
                                                     const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
-                                                    const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
+                                                    const sources = Array.from(sourceMatches).map(m => ({
+                                                        name: m[1],
+                                                        url: m[2].startsWith('/api/') ? `${API_URL}${m[2]}` : m[2],
+                                                    }));
 
                                                     return (
                                                         <>

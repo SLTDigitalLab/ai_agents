@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     QDRANT_URL: str
     POSTGRES_URL: str
 
+    # Microsoft Azure AD (used for OneDrive document proxy)
+    MS_CLIENT_ID: Optional[str] = None
+    MS_CLIENT_SECRET: Optional[str] = None
+    MS_TENANT_ID: Optional[str] = None
+
     # Bitrix24 CRM
     BITRIX24_WEBHOOK_URL: str = ""
 

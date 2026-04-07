@@ -121,10 +121,24 @@ class IngestionService:
         session.mount('https://', HTTPAdapter(max_retries=retries))
         session.mount('http://', HTTPAdapter(max_retries=retries))
 
-        # 1. List files in the folder
+        # 1. Get the drive ID so we can address files later with app credentials
         headers = {"Authorization": f"Bearer {access_token}"}
+        try:
+            drive_resp = session.get(
+                "https://graph.microsoft.com/v1.0/me/drive",
+                headers=headers, timeout=30,
+            )
+            if drive_resp.status_code == 200:
+                drive_id = drive_resp.json().get("id", "")
+            else:
+                drive_id = ""
+                log.warning(f"Could not fetch drive ID: {drive_resp.status_code}")
+        except Exception:
+            drive_id = ""
+
+        # 2. List files in the folder
         url = f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
-        
+
         try:
             resp = session.get(url, headers=headers, timeout=30)
             if resp.status_code != 200:
@@ -189,9 +203,13 @@ class IngestionService:
                         if chunks:
                             for doc in chunks:
                                 doc.metadata["source"] = file_name
-                                doc.metadata["link"] = item.get("webUrl", "#")
                                 doc.metadata["onedrive_id"] = item.get("id", "unknown")
+                                doc.metadata["drive_id"] = drive_id
                                 doc.metadata["source_folder"] = folder_id
+                                doc.metadata["link"] = (
+                                    f"/api/v1/documents/view?drive_id={drive_id}&item_id={item.get('id', '')}"
+                                    if drive_id else item.get("webUrl", "#")
+                                )
 
                             vector_store.add_documents(chunks)
                             total_chunks += len(chunks)
