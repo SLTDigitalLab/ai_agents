@@ -10,16 +10,14 @@ the top-k document chunks as a single concatenated context string.
 from typing import Annotated
 
 from langchain_core.tools import tool
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langgraph.prebuilt import InjectedState
 from qdrant_client import QdrantClient
 
 from core.config import settings
-
-
+from core.llm import get_embedding_model
 @tool
-def search_knowledge_base(
+async def search_knowledge_base(
     query: str,
     agent_id: Annotated[str, InjectedState("agent_id")],
 ) -> str:
@@ -35,13 +33,12 @@ def search_knowledge_base(
         or an informational message when no documents are found.
     """
     try:
-        # --- Embeddings (Gemini embedding-001, 3072 dimensions) -----------
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001",
-            google_api_key=settings.GOOGLE_API_KEY,
-        )
+        # --- Embeddings ---------------------------------------------------
+        embeddings = get_embedding_model()
 
         # --- Qdrant client & collection ----------------------------------
+        # We use the sync client here because LangChain QdrantVectorStore handles it,
+        # but we call the async similarity search method.
         client = QdrantClient(url=settings.QDRANT_URL)
         collection_name = f"{agent_id}_docs"
 
@@ -51,25 +48,22 @@ def search_knowledge_base(
             embedding=embeddings,
         )
 
-        # --- Similarity search (top 5 chunks) ----------------------------
-        results = vector_store.similarity_search(query=query, k=5)
+        # --- Async Similarity search (top 5 chunks) ----------------------------
+        results = await vector_store.asimilarity_search(query=query, k=5)
 
         if not results:
             return "No relevant documents found."
 
-        # Concatenate page contents separated by double newlines
-        context = "\n\n".join(doc.page_content for doc in results)
-        
-        # --- DEBUG LOGGER ADDED HERE ---
-        # This will print the raw text Qdrant found into your Docker terminal
-        print("\n" + "="*40)
-        print(f"DEBUG: RAW CONTEXT FOR '{query}'")
-        print("="*40)
-        print(context)
-        print("="*40 + "\n")
+        # Include source metadata in the context
+        context_parts = []
+        for doc in results:
+            source = doc.metadata.get("source", "Unknown Source")
+            link = doc.metadata.get("link", "#")
+            context_parts.append(f"[Source: {source} | Link: {link}]\n{doc.page_content}")
 
-        return context
+        return "\n\n---\n\n".join(context_parts)
 
-    except Exception:
+    except Exception as e:
         # Collection may not exist yet, or Qdrant may be unreachable
+        print(f"DEBUG: Qdrant Search Error: {e}")
         return "No relevant documents found."

@@ -1,4 +1,4 @@
-version: "3.8"
+version: '3.8'
 
 services:
   db_postgres:
@@ -9,30 +9,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    ports:
-      - "5433:5432"
+    # No host ports — only reachable within the Docker network
+    expose:
+      - "5432"
     environment:
       POSTGRES_USER: slt
       POSTGRES_PASSWORD: slt123
       POSTGRES_DB: slt_db
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data
     restart: always
 
   db_qdrant:
     image: qdrant/qdrant:latest
     container_name: slt_qdrant
-    ports:
-      - "6333:6333"
+    # No host ports — only reachable within the Docker network
+    expose:
+      - "6333"
     volumes:
-      - ./data/qdrant:/qdrant/storage
-    restart: always
-
-  db_redis:
-    image: redis:7-alpine
-    container_name: slt_redis
-    ports:
-      - "6379:6379"
+      - qdrantdata:/qdrant/storage
     restart: always
 
   backend:
@@ -40,19 +35,16 @@ services:
       context: ./backend
     container_name: slt_backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8100:8000"   # Only bind to localhost — Nginx will proxy
     depends_on:
       db_postgres:
         condition: service_healthy
       db_qdrant:
         condition: service_started
-      db_redis:
-        condition: service_started
     environment:
       PYTHONUNBUFFERED: 1
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
-      QDRANT_URL: http://slt_qdrant:6333
-      REDIS_URL: redis://db_redis:6379/0
+      QDRANT_URL: http://db_qdrant:6333
     env_file:
       - ./.env
     volumes:
@@ -64,7 +56,7 @@ services:
       context: ./frontend
     container_name: slt_frontend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3100:3000"   # Only bind to localhost — Nginx will proxy
     depends_on:
       - backend
     env_file:
@@ -73,3 +65,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     restart: always
+
+volumes:
+  pgdata:
+  qdrantdata:

@@ -76,20 +76,50 @@ body {
     left: 100%;
 }
 
-/* Custom scrollbar for chat */
+/* Custom premium scrollbar for light chat */
 .chat-scrollbar::-webkit-scrollbar {
     width: 6px;
 }
 
 .chat-scrollbar::-webkit-scrollbar-track {
     background: transparent;
+    margin: 4px 0; /* Slightly reduced margin to leave room for the arrows */
+}
+
+/* Scrollbar directional arrows */
+.chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:decrement {
+    height: 12px;
+    background: transparent url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(0,0,0,0.2)'><path d='M4 1 L1 7 L7 7 Z'/></svg>") center center no-repeat;
+}
+
+.chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:increment {
+    height: 12px;
+    background: transparent url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(0,0,0,0.2)'><path d='M4 7 L1 1 L7 1 Z'/></svg>") center center no-repeat;
+}
+
+/* Hover states */
+.chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:decrement:hover {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(0,0,0,0.4)'><path d='M4 1 L1 7 L7 7 Z'/></svg>");
+}
+
+.chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:increment:hover {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(0,0,0,0.4)'><path d='M4 7 L1 1 L7 1 Z'/></svg>");
+}
+
+/* Disabled states (e.g. arrow disappears at absolute top or absolute bottom) */
+.chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:decrement:disabled {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(0,0,0,0.06)'><path d='M4 1 L1 7 L7 7 Z'/></svg>");
+}
+
+.chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:increment:disabled {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(0,0,0,0.06)'><path d='M4 7 L1 1 L7 1 Z'/></svg>");
 }
 
 .chat-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.15); /* Soft premium gray */
+    border-radius: 10px;
 }
 
 .chat-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.25); /* Darker on hover */
 }

@@ -5,6 +5,11 @@ import { PublicClientApplication, InteractionStatus } from "@azure/msal-browser"
 import { msalConfig, loginRequest } from './authConfig';
 import { AGENTS } from './config/agents';
 import ChatInterface from './components/ChatInterface';
+import ChatBrowser from './components/admin/ChatBrowser';
+import AdminDashboard from './components/admin/AdminDashboard';
+import IngestionPanel from './components/admin/IngestionPanel';
+import FeedbackPanel from './components/admin/FeedbackPanel';
+import AdminRoute from './components/admin/AdminRoute';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 
@@ -92,13 +97,28 @@ const AgentWrapper = () => {
   };
 
   return (
-    <div className={`h-screen flex flex-col bg-gradient-to-br ${agentConfig.color} breathing-bg relative overflow-hidden`}>
+    <div className="h-screen flex flex-col bg-[#0b0c14] relative overflow-hidden">
 
-      {/* ── Ambient floating orbs ────────────────────────── */}
+      {/* ── Premium static background mesh ────────────────────────── */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
-        <div className="absolute top-[-10%] left-[-5%] w-[500px] h-[500px] rounded-full bg-white/[0.03] blur-3xl animate-float-slow" />
-        <div className="absolute bottom-[-15%] right-[-10%] w-[600px] h-[600px] rounded-full bg-white/[0.04] blur-3xl animate-float-slower" />
-        <div className="absolute top-[30%] right-[15%] w-[300px] h-[300px] rounded-full bg-cyan-400/[0.03] blur-3xl animate-pulse-glow" />
+
+        {/* Massive Ambient Center Wash (Fills the middle black gap seamlessly) */}
+        <div
+          className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[140vw] h-[140vh] rounded-[100%] bg-gradient-to-b ${agentConfig.color} opacity-50 blur-[150px] mix-blend-normal`}
+        />
+
+        {/* Vibrant Top-Left Orb */}
+        <div
+          className={`absolute -top-[10%] -left-[10%] w-[65vw] h-[65vw] rounded-full bg-gradient-to-br ${agentConfig.color} opacity-90 blur-[120px] mix-blend-normal`}
+        />
+
+        {/* Deep Bottom-Right Orb */}
+        <div
+          className={`absolute -bottom-[10%] -right-[10%] w-[55vw] h-[55vw] rounded-full bg-gradient-to-tl ${agentConfig.color} opacity-70 blur-[120px] mix-blend-normal`}
+        />
+
+        {/* Enhanced Anti-Banding Noise Texture (Dithering) */}
+        <div className="absolute inset-0 z-0 opacity-[0.05] pointer-events-none mix-blend-overlay" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }}></div>
       </div>
 
       {/* ── Floating Frosted-Glass Navbar ────────────────── */}
@@ -106,9 +126,12 @@ const AgentWrapper = () => {
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        className="glass-nav mx-4 sm:mx-8 mt-4 px-6 sm:px-8 py-3 flex justify-between items-center z-20 rounded-2xl"
+        className="glass-nav relative mx-4 sm:mx-8 mt-4 px-6 sm:px-8 py-3 flex justify-between items-center z-20 rounded-2xl border border-white/10 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.3)]"
       >
-        <div className="flex items-center gap-2">
+        {/* Subtle Liquid Glass Neon Underglow */}
+        <div className={`absolute inset-0 rounded-2xl bg-gradient-to-r ${agentConfig.color} opacity-20 blur-lg -z-10 transition-colors duration-700 pointer-events-none`} />
+
+        <div className="flex items-center gap-2 relative z-10">
           <img src={sltLogo} alt="SLTMobitel" className="h-8 sm:h-10 w-auto" />
         </div>
 
@@ -178,35 +201,53 @@ const AgentWrapper = () => {
               {agentConfig.subtitle}
             </motion.p>
 
-            {/* Glassmorphism Login Card */}
+            {/* ── LIQUID GLASS LOGIN CARD ── */}
             <motion.div
               variants={cardVariants}
-              className="glass-card-bright w-full max-w-lg rounded-3xl p-8 sm:p-10 flex flex-col items-center justify-center"
+              className="relative w-full max-w-lg mt-4"
             >
-              <div className="w-14 h-14 rounded-2xl bg-white/[0.06] border border-white/10 flex items-center justify-center mb-5">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.2} stroke="currentColor" className="w-7 h-7 text-cyan-400">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                </svg>
+              {/* Surrounding Neon Aura (Liquid Glass ambient spread behind the frosted glass) */}
+              <div className={`absolute -inset-1 blur-2xl opacity-40 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 transition-colors duration-700`} />
+
+              {/* Main Thick Glass Body */}
+              <div className="relative glass-card-bright w-full rounded-[2rem] p-8 sm:p-10 flex flex-col items-center justify-center border border-white/20 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.3)] overflow-hidden">
+
+                {/* Internal Diagonal Glare (Simulates thick polished glass Edge) */}
+                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+
+                <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center mb-6 shadow-inner relative overflow-hidden group">
+                  <div className={`absolute inset-0 bg-gradient-to-b ${agentConfig.color} opacity-20 group-hover:opacity-40 transition-opacity`} />
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-white relative z-10 drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                  </svg>
+                </div>
+
+                <p className="text-white/70 text-[0.8rem] font-bold mb-2 tracking-[0.2em] uppercase">
+                  Secure Identity
+                </p>
+                <p className="text-white/40 text-sm mb-9 text-center font-light">
+                  Authenticate securely through your corporate Microsoft tunnel
+                </p>
+
+                {/* LIQUID GLASS MICROSOFT BUTTON */}
+                <motion.button
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={handleLogin}
+                  className="group relative flex items-center justify-center w-full px-8 py-4 rounded-full transition-all duration-300"
+                >
+                  {/* Neon Glow Layer that brightens aggressively on hover */}
+                  <div className={`absolute inset-0 rounded-full bg-gradient-to-r ${agentConfig.color} blur-xl opacity-40 group-hover:opacity-100 transition-opacity duration-500`} />
+
+                  {/* The actual polished dark glass button surface */}
+                  <div className="absolute inset-0 rounded-full bg-[#0b0c14]/30 backdrop-blur-xl border border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] group-hover:bg-white/[0.08] transition-all duration-300" />
+
+                  <span className="relative z-10 flex items-center gap-3 font-semibold text-white tracking-wide">
+                    <MicrosoftIcon />
+                    Login with Microsoft
+                  </span>
+                </motion.button>
               </div>
-
-              <p className="text-white/50 text-sm font-medium mb-1 tracking-wide uppercase">
-                Secure Access
-              </p>
-              <p className="text-white/30 text-sm mb-7 text-center">
-                Authenticate with your Microsoft account to continue
-              </p>
-
-              <motion.button
-                whileHover={{ scale: 1.04 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handleLogin}
-                className={`glow-sweep-btn group relative flex items-center gap-3 px-7 py-3.5 rounded-xl text-white font-semibold text-base shadow-lg bg-gradient-to-r ${agentConfig.color} hover:shadow-2xl transition-all duration-300 border border-white/10`}
-              >
-                <span className="relative z-10 flex items-center gap-3">
-                  <MicrosoftIcon />
-                  Login with Microsoft
-                </span>
-              </motion.button>
             </motion.div>
           </motion.div>
         </UnauthenticatedTemplate>
@@ -225,16 +266,6 @@ const AgentWrapper = () => {
           </motion.div>
         </AuthenticatedTemplate>
       </AnimatePresence>
-
-      {/* ── Footer ──────────────────────────────────────── */}
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 1.2, duration: 0.8 }}
-        className="fixed bottom-0 left-0 right-0 text-center py-3 text-white/30 text-xs font-medium tracking-widest uppercase z-10 pointer-events-none"
-      >
-        Powered by The Embryo Innovation Centre
-      </motion.div>
     </div>
   );
 };
@@ -311,6 +342,12 @@ function App() {
             </div>
           } />
 
+          <Route element={<AdminRoute />}>
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/chats" element={<ChatBrowser />} />
+            <Route path="/admin/ingestion" element={<IngestionPanel />} />
+            <Route path="/admin/feedback" element={<FeedbackPanel />} />
+          </Route>
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
       </BrowserRouter>

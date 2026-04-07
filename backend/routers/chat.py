@@ -1,17 +1,17 @@
 """
-Chat router - connects the React frontend to the LangGraph agent system.
+Chat router - connects the React frontend to the LangGraph agent system with streaming support.
+Includes input guardrails (LLM-based intent + sentiment classification) run before the agent.
 
-POST /api/v1/chat  →  Compiles the agent graph on-the-fly with a per-request
-database connection to ensure clean resource cleanup.
-
-Redis may short-circuit the LLM while still running the graph so Postgres
-checkpoints stay consistent with the conversation.
+POST /api/v1/chat compiles the agent graph per request with an async Postgres checkpointer.
+Redis may short-circuit the LLM while still running the graph so checkpoints stay consistent.
 """
 
 import logging
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tracers.context import tracing_v2_enabled
 
 from core.cache_keys import (
@@ -19,8 +19,9 @@ from core.cache_keys import (
     should_skip_cache_for_message,
     should_use_cache_for_agent,
 )
-from core.checkpointer import get_postgres_checkpointer
+from core.checkpointer import get_async_postgres_checkpointer, get_postgres_checkpointer
 from core.redis_client import get_redis_client
+from domain.guardrails import classify_intent
 from domain.registry import get_agent_builder
 from schemas.chat import ChatRequest
 
@@ -30,6 +31,8 @@ router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 
 CACHE_TTL_SECONDS = 86400
 MIN_CACHEABLE_RESPONSE_LEN = 12
+
+BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
 
 
 def _normalize_final_message(final_message: Any) -> str:
@@ -59,49 +62,54 @@ def _conversation_has_prior_turns(snapshot_values: dict | None) -> bool:
     return len(msgs) > 0
 
 
-@router.post("")  # Mounts at /api/v1/chat (no trailing slash)
+def _last_ai_text_from_messages(msgs: list) -> str | None:
+    for msg in reversed(msgs):
+        if getattr(msg, "type", None) == "ai":
+            return _normalize_final_message(msg.content)
+    return None
+
+
+@router.post("")
 async def chat(request: ChatRequest):
-    """Handle an incoming chat message from the frontend."""
+    """Handle an incoming chat message from the frontend with streaming."""
     try:
-        print(f"DEBUG: Received agent_id: {request.agent_id}")
         builder_fn = get_agent_builder(request.agent_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
-    workflow = builder_fn()
-    config = _build_invoke_config(request.thread_id)
+    async def event_generator() -> AsyncGenerator[str, None]:
+        try:
+            base_config = _build_invoke_config(request.thread_id)
 
-    redis_client = get_redis_client()
-    cache_key: str | None = None
-    cache_allowed = (
-        request.use_cache
-        and redis_client is not None
-        and should_use_cache_for_agent(request.agent_id)
-        and not should_skip_cache_for_message(request.message)
-    )
+            guardrail = await classify_intent(request.message)
 
-    try:
-        with get_postgres_checkpointer(request.agent_id) as checkpointer:
-            graph = workflow.compile(checkpointer=checkpointer)
-
-            snapshot = graph.get_state(config)
-            prior = _conversation_has_prior_turns(snapshot.values)
-            if prior:
-                cache_allowed = False
-
-            cached_text: str | None = None
-            if cache_allowed:
-                cache_key = build_cache_key(request.agent_id, request.message)
+            if guardrail.action == "BLOCK":
+                logger.info("Guardrail BLOCK | reason=%s", guardrail.reason)
                 try:
-                    cached_text = redis_client.get(cache_key)
-                except Exception as exc:
-                    logger.warning("Redis GET failed; continuing without cache: %s", exc)
-                    cached_text = None
+                    async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
+                        workflow = builder_fn()
+                        graph = workflow.compile(checkpointer=checkpointer)
+                        blocked_state = {
+                            "messages": [
+                                HumanMessage(content=request.message),
+                                AIMessage(content=BLOCK_MESSAGE),
+                            ],
+                            "agent_id": request.agent_id,
+                            "user_id": request.user_id,
+                            "form_slots": {},
+                            "next_node": "",
+                            "sentiment": guardrail.sentiment,
+                        }
+                        await graph.aupdate_state(base_config, blocked_state)
+                except Exception as e:
+                    logger.warning("Failed to save blocked exchange: %s", e)
+                yield BLOCK_MESSAGE
+                return
 
-            invoke_config = (
-                _build_invoke_config(request.thread_id, cached_text)
-                if cached_text
-                else config
+            logger.info(
+                "Guardrail PASS | sentiment=%s | reason=%s",
+                guardrail.sentiment,
+                guardrail.reason,
             )
 
             state = {
@@ -110,41 +118,96 @@ async def chat(request: ChatRequest):
                 "user_id": request.user_id,
                 "form_slots": {},
                 "next_node": "",
+                "sentiment": guardrail.sentiment,
             }
 
-            project_name = f"Ask SLT - {request.agent_id.upper()}"
-            with tracing_v2_enabled(project_name=project_name):
-                result = graph.invoke(state, config=invoke_config)
-
-            final_message = result["messages"][-1].content
-            final_text = _normalize_final_message(final_message)
-
-            response_cached = bool(cached_text)
-            if (
-                cache_allowed
-                and cache_key
+            redis_client = get_redis_client()
+            cache_key: str | None = None
+            cache_allowed = (
+                request.use_cache
                 and redis_client is not None
-                and not response_cached
-                and len(final_text.strip()) >= MIN_CACHEABLE_RESPONSE_LEN
-            ):
-                try:
-                    redis_client.setex(cache_key, CACHE_TTL_SECONDS, final_text)
-                except Exception as exc:
-                    logger.warning("Redis SET failed: %s", exc)
+                and should_use_cache_for_agent(request.agent_id)
+                and not should_skip_cache_for_message(request.message)
+            )
 
-            return {
-                "response": final_text,
-                "cached": response_cached,
-            }
+            async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
+                workflow = builder_fn()
+                graph = workflow.compile(checkpointer=checkpointer)
 
-    except Exception as exc:
-        import traceback
+                snapshot = await graph.aget_state(base_config)
+                if _conversation_has_prior_turns(snapshot.values):
+                    cache_allowed = False
 
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Agent execution failed: {exc}",
-        )
+                cached_text: str | None = None
+                if cache_allowed:
+                    cache_key = build_cache_key(request.agent_id, request.message)
+                    try:
+                        cached_text = redis_client.get(cache_key)
+                    except Exception as exc:
+                        logger.warning(
+                            "Redis GET failed; continuing without cache: %s", exc
+                        )
+                        cached_text = None
+
+                invoke_config = (
+                    _build_invoke_config(request.thread_id, cached_text)
+                    if cached_text
+                    else base_config
+                )
+
+                project_name = f"Ask SLT - {request.agent_id.upper()}"
+                with tracing_v2_enabled(project_name=project_name):
+                    if cached_text:
+                        result = await graph.ainvoke(state, config=invoke_config)
+                        final_message = result["messages"][-1].content
+                        yield _normalize_final_message(final_message)
+                    else:
+                        async for event in graph.astream_events(
+                            state, invoke_config, version="v2"
+                        ):
+                            kind = event["event"]
+                            if kind == "on_chat_model_stream":
+                                content = event["data"]["chunk"].content
+                                if content:
+                                    if isinstance(content, list):
+                                        for block in content:
+                                            if isinstance(block, dict) and "text" in block:
+                                                yield block["text"]
+                                            elif isinstance(block, str):
+                                                yield block
+                                    else:
+                                        yield str(content)
+
+                        if (
+                            cache_allowed
+                            and cache_key
+                            and redis_client is not None
+                        ):
+                            snap = await graph.aget_state(base_config)
+                            vals = snap.values or {}
+                            final_text = _last_ai_text_from_messages(
+                                vals.get("messages") or []
+                            )
+                            if (
+                                final_text
+                                and len(final_text.strip())
+                                >= MIN_CACHEABLE_RESPONSE_LEN
+                            ):
+                                try:
+                                    redis_client.setex(
+                                        cache_key, CACHE_TTL_SECONDS, final_text
+                                    )
+                                except Exception as exc:
+                                    logger.warning("Redis SET failed: %s", exc)
+
+        except Exception as exc:
+            import traceback
+
+            error_details = traceback.format_exc()
+            logger.error("Streaming error: %s\n%s", exc, error_details)
+            yield f"\n\n[ERROR]: {str(exc)}"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/{agent_id}/{thread_id}")
@@ -161,18 +224,13 @@ async def get_history(agent_id: str, thread_id: str):
     try:
         with get_postgres_checkpointer(agent_id) as checkpointer:
             graph = workflow.compile(checkpointer=checkpointer)
-
-            # Get the current state snapshot from the database
             snapshot = graph.get_state(config)
 
             if not snapshot.values:
                 return {"messages": []}
 
-            # return a simplified list of messages
-            # snapshot.values['messages'] is a list of LangChain objects
             messages = []
             for msg in snapshot.values.get("messages", []):
-                # Only expose Human and AI messages to the frontend
                 if msg.type not in ("human", "ai"):
                     continue
 
@@ -184,11 +242,10 @@ async def get_history(agent_id: str, thread_id: str):
                             text_parts.append(block)
                         elif isinstance(block, dict) and "text" in block:
                             text_parts.append(block["text"])
-                    content = " ".join(text_parts).strip()
+                    content = "".join(text_parts).strip()
                 elif not isinstance(content, str):
                     content = str(content).strip()
 
-                # Skip empty messages (e.g., AI messages that only performed a tool call but had no text)
                 if content:
                     messages.append(
                         {
@@ -200,4 +257,5 @@ async def get_history(agent_id: str, thread_id: str):
             return {"messages": messages}
 
     except Exception as exc:
+        logger.error("Error fetching history: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
