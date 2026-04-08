@@ -18,6 +18,7 @@ class OneDriveIngestRequest(BaseModel):
     folder_id: str
     token: str
     agent_name: str
+    force: bool = False
 
 class TestLeaveBalanceRequest(BaseModel):
     sid: str
@@ -38,7 +39,8 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
     return await ingestion_service.process_onedrive_ingestion(
         folder_id=request.folder_id,
         access_token=request.token,
-        agent_name=request.agent_name
+        agent_name=request.agent_name,
+        force=request.force,
     )
 
 @router.post("/test-leave-balance")
