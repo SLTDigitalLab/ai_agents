@@ -25,3 +25,4 @@ unstructured[pdf,docx,pptx,xlsx]==0.21.2
 fastapi-mail==1.6.2
 httpx==0.28.1
 pytesseract==0.3.13
+flashrank==0.2.9
