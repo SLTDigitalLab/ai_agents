@@ -2,7 +2,6 @@
 Input Guardrails — Model-based intent classification + sentiment detection.
 
 Uses a cheap/fast LLM (gpt-4.1-nano) to classify user intent and sentiment.
-Runs in parallel with the main agent to add ~0ms perceived latency.
 """
 
 import logging

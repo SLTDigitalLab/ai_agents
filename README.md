@@ -18,7 +18,7 @@ The project is a full-stack application orchestrated with Docker Compose.
 ```
 User Message (React)
   -> POST /api/v1/chat (FastAPI)
-  -> Guardrail classification (parallel, gpt-4.1-nano)
+  -> Guardrail classification (sequential, gpt-4.1-nano)
   -> LangGraph agent graph (archetype-specific)
   -> Tools: Qdrant RAG / SQL API / Form state
   -> StreamingResponse (token-by-token)
@@ -47,7 +47,7 @@ User Message (React)
 - **Multi-Agent Architecture** - 6 dedicated agents with domain-specific knowledge bases and tools
 - **Streaming Responses** - Token-by-token streaming from LangGraph to the frontend
 - **RAG Pipeline** - Document ingestion (PDF, DOCX, PPTX, XLSX, URLs, OneDrive) into per-agent Qdrant collections
-- **Guardrails** - Parallel intent/sentiment classification using a lightweight model to filter off-topic or sensitive queries
+- **Guardrails** - Sequential intent/sentiment classification using a lightweight model to filter off-topic or sensitive queries
 - **Generative UI Forms** - Enterprise and Lifestore agents emit tokens that render interactive forms in the frontend
 - **Feedback System** - Thumbs-up/down ratings on bot responses, stored in PostgreSQL
 - **Admin Dashboard** - Session analytics, conversation browser, feedback panel, and document ingestion UI
@@ -65,13 +65,17 @@ User Message (React)
 | `/api/v1/chat` | POST | Send a message to an agent (streaming response) |
 | `/api/v1/chat/{agent_id}/{thread_id}` | GET | Retrieve chat history for a thread |
 | `/api/v1/feedback` | POST | Submit or toggle feedback rating |
-| `/api/v1/feedback/{agent}/{thread}` | GET | Get feedback for a conversation |
+| `/api/v1/feedback` | DELETE | Remove a feedback rating |
+| `/api/v1/feedback/{agent_id}/{thread_id}` | GET | Get feedback for a conversation |
 | `/api/v1/admin/dashboard/stats` | GET | Session statistics |
 | `/api/v1/admin/dashboard/sessions` | GET | Paginated session list with search |
+| `/api/v1/admin/dashboard/sessions/{agent}/{session_id}` | GET | Conversation detail for a session |
 | `/api/v1/admin/dashboard/feedback` | GET | Feedback analytics |
 | `/api/v1/admin/ingest-url` | POST | Ingest a website URL into an agent's knowledge base |
 | `/api/v1/admin/ingest-onedrive` | POST | Ingest files from a OneDrive folder |
+| `/api/v1/admin/test-leave-balance` | POST | Test the HR leave balance API |
 | `/api/v1/enterprise/lead` | POST | Submit an enterprise lead to Bitrix24 CRM |
+| `/api/v1/enterprise/test-webhook` | POST | Test the Bitrix24 webhook connection |
 | `/api/v1/orders/submit` | POST | Submit a Lifestore order (sends email) |
 
 ---
@@ -111,7 +115,7 @@ GUARDRAIL_PROVIDER=openai
 GUARDRAIL_MODEL=gpt-4.1-nano
 
 # Databases
-POSTGRES_URL=postgresql://postgres:postgres@db_postgres:5432/askslt
+POSTGRES_URL=postgresql://slt:slt123@db_postgres:5432/slt_db
 QDRANT_URL=http://db_qdrant:6333
 
 # Frontend

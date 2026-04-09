@@ -14,7 +14,8 @@ import psycopg
 from psycopg.rows import dict_row
 
 from core.config import settings
-from domain.registry import AGENT_BUILDERS
+from core.checkpointer import get_postgres_checkpointer
+from domain.registry import AGENT_BUILDERS, get_agent_builder
 from schemas.feedback import FeedbackRequest, FeedbackResponse
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,46 @@ def _ensure_feedback_table():
         logger.warning(f"Feedback table creation check failed: {e}")
 
 
+def _load_session_messages(agent_id: str, thread_id: str) -> list:
+    """Load conversation messages for a session from LangGraph checkpoints.
+
+    Returns a list of {"type": "human"|"ai", "content": str} dicts.
+    """
+    try:
+        builder_fn = get_agent_builder(agent_id)
+        workflow = builder_fn()
+        config = {"configurable": {"thread_id": thread_id}}
+
+        with get_postgres_checkpointer(agent_id) as checkpointer:
+            graph = workflow.compile(checkpointer=checkpointer)
+            snapshot = graph.get_state(config)
+
+            if not snapshot.values:
+                return []
+
+            messages = []
+            for msg in snapshot.values.get("messages", []):
+                if msg.type not in ("human", "ai"):
+                    continue
+                content = msg.content
+                if isinstance(content, list):
+                    parts = []
+                    for block in content:
+                        if isinstance(block, str):
+                            parts.append(block)
+                        elif isinstance(block, dict) and "text" in block:
+                            parts.append(block["text"])
+                    content = " ".join(parts).strip()
+                elif not isinstance(content, str):
+                    content = str(content).strip()
+                if content:
+                    messages.append({"type": msg.type, "content": content})
+            return messages
+    except Exception as e:
+        logger.warning(f"Failed to load session {agent_id}/{thread_id}: {e}")
+        return []
+
+
 # ── Submit / Toggle Feedback ──────────────────────────────────────────────
 
 @router.post("/api/v1/feedback", response_model=FeedbackResponse)
@@ -90,6 +131,39 @@ async def submit_feedback(req: FeedbackRequest):
 
     except Exception as exc:
         logger.error(f"Failed to submit feedback: {exc}")
+        raise HTTPException(status_code=500, detail=f"Database error: {exc}")
+
+
+# ── Delete Feedback ───────────────────────────────────────────────────────
+
+@router.delete("/api/v1/feedback")
+async def delete_feedback(req: FeedbackRequest):
+    """Delete a user's feedback for a specific AI message."""
+    if req.agent_id not in VALID_AGENTS:
+        raise HTTPException(status_code=404, detail=f"Unknown agent '{req.agent_id}'")
+
+    _ensure_feedback_table()
+
+    try:
+        with psycopg.connect(settings.POSTGRES_URL, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM public.feedback
+                    WHERE agent_id = %(agent_id)s
+                      AND thread_id = %(thread_id)s
+                      AND message_index = %(message_index)s
+                      AND user_id = %(user_id)s
+                """, {
+                    "agent_id": req.agent_id,
+                    "thread_id": req.thread_id,
+                    "message_index": req.message_index,
+                    "user_id": req.user_id,
+                })
+
+        return {"status": "deleted"}
+
+    except Exception as exc:
+        logger.error(f"Failed to delete feedback: {exc}")
         raise HTTPException(status_code=500, detail=f"Database error: {exc}")
 
 
@@ -187,6 +261,37 @@ async def get_feedback_stats(
                 # Convert datetime to string for JSON serialization
                 for entry in recent:
                     entry["created_at"] = entry["created_at"].isoformat()
+
+        # Enrich recent entries with the actual message content
+        # Group by (agent_id, thread_id) to avoid redundant loads
+        session_cache = {}  # (agent_id, thread_id) → [messages]
+        for entry in recent:
+            key = (entry["agent_id"], entry["thread_id"])
+            if key not in session_cache:
+                session_cache[key] = _load_session_messages(entry["agent_id"], entry["thread_id"])
+            messages = session_cache[key]
+            idx = entry["message_index"]
+
+            # The frontend includes a greeting message at index 0 that isn't
+            # stored in LangGraph, so the stored message_index is offset by 1.
+            # Try idx-1 first (greeting offset), then idx as fallback.
+            resolved_idx = None
+            for candidate in (idx - 1, idx):
+                if messages and 0 <= candidate < len(messages) and messages[candidate]["type"] == "ai":
+                    resolved_idx = candidate
+                    break
+
+            if resolved_idx is not None:
+                entry["message_content"] = messages[resolved_idx]["content"]
+                # Walk backward to find the preceding human message (user question)
+                entry["user_question"] = None
+                for j in range(resolved_idx - 1, -1, -1):
+                    if messages[j]["type"] == "human":
+                        entry["user_question"] = messages[j]["content"]
+                        break
+            else:
+                entry["message_content"] = None
+                entry["user_question"] = None
 
         return {
             "total_feedback": totals["total_feedback"],
