@@ -18,15 +18,13 @@ from core.config import settings
 router = APIRouter(prefix="/api/v1/documents", tags=["Documents"])
 logger = logging.getLogger(__name__)
 
-# Microsoft OAuth2 token endpoint
-TOKEN_URL = f"https://login.microsoftonline.com/{settings.MS_TENANT_ID}/oauth2/v2.0/token"
-
 
 async def _get_app_token() -> str:
     """Obtain an app-level access token using the client credentials flow."""
+    token_url = f"https://login.microsoftonline.com/{settings.MS_TENANT_ID}/oauth2/v2.0/token"
     async with httpx.AsyncClient() as client:
         resp = await client.post(
-            TOKEN_URL,
+            token_url,
             data={
                 "client_id": settings.MS_CLIENT_ID,
                 "client_secret": settings.MS_CLIENT_SECRET,
@@ -37,7 +35,10 @@ async def _get_app_token() -> str:
         )
     if resp.status_code != 200:
         logger.error(f"Failed to obtain app token: {resp.status_code} {resp.text}")
-        raise HTTPException(status_code=502, detail="Could not authenticate with Microsoft")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not authenticate with Microsoft: {resp.json().get('error_description', resp.text)}",
+        )
     return resp.json()["access_token"]
 
 
@@ -72,7 +73,8 @@ async def view_document(
 
     if resp.status_code != 200:
         logger.error(f"Graph API error: {resp.status_code} {resp.text}")
-        raise HTTPException(status_code=404, detail="Document not found or not accessible")
+        error_msg = resp.json().get("error", {}).get("message", resp.text)
+        raise HTTPException(status_code=resp.status_code, detail=f"Graph API: {error_msg}")
 
     data = resp.json()
     download_url = data.get("@microsoft.graph.downloadUrl")
