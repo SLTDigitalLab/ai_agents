@@ -1,4 +1,14 @@
 export const AGENTS = {
+    // Default supervisor landing page
+    askslt: {
+        id: "supervisor",
+        title: "Workmate AI",
+        subtitle: "Start here. Workmate AI can answer platform questions directly and route you to the right specialist when needed.",
+        color: "from-cyan-900 to-cyan-600",
+        buttonColor: "bg-cyan-600 hover:bg-cyan-700",
+        disclaimer: "Workmate AI may answer directly, ask for clarification, or route your request to a specialist agent."
+    },
+
     // 1. HR
     askhr: {
         id: "hr",
