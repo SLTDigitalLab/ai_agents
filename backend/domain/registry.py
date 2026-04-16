@@ -19,11 +19,15 @@ from langgraph.graph import StateGraph
 from domain.archetypes.kb_agent import build_kb_workflow
 from domain.archetypes.kb_api_agent import build_kb_api_workflow
 from domain.archetypes.kb_form_agent import build_kb_form_workflow
+from domain.archetypes.supervisor_agent import build_supervisor_workflow
 
 # ── Registry ─────────────────────────────────────────────────────────────
 # Maps each agent_id (sent by the frontend) to the *builder function*
 # that returns an uncompiled StateGraph for the appropriate archetype.
 AGENT_BUILDERS: dict[str, callable] = {
+    # Default supervisor agent that routes between specialists based on user needs
+    "supervisor": build_supervisor_workflow,
+
     # Archetype 1 – Knowledge Base only
     "finance": build_kb_workflow,
     "admin": build_kb_workflow,
