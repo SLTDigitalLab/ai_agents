@@ -39,7 +39,7 @@ class AgentState(TypedDict):
     last_specialist_agent: NotRequired[str]
 
     # Routing metadata used only by the supervisor agent.
-    routing_action: NotRequired[Literal["delegate", "direct", "clarify"]]
+    routing_action: NotRequired[Literal["delegate", "direct", "clarify", "out_of_scope"]]
     routed_agent_id: NotRequired[str]
     routing_reason: NotRequired[str]
     routing_scores: NotRequired[dict[str, float]]

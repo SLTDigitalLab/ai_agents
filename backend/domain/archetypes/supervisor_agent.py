@@ -31,6 +31,7 @@ from domain.config.supervisor_routing import (
     GENERAL_HELP_PATTERNS,
     LOW_CONFIDENCE_THRESHOLD,
     MIN_ROUTE_MARGIN,
+    OUT_OF_SCOPE_THRESHOLD,
     SHORT_FOLLOW_UP_MAX_WORDS,
     SPECIALIST_ROUTING_PROFILES,
     STRONG_ROUTE_THRESHOLD,
@@ -144,7 +145,7 @@ async def _score_specialists(
 
 
 async def route_request(state: AgentState) -> dict:
-    """Choose whether to answer directly, delegate, or clarify."""
+    """Choose whether to answer directly, delegate, clarify, or reject as out-of-scope."""
     query = _latest_user_query(state)
     last_specialist_agent = state.get("last_specialist_agent")
 
@@ -170,6 +171,7 @@ async def route_request(state: AgentState) -> dict:
     score_gap = top_score - second_score
     rounded_scores = {agent_id: round(score, 4) for agent_id, score in scored}
 
+    # 1. Strong specialist match -> delegate
     if top_score >= STRONG_ROUTE_THRESHOLD and score_gap >= MIN_ROUTE_MARGIN:
         logger.info(
             "Supervisor route | action=delegate | target=%s | top=%.4f | second=%s %.4f | last=%s | query=%r",
@@ -187,6 +189,23 @@ async def route_request(state: AgentState) -> dict:
             "routing_scores": rounded_scores,
         }
 
+    # 2. Extremely weak match -> explicit out-of-scope
+    if top_score < OUT_OF_SCOPE_THRESHOLD:
+        logger.info(
+            "Supervisor route | action=out_of_scope | top=%s %.4f | second=%s %.4f | query=%r",
+            top_agent,
+            top_score,
+            second_agent,
+            second_score,
+            query[:200],
+        )
+        return {
+            "routing_action": "out_of_scope",
+            "routing_reason": "very_low_specialist_similarity",
+            "routing_scores": rounded_scores,
+        }
+
+    # 3. Weak or ambiguous specialist match -> clarify
     if top_score < LOW_CONFIDENCE_THRESHOLD or score_gap < MIN_ROUTE_MARGIN:
         logger.info(
             "Supervisor route | action=clarify | top=%s %.4f | second=%s %.4f | last=%s | query=%r",
@@ -218,7 +237,6 @@ async def route_request(state: AgentState) -> dict:
         "routing_reason": "routing_fallback",
         "routing_scores": rounded_scores,
     }
-
 
 async def answer_directly(state: AgentState) -> dict:
     """Answer general help, platform, and navigation questions directly."""
@@ -302,6 +320,14 @@ async def ask_for_clarification(state: AgentState) -> dict:
 
     return {"messages": [AIMessage(content=content)]}
 
+async def respond_out_of_scope(state: AgentState) -> dict:
+    """Respond when the query is outside the supported domains."""
+    content = (
+        "I cannot answer that request. "
+        "I am limited to platform/help questions and requests related to "
+        "**HR**, **Finance**, and **Admin**."
+    )
+    return {"messages": [AIMessage(content=content)]}
 
 def _build_delegate_node(agent_id: str):
     """Create a supervisor node that delegates to one specialist graph."""
@@ -349,6 +375,8 @@ def _route_to_node(state: AgentState) -> str:
         return "answer_directly"
     if action == "clarify":
         return "ask_for_clarification"
+    if action == "out_of_scope":
+        return "respond_out_of_scope"
     if action == "delegate":
         routed_agent_id = state.get("routed_agent_id")
         if routed_agent_id in SPECIALIST_BUILDERS:
@@ -363,6 +391,7 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_node("route_request", route_request)
     workflow.add_node("answer_directly", answer_directly)
     workflow.add_node("ask_for_clarification", ask_for_clarification)
+    workflow.add_node("respond_out_of_scope", respond_out_of_scope)
 
     for agent_id in SPECIALIST_BUILDERS:
         workflow.add_node(f"delegate_{agent_id}", _build_delegate_node(agent_id))
@@ -374,6 +403,7 @@ def build_supervisor_workflow() -> StateGraph:
         {
             "answer_directly": "answer_directly",
             "ask_for_clarification": "ask_for_clarification",
+            "respond_out_of_scope": "respond_out_of_scope",
             "delegate_hr": "delegate_hr",
             "delegate_finance": "delegate_finance",
             "delegate_admin": "delegate_admin",
@@ -382,6 +412,7 @@ def build_supervisor_workflow() -> StateGraph:
 
     workflow.add_edge("answer_directly", END)
     workflow.add_edge("ask_for_clarification", END)
+    workflow.add_edge("respond_out_of_scope", END)
     workflow.add_edge("delegate_hr", END)
     workflow.add_edge("delegate_finance", END)
     workflow.add_edge("delegate_admin", END)
