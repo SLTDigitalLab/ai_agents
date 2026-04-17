@@ -5,7 +5,7 @@ All agent graphs share this single state schema. Fields are accumulated
 (messages) or overwritten (everything else) on each graph step.
 """
 
-from typing import Annotated, TypedDict
+from typing import Annotated, TypedDict, Literal, NotRequired
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -34,3 +34,14 @@ class AgentState(TypedDict):
     # Detected sentiment from input guardrails (e.g. "frustrated", "neutral").
     # Used by agent nodes to adapt response tone.
     sentiment: str
+
+    # Supervisor-only routing fields
+    routing_action: NotRequired[str]
+    routing_reason: NotRequired[str]
+    routed_agent_id: NotRequired[str]
+    routing_scores: NotRequired[dict[str, float]]
+    last_specialist_agent: NotRequired[str]
+    pending_clarification: NotRequired[bool]
+    clarification_options: NotRequired[list[str]]
+    original_query: NotRequired[str]
+    delegation_query: NotRequired[str]
