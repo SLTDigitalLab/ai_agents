@@ -4,6 +4,7 @@ Includes input guardrails (LLM-based intent + sentiment classification) run befo
 """
 
 import logging
+import re
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
@@ -22,6 +23,39 @@ logger = logging.getLogger(__name__)
 BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
 
 
+def _join_text_parts(parts: list[str]) -> str:
+    """Join fragmented text blocks without crushing words together."""
+    merged = ""
+
+    for raw in parts:
+        text = str(raw or "")
+        if not text:
+            continue
+
+        if not merged:
+            merged = text
+            continue
+
+        prev = merged[-1]
+        nxt = text[0]
+
+        should_insert_space = (
+            not prev.isspace()
+            and not nxt.isspace()
+            and (
+                (prev.isalnum() and nxt.isalnum())
+                or (prev in ".!?,:;)" and (nxt.isalnum() or nxt == "("))
+            )
+        )
+
+        if should_insert_space:
+            merged += " "
+
+        merged += text
+
+    return re.sub(r"[ \t]+", " ", merged).strip()
+
+
 def _message_content_to_text(content) -> str:
     """Normalize LangChain message content into plain text."""
     if isinstance(content, str):
@@ -34,7 +68,7 @@ def _message_content_to_text(content) -> str:
                 text_parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(str(block["text"]))
-        return "".join(text_parts).strip()
+        return _join_text_parts(text_parts)
 
     if content is None:
         return ""
@@ -183,10 +217,12 @@ async def get_history(agent_id: str, thread_id: str):
                         if isinstance(block, str):
                             text_parts.append(block)
                         elif isinstance(block, dict) and "text" in block:
-                            text_parts.append(block["text"])
-                    content = "".join(text_parts).strip()
+                            text_parts.append(str(block["text"]))
+                    content = _join_text_parts(text_parts)
                 elif not isinstance(content, str):
                     content = str(content).strip()
+                else:
+                    content = content.strip()
 
                 if content:
                     messages.append({
