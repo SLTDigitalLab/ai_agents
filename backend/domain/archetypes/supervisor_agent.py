@@ -3,7 +3,7 @@
 The supervisor is the default entry point. It does three things:
 1. Answers general/platform/help questions directly.
 2. Clarifies ambiguous specialist questions.
-3. Delegates clear specialist questions to one of the existing six agents.
+3. Delegates clear specialist questions to the configured specialist agents.
 
 Specialist routing is done with vector similarity against maintained routing
 profiles. General/help/platform questions are handled with lightweight rules.
@@ -18,7 +18,7 @@ import re
 from functools import lru_cache
 from typing import Any
 
-from langchain_core.messages import AIMessage, trim_messages
+from langchain_core.messages import AIMessage, HumanMessage, trim_messages
 from langgraph.graph import END, START, StateGraph
 
 from core.llm import get_chat_model, get_embedding_model
@@ -26,6 +26,7 @@ from domain.archetypes.kb_agent import build_kb_workflow
 from domain.archetypes.kb_api_agent import build_kb_api_workflow
 from domain.archetypes.kb_form_agent import build_kb_form_workflow
 from domain.config.supervisor_routing import (
+    CLARIFICATION_CHOICE_ALIASES,
     FOLLOW_UP_PATTERNS,
     FOLLOW_UP_STICKINESS_BOOST,
     GENERAL_HELP_PATTERNS,
@@ -35,6 +36,7 @@ from domain.config.supervisor_routing import (
     SHORT_FOLLOW_UP_MAX_WORDS,
     SPECIALIST_ROUTING_PROFILES,
     STRONG_ROUTE_THRESHOLD,
+    VAGUE_SPECIALIST_PATTERNS,
 )
 from domain.state import AgentState
 
@@ -113,6 +115,23 @@ def _is_general_help_question(query: str) -> bool:
     return any(re.search(pattern, query) for pattern in GENERAL_HELP_PATTERNS)
 
 
+def _is_vague_specialist_prompt(query: str) -> bool:
+    """Detect low-information prompts that should be clarified before routing."""
+    stripped = query.strip().lower()
+
+    if any(re.search(pattern, stripped) for pattern in VAGUE_SPECIALIST_PATTERNS):
+        return True
+
+    tokens = re.findall(r"\w+", stripped)
+    low_signal_words = {"help", "something", "issue", "problem", "support", "question"}
+
+    return (
+        len(tokens) <= 4
+        and any(token in low_signal_words for token in tokens)
+        and not _is_general_help_question(stripped)
+    )
+
+
 def _is_short_follow_up(query: str) -> bool:
     """Detect short follow-up turns that should inherit route bias."""
     stripped = query.strip().lower()
@@ -122,6 +141,78 @@ def _is_short_follow_up(query: str) -> bool:
     ):
         return True
     return False
+
+
+def _clarification_display_names(agent_ids: list[str]) -> list[str]:
+    """Return display names for a list of specialist ids."""
+    return [
+        str(SPECIALIST_ROUTING_PROFILES[agent_id]["display_name"])
+        for agent_id in agent_ids
+        if agent_id in SPECIALIST_ROUTING_PROFILES
+    ]
+
+
+def _matches_clarification_choice(query: str, agent_id: str) -> bool:
+    """Check whether a clarification reply maps to a given specialist."""
+    normalized = query.strip().lower()
+    aliases = CLARIFICATION_CHOICE_ALIASES.get(agent_id, ())
+    candidate_terms = (agent_id, *aliases)
+
+    for term in candidate_terms:
+        escaped = re.escape(term.lower())
+        if re.fullmatch(rf"{escaped}", normalized):
+            return True
+        if re.fullmatch(
+            rf"(it is|it's|its|for|about|this is|this is about|go with|choose|select|pick)?\s*{escaped}(\s+please)?",
+            normalized,
+        ):
+            return True
+
+    return False
+
+
+def _resolve_clarification_choice(query: str, options: list[str]) -> str | None:
+    """Resolve a user clarification reply to one specialist id."""
+    matches = [agent_id for agent_id in options if _matches_clarification_choice(query, agent_id)]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _replace_latest_human_message(messages: list[Any], new_query: str) -> list[Any]:
+    """Replace the newest human message so the specialist receives the real query."""
+    updated_messages = list(messages)
+
+    for index in range(len(updated_messages) - 1, -1, -1):
+        message = updated_messages[index]
+
+        if getattr(message, "type", None) == "human":
+            updated_messages[index] = HumanMessage(content=new_query)
+            return updated_messages
+
+        if isinstance(message, tuple) and len(message) == 2 and message[0] in {"user", "human"}:
+            updated_messages[index] = HumanMessage(content=new_query)
+            return updated_messages
+
+    updated_messages.append(HumanMessage(content=new_query))
+    return updated_messages
+
+
+def _clarification_options_from_scores(
+    scored: list[tuple[str, float]],
+    score_gap: float,
+) -> list[str]:
+    """Pick the specialist choices that should be shown to the user."""
+    top_agent, top_score = scored[0]
+    second_agent, second_score = scored[1]
+
+    if score_gap < MIN_ROUTE_MARGIN:
+        return [top_agent, second_agent]
+
+    if top_score < LOW_CONFIDENCE_THRESHOLD and second_score >= OUT_OF_SCOPE_THRESHOLD:
+        return [top_agent, second_agent]
+
+    return [top_agent]
 
 
 async def _score_specialists(
@@ -148,12 +239,39 @@ async def route_request(state: AgentState) -> dict:
     """Choose whether to answer directly, delegate, clarify, or reject as out-of-scope."""
     query = _latest_user_query(state)
     last_specialist_agent = state.get("last_specialist_agent")
+    pending_clarification = bool(state.get("pending_clarification"))
+    clarification_options = list(state.get("clarification_options") or [])
+    original_query = state.get("original_query") or ""
 
     if not query:
         return {
             "routing_action": "clarify",
             "routing_reason": "empty_query",
+            "pending_clarification": True,
+            "clarification_options": list(SPECIALIST_BUILDERS.keys()),
+            "original_query": "",
         }
+
+    # First handle a pending clarification turn.
+    if pending_clarification and clarification_options:
+        chosen_agent = _resolve_clarification_choice(query, clarification_options)
+        if chosen_agent:
+            logger.info(
+                "Supervisor route | action=delegate | reason=clarification_choice | target=%s | original_query=%r | choice=%r",
+                chosen_agent,
+                original_query[:200],
+                query[:200],
+            )
+            return {
+                "routing_action": "delegate",
+                "routed_agent_id": chosen_agent,
+                "routing_reason": f"clarification_choice:{chosen_agent}",
+                "routing_scores": {},
+                "delegation_query": original_query or query,
+                "pending_clarification": False,
+                "clarification_options": [],
+                "original_query": "",
+            }
 
     if _is_general_help_question(query):
         logger.info(
@@ -163,6 +281,23 @@ async def route_request(state: AgentState) -> dict:
         return {
             "routing_action": "direct",
             "routing_reason": "general_help_rule",
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
+    if _is_vague_specialist_prompt(query):
+        logger.info(
+            "Supervisor route | action=clarify | reason=vague_prompt | query=%r",
+            query[:200],
+        )
+        return {
+            "routing_action": "clarify",
+            "routing_reason": "vague_prompt",
+            "routing_scores": {},
+            "pending_clarification": True,
+            "clarification_options": list(SPECIALIST_BUILDERS.keys()),
+            "original_query": query,
         }
 
     scored = await _score_specialists(query, last_specialist_agent)
@@ -171,7 +306,6 @@ async def route_request(state: AgentState) -> dict:
     score_gap = top_score - second_score
     rounded_scores = {agent_id: round(score, 4) for agent_id, score in scored}
 
-    # 1. Strong specialist match -> delegate
     if top_score >= STRONG_ROUTE_THRESHOLD and score_gap >= MIN_ROUTE_MARGIN:
         logger.info(
             "Supervisor route | action=delegate | target=%s | top=%.4f | second=%s %.4f | last=%s | query=%r",
@@ -187,9 +321,12 @@ async def route_request(state: AgentState) -> dict:
             "routed_agent_id": top_agent,
             "routing_reason": f"vector_match:{top_agent}",
             "routing_scores": rounded_scores,
+            "delegation_query": query,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
         }
 
-    # 2. Extremely weak match -> explicit out-of-scope
     if top_score < OUT_OF_SCOPE_THRESHOLD:
         logger.info(
             "Supervisor route | action=out_of_scope | top=%s %.4f | second=%s %.4f | query=%r",
@@ -203,40 +340,33 @@ async def route_request(state: AgentState) -> dict:
             "routing_action": "out_of_scope",
             "routing_reason": "very_low_specialist_similarity",
             "routing_scores": rounded_scores,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
         }
 
-    # 3. Weak or ambiguous specialist match -> clarify
-    if top_score < LOW_CONFIDENCE_THRESHOLD or score_gap < MIN_ROUTE_MARGIN:
-        logger.info(
-            "Supervisor route | action=clarify | top=%s %.4f | second=%s %.4f | last=%s | query=%r",
-            top_agent,
-            top_score,
-            second_agent,
-            second_score,
-            last_specialist_agent,
-            query[:200],
-        )
-        return {
-            "routing_action": "clarify",
-            "routed_agent_id": top_agent,
-            "routing_reason": "low_confidence_or_small_margin",
-            "routing_scores": rounded_scores,
-        }
+    clarification_targets = _clarification_options_from_scores(scored, score_gap)
 
     logger.info(
-        "Supervisor route | action=clarify | reason=fallback | top=%s %.4f | second=%s %.4f | query=%r",
+        "Supervisor route | action=clarify | top=%s %.4f | second=%s %.4f | last=%s | options=%s | query=%r",
         top_agent,
         top_score,
         second_agent,
         second_score,
+        last_specialist_agent,
+        clarification_targets,
         query[:200],
     )
     return {
         "routing_action": "clarify",
         "routed_agent_id": top_agent,
-        "routing_reason": "routing_fallback",
+        "routing_reason": "low_confidence_or_small_margin",
         "routing_scores": rounded_scores,
+        "pending_clarification": True,
+        "clarification_options": clarification_targets,
+        "original_query": query,
     }
+
 
 async def answer_directly(state: AgentState) -> dict:
     """Answer general help, platform, and navigation questions directly."""
@@ -281,44 +411,36 @@ Rules:
 
 async def ask_for_clarification(state: AgentState) -> dict:
     """Ask the user to clarify ambiguous specialist intent."""
-    routed_agent_id = state.get("routed_agent_id")
-    routing_scores = state.get("routing_scores") or {}
-    last_specialist_agent = state.get("last_specialist_agent")
-    query = _latest_user_query(state)
+    options = list(state.get("clarification_options") or [])
+    reason = state.get("routing_reason")
+    display_names = _clarification_display_names(options)
 
-    if last_specialist_agent and _is_short_follow_up(query):
-        profile = SPECIALIST_ROUTING_PROFILES[last_specialist_agent]
+    if reason == "vague_prompt" or not display_names:
         content = (
-            f"Are you still asking about **{profile['display_name']}**, or did you want a different area? "
-            f"I can route this to **HR**, **Finance**, or **Admin**."
+            "Please tell me which area this is about: **HR**, **Finance**, or **Admin**."
         )
         return {"messages": [AIMessage(content=content)]}
 
-    ranked = sorted(routing_scores.items(), key=lambda item: item[1], reverse=True)
-    candidate_names = [
-        SPECIALIST_ROUTING_PROFILES[agent_id]["display_name"]
-        for agent_id, _ in ranked[:2]
-        if agent_id in SPECIALIST_ROUTING_PROFILES
-    ]
+    if reason == "low_confidence_or_small_margin" and len(display_names) == 2:
+        content = (
+            f"I want to route this correctly, but it could belong to **{display_names[0]}** "
+            f"or **{display_names[1]}**. Please reply with one of those."
+        )
+        return {"messages": [AIMessage(content=content)]}
 
-    if len(candidate_names) == 2:
+    if len(display_names) == 1:
         content = (
-            f"I want to route this correctly, but it could belong to **{candidate_names[0]}** or **{candidate_names[1]}**. "
-            f"Please say which one you want."
+            f"I think this may belong to **{display_names[0]}**. "
+            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, or **Admin**."
         )
-    elif routed_agent_id in SPECIALIST_ROUTING_PROFILES:
-        name = SPECIALIST_ROUTING_PROFILES[routed_agent_id]["display_name"]
-        content = (
-            f"I am not fully confident about the best specialist for that request. "
-            f"It may be **{name}**, but please clarify what you need."
-        )
-    else:
-        content = (
-            "I need a bit more detail to route that correctly. "
-            "Please tell me whether this is about **HR**, **Finance**, or **Admin**."
-        )
+        return {"messages": [AIMessage(content=content)]}
 
+    choices = ", ".join(f"**{name}**" for name in display_names[:-1])
+    content = (
+        f"Please reply with one of these areas: {choices}, or **{display_names[-1]}**."
+    )
     return {"messages": [AIMessage(content=content)]}
+
 
 async def respond_out_of_scope(state: AgentState) -> dict:
     """Respond when the query is outside the supported domains."""
@@ -329,6 +451,7 @@ async def respond_out_of_scope(state: AgentState) -> dict:
     )
     return {"messages": [AIMessage(content=content)]}
 
+
 def _build_delegate_node(agent_id: str):
     """Create a supervisor node that delegates to one specialist graph."""
     specialist_graph = SPECIALIST_BUILDERS[agent_id]().compile()
@@ -336,6 +459,13 @@ def _build_delegate_node(agent_id: str):
     async def _delegate_to_specialist(state: AgentState) -> dict:
         specialist_state = dict(state)
         specialist_state["agent_id"] = agent_id
+
+        delegation_query = state.get("delegation_query")
+        if delegation_query:
+            specialist_state["messages"] = _replace_latest_human_message(
+                state.get("messages", []),
+                delegation_query,
+            )
 
         try:
             result = await specialist_graph.ainvoke(specialist_state)
@@ -350,9 +480,14 @@ def _build_delegate_node(agent_id: str):
             return {
                 "messages": [final_message],
                 "last_specialist_agent": agent_id,
+                "pending_clarification": False,
+                "clarification_options": [],
+                "original_query": "",
+                "delegation_query": "",
             }
         except Exception:
             logger.exception("Supervisor delegation failed for agent=%s", agent_id)
+            logger.info("Delegated final message raw content: %r", final_message.content)
             return {
                 "messages": [
                     AIMessage(
