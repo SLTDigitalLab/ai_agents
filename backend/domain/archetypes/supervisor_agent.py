@@ -114,6 +114,15 @@ def _is_general_help_question(query: str) -> bool:
     query = query.strip().lower()
     return any(re.search(pattern, query) for pattern in GENERAL_HELP_PATTERNS)
 
+def _is_bare_greeting(query: str) -> bool:
+    """Detect greeting-only turns that should ignore prior thread context."""
+    stripped = query.strip().lower()
+    return bool(
+        re.fullmatch(
+            r"(hi|hello|hey|good morning|good afternoon|good evening)[!. ]*",
+            stripped,
+        )
+    )
 
 def _is_vague_specialist_prompt(query: str) -> bool:
     """Detect low-information prompts that should be clarified before routing."""
@@ -370,12 +379,28 @@ async def route_request(state: AgentState) -> dict:
 
 async def answer_directly(state: AgentState) -> dict:
     """Answer general help, platform, and navigation questions directly."""
-    system_prompt = """You are ASK SLT, the main supervisor assistant for an internal multi-agent platform.
+    query = _latest_user_query(state)
+
+    # Greeting-only turns should not inherit old specialist context.
+    if _is_bare_greeting(query):
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        "Hi! I’m Workmate AI. I can help with platform questions "
+                        "or requests related to **HR**, **Finance**, or **Admin**."
+                    )
+                )
+            ],
+            "last_specialist_agent": None,
+        }
+
+    system_prompt = """You are Workmate AI, the main supervisor assistant for an internal multi-agent platform.
 
 You answer ONLY these categories directly:
 - platform help and navigation
 - greetings, thanks, brief conversational turns
-- questions about what ASK SLT can do
+- questions about what Workmate AI can do
 - questions about which specialist should handle a topic
 - general workplace help that does not require specialist policy retrieval
 
