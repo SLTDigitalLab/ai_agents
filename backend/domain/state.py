@@ -35,11 +35,13 @@ class AgentState(TypedDict):
     # Used by agent nodes to adapt response tone.
     sentiment: str
 
-    # Last specialist selected by the supervisor for soft follow-up stickiness.
-    last_specialist_agent: NotRequired[str]
-
-    # Routing metadata used only by the supervisor agent.
-    routing_action: NotRequired[Literal["delegate", "direct", "clarify", "out_of_scope"]]
-    routed_agent_id: NotRequired[str]
+    # Supervisor-only routing fields
+    routing_action: NotRequired[str]
     routing_reason: NotRequired[str]
+    routed_agent_id: NotRequired[str]
     routing_scores: NotRequired[dict[str, float]]
+    last_specialist_agent: NotRequired[str]
+    pending_clarification: NotRequired[bool]
+    clarification_options: NotRequired[list[str]]
+    original_query: NotRequired[str]
+    delegation_query: NotRequired[str]
