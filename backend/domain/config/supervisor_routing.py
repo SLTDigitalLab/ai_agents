@@ -87,6 +87,53 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "How can I report a facility issue?",
         ],
     },
+    "it": {
+        "display_name": "IT",
+        "description": (
+            "IT matters such as technical support, software issues, hardware requests, "
+            "network and Wi-Fi, VPN, email accounts, password resets, access management, "
+            "and general IT services."
+        ),
+        "keywords": [
+            "it support",
+            "technical support",
+            "software",
+            "hardware",
+            "laptop request",
+            "network",
+            "wi-fi",
+            "vpn",
+            "email",
+            "password reset",
+            "access request",
+        ],
+        "examples": [
+            "How do I reset my email password?",
+            "How to connect to the corporate VPN?",
+            "How can I request a new laptop?",
+        ],
+    },
+    "cio": {
+        "display_name": "CIO",
+        "description": (
+            "CIO matters such as IT strategy, digital transformation, technology roadmap, "
+            "enterprise architecture, governance, vendor management, and cybersecurity strategy."
+        ),
+        "keywords": [
+            "cio",
+            "strategy",
+            "roadmap",
+            "digital transformation",
+            "governance",
+            "architecture",
+            "cybersecurity strategy",
+        ],
+        "examples": [
+            "What is the IT strategy for this year?",
+            "Tell me about the digital transformation roadmap.",
+            "Where can I find the enterprise architecture guidelines?",
+        ],
+    },
 }
 
 GENERAL_HELP_PATTERNS: tuple[str, ...] = (
@@ -121,6 +168,8 @@ CLARIFICATION_CHOICE_ALIASES: dict[str, tuple[str, ...]] = {
     "hr": ("hr", "human resources"),
     "finance": ("finance", "financial", "accounts", "accounting"),
     "admin": ("admin", "administration", "facilities"),
+    "it": ("it", "information technology", "tech support", "technical support"),
+    "cio": ("cio", "chief information officer", "technology strategy"),
 }
 
 FOLLOW_UP_PATTERNS: tuple[str, ...] = (

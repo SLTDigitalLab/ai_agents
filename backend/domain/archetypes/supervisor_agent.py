@@ -47,6 +47,8 @@ SPECIALIST_BUILDERS = {
     "hr": build_kb_api_workflow,
     "finance": build_kb_workflow,
     "admin": build_kb_workflow,
+    "it": build_kb_workflow,
+    "cio": build_kb_workflow,
 }
 
 
@@ -388,7 +390,7 @@ async def answer_directly(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "Hi! I’m Workmate AI. I can help with platform questions "
-                        "or requests related to **HR**, **Finance**, or **Admin**."
+                        "or requests related to **HR**, **Finance**, **IT**, **CIO**, or **Admin**."
                     )
                 )
             ],
@@ -407,12 +409,14 @@ You answer ONLY these categories directly:
 Available specialists:
 - HR: leave, benefits, recruitment, employee policy, staff support
 - Finance: salary, payroll, budgets, invoices, expense claims, payments
+- IT: technical support, hardware, software, network, access management
+- CIO: digital transformation, IT strategy, enterprise architecture, technology roadmap
 - Admin: facilities, transport, security, parking, office support
 
 Rules:
 1. Be concise, clear, and practical.
 2. If the user asks which specialist should handle something, answer directly.
-3. Do not invent HR, finance, or admin facts.
+3. Do not invent HR, finance, IT, CIO, or admin facts.
 4. If the user is clearly asking a specialist-domain factual question, say that you can route them to the right specialist and name the best fit.
 5. Do not mention routing scores, thresholds, embeddings, vectors, or internal implementation.
 6. Do not end with a closing question.
@@ -442,7 +446,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
 
     if reason == "vague_prompt" or not display_names:
         content = (
-            "Please tell me which area this is about: **HR**, **Finance**, or **Admin**."
+            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **CIO**, or **Admin**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -456,7 +460,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
     if len(display_names) == 1:
         content = (
             f"I think this may belong to **{display_names[0]}**. "
-            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, or **Admin**."
+            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **CIO**, or **Admin**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -472,7 +476,7 @@ async def respond_out_of_scope(state: AgentState) -> dict:
     content = (
         "I cannot answer that request. "
         "I am limited to platform/help questions and requests related to "
-        "**HR**, **Finance**, and **Admin**."
+        "**HR**, **Finance**, **IT**, **CIO**, and **Admin**."
     )
     return {"messages": [AIMessage(content=content)]}
 
@@ -567,6 +571,8 @@ def build_supervisor_workflow() -> StateGraph:
             "delegate_hr": "delegate_hr",
             "delegate_finance": "delegate_finance",
             "delegate_admin": "delegate_admin",
+            "delegate_it": "delegate_it",
+            "delegate_cio": "delegate_cio",
         },
     )
 
@@ -576,5 +582,7 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("delegate_hr", END)
     workflow.add_edge("delegate_finance", END)
     workflow.add_edge("delegate_admin", END)
+    workflow.add_edge("delegate_it", END)
+    workflow.add_edge("delegate_cio", END)
 
     return workflow
