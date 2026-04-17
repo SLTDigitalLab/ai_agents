@@ -11,18 +11,19 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
     "hr": {
         "display_name": "HR",
         "description": (
-            "Human resources matters such as leave, attendance, recruitment, "
-            "employee benefits, medical claims, payroll policy questions, "
-            "letters, internal people policies, and staff support."
+            "Human resources matters such as leave balance, leave entitlement, "
+            "annual leave, casual leave, sick leave, attendance, recruitment, "
+            "employee benefits, HR letters, internal people policies, and staff support."
         ),
         "keywords": [
             "leave",
+            "leave balance",
+            "leave entitlement",
             "annual leave",
             "casual leave",
             "sick leave",
             "attendance",
             "employee benefits",
-            "medical claim",
             "recruitment",
             "promotion",
             "warning letter",
@@ -30,8 +31,8 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "staff policy",
         ],
         "examples": [
-            "How many annual leave days do I have?",
-            "What is the procedure to apply for medical reimbursement?",
+            "How many annual leave days do I have left?",
+            "I need to check my leave balance.",
             "Where can I find the attendance policy?",
         ],
     },
@@ -104,6 +105,23 @@ GENERAL_HELP_PATTERNS: tuple[str, ...] = (
     r"\bhelp me choose\b",
     r"\broute me\b",
 )
+
+VAGUE_SPECIALIST_PATTERNS: tuple[str, ...] = (
+    r"^\s*help\s*\??\s*$",
+    r"^\s*support\s*\??\s*$",
+    r"^\s*i need help\s*\??\s*$",
+    r"^\s*i need help with something\s*\??\s*$",
+    r"^\s*i need assistance\s*\??\s*$",
+    r"^\s*can you help me\s*\??\s*$",
+    r"^\s*i have a question\s*\??\s*$",
+    r"^\s*i need to ask something\s*\??\s*$",
+)
+
+CLARIFICATION_CHOICE_ALIASES: dict[str, tuple[str, ...]] = {
+    "hr": ("hr", "human resources"),
+    "finance": ("finance", "financial", "accounts", "accounting"),
+    "admin": ("admin", "administration", "facilities"),
+}
 
 FOLLOW_UP_PATTERNS: tuple[str, ...] = (
     r"^\s*what about( that| this)?\s*\??$",
