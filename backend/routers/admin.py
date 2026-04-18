@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import requests
 import logging
 from services.ingestion import IngestionService
+from services import ingestion_status
 from domain.tools.api_tools import LEAVE_BALANCE_API_URL
 
 logger = logging.getLogger(__name__)
@@ -28,20 +29,35 @@ async def ingest_url(request: UrlIngestRequest):
     """
     Ingest content from a URL and store embeddings in Qdrant.
     """
-    return await ingestion_service.ingest_website(request.url, request.agent_name)
+    ingestion_status.start(agent_name=request.agent_name, source="url")
+    try:
+        result = await ingestion_service.ingest_website(request.url, request.agent_name)
+    finally:
+        ingestion_status.finish(result if isinstance(result, dict) else {"status": "error", "message": "Unknown error"})
+    return result
 
 @router.post("/ingest-onedrive")
 async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
     """
-    Process Onedrive Ingestion Api - Ingest PDFs, Word docs, Powerpoint and Excel 
+    Process Onedrive Ingestion Api - Ingest PDFs, Word docs, Powerpoint and Excel
     from a OneDrive folder using the Graph API.
     """
-    return await ingestion_service.process_onedrive_ingestion(
-        folder_id=request.folder_id,
-        access_token=request.token,
-        agent_name=request.agent_name,
-        force=request.force,
-    )
+    ingestion_status.start(agent_name=request.agent_name, source="onedrive")
+    try:
+        result = await ingestion_service.process_onedrive_ingestion(
+            folder_id=request.folder_id,
+            access_token=request.token,
+            agent_name=request.agent_name,
+            force=request.force,
+        )
+    finally:
+        ingestion_status.finish(result if isinstance(result, dict) else {"status": "error", "message": "Unknown error"})
+    return result
+
+@router.get("/ingestion-status")
+async def get_ingestion_status():
+    """Current or last ingestion state — used by admin panel to survive page refresh."""
+    return ingestion_status.get_status()
 
 @router.post("/test-leave-balance")
 async def test_leave_balance(request: TestLeaveBalanceRequest):

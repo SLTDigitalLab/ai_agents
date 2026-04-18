@@ -1,8 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AGENTS } from '../../config/agents';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/admin`;
+
+const AGENT_TITLE = {};
+Object.values(AGENTS).forEach(cfg => { AGENT_TITLE[cfg.id] = cfg.title; });
+
+const formatElapsed = (startedAt) => {
+    if (!startedAt) return '';
+    const sec = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}m ${s}s`;
+};
 
 const AGENT_LIST = Object.values(AGENTS).map(cfg => ({
     id: cfg.id,
@@ -68,6 +79,50 @@ const IngestionPanel = () => {
     // OneDrive Ingestion state
     const [odForm, setOdForm] = useState({ folder_id: '', token: '', agent_name: AGENT_LIST[0]?.id || '' });
     const [odLoading, setOdLoading] = useState(false);
+
+    // Server-tracked ingestion status (survives page refresh)
+    const [serverStatus, setServerStatus] = useState(null);
+    const [tick, setTick] = useState(0); // re-render every second to update elapsed time
+    const lastSeenResultRef = useRef(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        const poll = async () => {
+            try {
+                const res = await fetch(`${API_BASE}/ingestion-status`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (cancelled) return;
+                setServerStatus(data);
+
+                // Surface last_result as a toast when it changes (survives refresh)
+                const stamp = data.last_result?.finished_at;
+                if (stamp && stamp !== lastSeenResultRef.current) {
+                    lastSeenResultRef.current = stamp;
+                    const r = data.last_result;
+                    setStatus({
+                        type: r.status === 'success' ? 'success' : r.status === 'warning' ? 'warning' : 'error',
+                        title: r.status === 'success' ? 'Ingestion Complete' : r.status === 'warning' ? 'Warning' : 'Error',
+                        message: r.message,
+                        files: r.files || [],
+                    });
+                    setUrlLoading(false);
+                    setOdLoading(false);
+                }
+            } catch {
+                /* ignore network errors */
+            }
+        };
+        poll();
+        const id = setInterval(poll, 3000);
+        return () => { cancelled = true; clearInterval(id); };
+    }, []);
+
+    useEffect(() => {
+        if (!serverStatus?.active) return;
+        const id = setInterval(() => setTick(t => t + 1), 1000);
+        return () => clearInterval(id);
+    }, [serverStatus?.active]);
 
     // ── URL Ingestion Handler ──
     const handleUrlIngest = async (e) => {
@@ -167,6 +222,29 @@ const IngestionPanel = () => {
                         Ingest website URLs and OneDrive documents into agent knowledge bases
                     </p>
                 </motion.div>
+
+                {/* ── Active Ingestion Banner (survives page refresh) ── */}
+                <AnimatePresence>
+                    {serverStatus?.active && (
+                        <motion.div
+                            key={`ingesting-${tick}`}
+                            initial={{ opacity: 0, y: -8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -8 }}
+                            className="mb-6 flex items-center gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/[0.08] p-4"
+                        >
+                            <div className="w-5 h-5 border-2 border-amber-400/40 border-t-amber-300 rounded-full animate-spin" />
+                            <div className="flex-1">
+                                <p className="text-amber-200 text-sm font-semibold">
+                                    Ingestion in progress — {AGENT_TITLE[serverStatus.agent_name] || serverStatus.agent_name}
+                                </p>
+                                <p className="text-amber-200/60 text-xs mt-0.5">
+                                    Source: {serverStatus.source} · Elapsed: {formatElapsed(serverStatus.started_at)} · Do not start another ingestion
+                                </p>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
 
                 {/* ── Tab Switcher ─────────────────────────────── */}
                 <motion.div
