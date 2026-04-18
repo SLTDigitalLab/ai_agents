@@ -56,10 +56,10 @@ def _join_text_parts(parts: list[str]) -> str:
     return re.sub(r"[ \t]+", " ", merged).strip()
 
 
-def _message_content_to_text(content) -> str:
+def _message_content_to_text(content, strip: bool = True) -> str:
     """Normalize LangChain message content into plain text."""
     if isinstance(content, str):
-        return content.strip()
+        return content.strip() if strip else content
 
     if isinstance(content, list):
         text_parts = []
@@ -68,12 +68,13 @@ def _message_content_to_text(content) -> str:
                 text_parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(str(block["text"]))
-        return _join_text_parts(text_parts)
+        merged = _join_text_parts(text_parts)
+        return merged.strip() if strip else merged
 
     if content is None:
         return ""
 
-    return str(content).strip()
+    return str(content).strip() if strip else str(content)
 
 
 @router.post("")
@@ -150,7 +151,7 @@ async def chat(request: ChatRequest):
 
                         if kind == "on_chat_model_stream":
                             content = event["data"]["chunk"].content
-                            text = _message_content_to_text(content)
+                            text = _message_content_to_text(content, strip=False)
 
                             if text:
                                 streamed_any_text = True

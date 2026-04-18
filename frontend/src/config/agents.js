@@ -39,6 +39,26 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Administration department."
     },
 
+    // 4. IT
+    askit: {
+        id: "it",
+        title: "ASK IT",
+        subtitle: "Get support for technical issues, software access, and hardware requests.",
+        color: "from-sky-900 to-sky-600",
+        buttonColor: "bg-sky-600 hover:bg-sky-700",
+        disclaimer: "If you need any further clarifications, please reach out to the IT Helpdesk."
+    },
+
+    // 5. CIO
+    askcio: {
+        id: "cio",
+        title: "ASK CIO",
+        subtitle: "Get insights into IT strategy, digital transformation, and enterprise architecture.",
+        color: "from-amber-900 to-amber-600",
+        buttonColor: "bg-amber-600 hover:bg-amber-700",
+        disclaimer: "If you need any further clarifications, please reach out to the CIO Office."
+    },
+
     // 4. Process 
     askprocess: {
         id: "process",
