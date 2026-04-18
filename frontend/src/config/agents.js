@@ -1,4 +1,14 @@
 export const AGENTS = {
+    // Default supervisor landing page
+    askslt: {
+        id: "supervisor",
+        title: "Workmate AI",
+        subtitle: "Start here. Workmate AI can answer platform questions directly and route you to the right specialist when needed.",
+        color: "from-cyan-900 to-cyan-600",
+        buttonColor: "bg-cyan-600 hover:bg-cyan-700",
+        disclaimer: "Workmate AI may answer directly, ask for clarification, or route your request to a specialist agent."
+    },
+
     // 1. HR
     askhr: {
         id: "hr",
@@ -27,6 +37,26 @@ export const AGENTS = {
         color: "from-gray-900 to-gray-600",
         buttonColor: "bg-gray-600 hover:bg-gray-700",
         disclaimer: "If you need any further clarifications, please reach out to the Administration department."
+    },
+
+    // 4. IT
+    askit: {
+        id: "it",
+        title: "ASK IT",
+        subtitle: "Get support for technical issues, software access, and hardware requests.",
+        color: "from-sky-900 to-sky-600",
+        buttonColor: "bg-sky-600 hover:bg-sky-700",
+        disclaimer: "If you need any further clarifications, please reach out to the IT Helpdesk."
+    },
+
+    // 5. CIO
+    askcio: {
+        id: "cio",
+        title: "ASK CIO",
+        subtitle: "Get insights into IT strategy, digital transformation, and enterprise architecture.",
+        color: "from-amber-900 to-amber-600",
+        buttonColor: "bg-amber-600 hover:bg-amber-700",
+        disclaimer: "If you need any further clarifications, please reach out to the CIO Office."
     },
 
     // 4. Process 

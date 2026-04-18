@@ -4,6 +4,7 @@ Includes input guardrails (LLM-based intent + sentiment classification) run befo
 """
 
 import logging
+import re
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, HTTPException
@@ -20,6 +21,61 @@ router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
 
 BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
+
+
+def _join_text_parts(parts: list[str]) -> str:
+    """Join fragmented text blocks without crushing words together."""
+    merged = ""
+
+    for raw in parts:
+        text = str(raw or "")
+        if not text:
+            continue
+
+        if not merged:
+            merged = text
+            continue
+
+        prev = merged[-1]
+        nxt = text[0]
+
+        should_insert_space = (
+            not prev.isspace()
+            and not nxt.isspace()
+            and (
+                (prev.isalnum() and nxt.isalnum())
+                or (prev in ".!?,:;)" and (nxt.isalnum() or nxt == "("))
+            )
+        )
+
+        if should_insert_space:
+            merged += " "
+
+        merged += text
+
+    return re.sub(r"[ \t]+", " ", merged).strip()
+
+
+def _message_content_to_text(content, strip: bool = True) -> str:
+    """Normalize LangChain message content into plain text."""
+    if isinstance(content, str):
+        return content.strip() if strip else content
+
+    if isinstance(content, list):
+        text_parts = []
+        for block in content:
+            if isinstance(block, str):
+                text_parts.append(block)
+            elif isinstance(block, dict) and "text" in block:
+                text_parts.append(str(block["text"]))
+        merged = _join_text_parts(text_parts)
+        return merged.strip() if strip else merged
+
+    if content is None:
+        return ""
+
+    return str(content).strip() if strip else str(content)
+
 
 @router.post("")
 async def chat(request: ChatRequest):
@@ -40,9 +96,7 @@ async def chat(request: ChatRequest):
             guardrail = await classify_intent(request.message)
 
             if guardrail.action == "BLOCK":
-                logger.info(
-                    f"Guardrail BLOCK | reason={guardrail.reason}"
-                )
+                logger.info(f"Guardrail BLOCK | reason={guardrail.reason}")
                 # Save the blocked exchange to chat history
                 try:
                     async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
@@ -62,6 +116,7 @@ async def chat(request: ChatRequest):
                         await graph.aupdate_state(config, blocked_state)
                 except Exception as e:
                     logger.warning(f"Failed to save blocked exchange: {e}")
+
                 yield BLOCK_MESSAGE
                 return
 
@@ -85,23 +140,42 @@ async def chat(request: ChatRequest):
                 workflow = builder_fn()
                 graph = workflow.compile(checkpointer=checkpointer)
 
+                streamed_any_text = False
+
                 project_name = f"Ask SLT - {request.agent_id.upper()}"
                 with tracing_v2_enabled(project_name=project_name):
                     # We use astream_events (v2) for fine-grained streaming
                     async for event in graph.astream_events(state, config, version="v2"):
                         # ── Extract tokens from stream events ────────
                         kind = event["event"]
+
                         if kind == "on_chat_model_stream":
                             content = event["data"]["chunk"].content
-                            if content:
-                                if isinstance(content, list):
-                                    for block in content:
-                                        if isinstance(block, dict) and "text" in block:
-                                            yield block["text"]
-                                        elif isinstance(block, str):
-                                            yield block
-                                else:
-                                    yield str(content)
+                            text = _message_content_to_text(content, strip=False)
+
+                            if text:
+                                streamed_any_text = True
+                                yield text
+
+                # Fallback: if the graph responded without streaming tokens,
+                # fetch the latest AI message from final graph state.
+                if not streamed_any_text:
+                    snapshot = await graph.aget_state(config)
+
+                    if snapshot.values:
+                        messages = snapshot.values.get("messages", [])
+
+                        for msg in reversed(messages):
+                            if msg.type == "ai":
+                                text = _message_content_to_text(msg.content)
+                                if text:
+                                    logger.info(
+                                        "Non-streaming fallback response used | agent=%s | thread=%s",
+                                        request.agent_id,
+                                        request.thread_id,
+                                    )
+                                    yield text
+                                    break
 
         except Exception as exc:
             import traceback
@@ -126,9 +200,9 @@ async def get_history(agent_id: str, thread_id: str):
     try:
         with get_postgres_checkpointer(agent_id) as checkpointer:
             graph = workflow.compile(checkpointer=checkpointer)
-            
+
             snapshot = graph.get_state(config)
-            
+
             if not snapshot.values:
                 return {"messages": []}
 
@@ -144,17 +218,19 @@ async def get_history(agent_id: str, thread_id: str):
                         if isinstance(block, str):
                             text_parts.append(block)
                         elif isinstance(block, dict) and "text" in block:
-                            text_parts.append(block["text"])
-                    content = "".join(text_parts).strip()
+                            text_parts.append(str(block["text"]))
+                    content = _join_text_parts(text_parts)
                 elif not isinstance(content, str):
                     content = str(content).strip()
-                
+                else:
+                    content = content.strip()
+
                 if content:
                     messages.append({
                         "type": msg.type,
                         "content": content
                     })
-            
+
             return {"messages": messages}
 
     except Exception as exc:

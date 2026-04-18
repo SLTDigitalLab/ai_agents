@@ -15,6 +15,25 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
+// Utility function to append incoming text chunks to the current message text
+const appendChunkSmartly = (current, incoming) => {
+  if (!incoming) return current;
+  if (!current) return incoming;
+
+  const prev = current[current.length - 1];
+  const next = incoming[0];
+
+  const shouldInsertSpace =
+    !/\s/.test(prev) &&
+    !/\s/.test(next) &&
+    (
+      (/[A-Za-z0-9]/.test(prev) && /[A-Za-z0-9]/.test(next)) ||
+      (/[.!?,:;)\]-]/.test(prev) && /[A-Za-z0-9(]/.test(next))
+    );
+
+  return shouldInsertSpace ? `${current} ${incoming}` : current + incoming;
+};
+
 // ── Source UI Components ──────────────────────────────────────
 
 const SourceBadge = ({ name, url, color }) => (
@@ -320,8 +339,8 @@ const ChatInterface = ({ agentConfig }) => {
                 const { done, value } = await reader.read();
                 if (done) break;
 
-                const chunk = decoder.decode(value, { stream: true });
-                accumulatedText += chunk;
+                const chunk = decoder.decode(value, { stream: true }).replace(/\r/g, '');
+                accumulatedText = appendChunkSmartly(accumulatedText, chunk);
 
                 // Detect and strip Generative UI trigger tokens
                 let currentFormType = null;
