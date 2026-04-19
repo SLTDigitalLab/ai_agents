@@ -1,6 +1,6 @@
 export const AGENTS = {
     // Default supervisor landing page
-    askslt: {
+    workmateai: {
         id: "supervisor",
         title: "Workmate AI",
         subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, CIO, or Admin — all in one place.",
