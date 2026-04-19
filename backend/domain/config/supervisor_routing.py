@@ -57,6 +57,7 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "fairness review committee",
             "annual bonus",
             "salary",
+            "loan",
             "file a grievance",
             "grievance handling committee",
             "vacation of post",
