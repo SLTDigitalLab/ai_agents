@@ -238,7 +238,7 @@ FOLLOW_UP_PATTERNS: tuple[str, ...] = (
 # Initial tuning defaults for cosine similarity routing.
 # These should be refined later using real routing logs.
 STRONG_ROUTE_THRESHOLD = 0.40
-LOW_CONFIDENCE_THRESHOLD = 0.28
+LOW_CONFIDENCE_THRESHOLD = 0.25
 OUT_OF_SCOPE_THRESHOLD = 0.18
 MIN_ROUTE_MARGIN = 0.04
 FOLLOW_UP_STICKINESS_BOOST = 0.06

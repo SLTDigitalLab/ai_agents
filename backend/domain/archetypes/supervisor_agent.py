@@ -451,6 +451,30 @@ async def route_request(state: AgentState) -> dict:
 
     clarification_targets = _clarification_options_from_scores(scored, score_gap)
 
+    # Weak/ambiguous but two plausible specialists — fan out instead of asking
+    # the user to clarify. Synthesis gracefully handles declines.
+    if len(clarification_targets) >= 2:
+        fan_out_targets = clarification_targets[:MULTI_DELEGATE_MAX_AGENTS]
+        logger.info(
+            "Supervisor route | action=multi_delegate | reason=weak_ambiguous_fanout | targets=%s | top=%s %.4f | second=%s %.4f | query=%r",
+            fan_out_targets,
+            top_agent,
+            top_score,
+            second_agent,
+            second_score,
+            query[:200],
+        )
+        return {
+            "routing_action": "multi_delegate",
+            "routed_agent_ids": fan_out_targets,
+            "routing_reason": f"weak_ambiguous_fanout:{'+'.join(fan_out_targets)}",
+            "routing_scores": rounded_scores,
+            "delegation_query": query,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
     logger.info(
         "Supervisor route | action=clarify | top=%s %.4f | second=%s %.4f | last=%s | options=%s | query=%r",
         top_agent,
