@@ -358,6 +358,33 @@ async def route_request(state: AgentState) -> dict:
             "original_query": "",
         }
 
+    # Medium-confidence single winner — delegate directly instead of asking the user
+    # to confirm a single option. Only kicks in when runner-up isn't plausible enough
+    # to justify a fan-out.
+    if (
+        top_score >= LOW_CONFIDENCE_THRESHOLD
+        and score_gap >= MIN_ROUTE_MARGIN
+        and second_score < MULTI_DELEGATE_SECONDARY_THRESHOLD
+    ):
+        logger.info(
+            "Supervisor route | action=delegate | reason=medium_confidence_clear_winner | target=%s | top=%.4f | second=%s %.4f | query=%r",
+            top_agent,
+            top_score,
+            second_agent,
+            second_score,
+            query[:200],
+        )
+        return {
+            "routing_action": "delegate",
+            "routed_agent_id": top_agent,
+            "routing_reason": f"medium_confidence:{top_agent}",
+            "routing_scores": rounded_scores,
+            "delegation_query": query,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
     # Ambiguous but plausible on both top candidates — fan out instead of clarifying.
     if (
         top_score >= LOW_CONFIDENCE_THRESHOLD
@@ -629,18 +656,37 @@ async def multi_delegate(state: AgentState) -> dict:
     }
 
 
+_DECLINE_PATTERNS: tuple[str, ...] = (
+    r"\bi (?:can(?:not|'t)|am (?:not|unable)) (?:help|answer|assist)\b",
+    r"\b(?:not|outside) (?:my|the) (?:domain|area|scope|expertise)\b",
+    r"\bask (?:the )?(?:hr|finance|it|cio|admin) (?:team|agent|specialist)\b",
+    r"\bplease (?:contact|reach out to) (?:hr|finance|it|cio|admin)\b",
+    r"\bno relevant (?:documents|information) (?:were |was )?found\b",
+    r"\bcould not (?:find|retrieve) (?:the |any )?(?:relevant )?(?:information|answer)\b",
+    r"\bi don'?t have (?:the )?(?:information|details|answer)\b",
+)
+
+
+def _looks_like_decline(text: str) -> bool:
+    """Detect specialist answers that are non-answers (declines, redirects, empties)."""
+    stripped = text.strip().lower()
+    if len(stripped) < 20:
+        return True
+    return any(re.search(pattern, stripped) for pattern in _DECLINE_PATTERNS)
+
+
 async def synthesize_multi_answer(state: AgentState) -> dict:
     """Merge multiple specialist answers into one final user-facing reply."""
     specialist_answers: dict[str, str] = state.get("specialist_answers") or {}
     query = _latest_user_query(state)
 
-    non_empty = {
+    useful = {
         agent_id: answer.strip()
         for agent_id, answer in specialist_answers.items()
-        if answer and answer.strip()
+        if answer and answer.strip() and not _looks_like_decline(answer)
     }
 
-    if not non_empty:
+    if not useful:
         return {
             "messages": [
                 AIMessage(
@@ -653,24 +699,45 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
             "specialist_answers": {},
         }
 
+    # Only one specialist gave useful info — return it verbatim, no merging LLM call.
+    if len(useful) == 1:
+        only_answer = next(iter(useful.values()))
+        return {
+            "messages": [AIMessage(content=only_answer)],
+            "specialist_answers": {},
+        }
+
     answer_blocks: list[str] = []
-    for agent_id, answer in non_empty.items():
+    for agent_id, answer in useful.items():
         display_name = SPECIALIST_ROUTING_PROFILES.get(agent_id, {}).get(
             "display_name", agent_id.upper()
         )
         answer_blocks.append(f"[{display_name} specialist answer]\n{answer}")
 
     system_prompt = (
-        "You are Workmate AI. The user's question was ambiguous between two departments, "
-        "so both specialists were consulted. Compose ONE clear, cohesive answer for the "
-        "user using only the information in the specialist answers below.\n\n"
-        "Rules:\n"
-        "- If a specialist declined, said the topic is not theirs, or returned nothing useful, ignore that specialist.\n"
-        "- If only one specialist gave useful info, answer using just that.\n"
-        "- If both gave useful info on different facets, combine them coherently.\n"
-        "- Do not invent facts not present in the specialist answers.\n"
-        "- Do not mention routing, scores, multiple agents, or that specialists were consulted.\n"
-        "- Be concise and practical. Do not end with a closing question."
+        "You are Workmate AI composing a single final answer for the user from TWO "
+        "specialist answers below. Write clean, well-formed markdown prose.\n\n"
+        "HARD RULES:\n"
+        "- Do NOT interleave, blend, or stitch the two answers word-by-word or phrase-by-phrase. "
+        "That produces garbled text like 'Companyl providedorries' — never do this.\n"
+        "- If the two answers say substantially the same thing, pick the clearer, better-formed "
+        "one and use it as your base. You may add any unique factual detail from the other, "
+        "but only as a separate sentence or bullet.\n"
+        "- If the two answers cover different facets of the question, combine them as distinct, "
+        "clearly-written sections or bullets — each facet in its own complete sentence.\n"
+        "- Rewrite into clean grammatical English. Fix any obviously broken tokenization or "
+        "spacing you see in the source answers (e.g. missing spaces, merged words).\n"
+        "- Do not invent facts not supported by the specialist answers.\n"
+        "- Do not mention routing, multiple specialists, or that a merge happened.\n"
+        "- Be concise and practical. Do not end with a closing question.\n\n"
+        "SOURCE CITATIONS:\n"
+        "- Each specialist answer may contain a 'Sources:' section with markdown links like "
+        "[Filename](URL). You MUST preserve every unique source link you used.\n"
+        "- End your final answer with a single 'Sources:' section that lists the deduplicated "
+        "union of all [Filename](URL) links from the specialist answers you drew facts from.\n"
+        "- Do not invent source filenames or URLs. Only keep links that already appear in the "
+        "specialist answers above.\n"
+        "- If a specialist answer has no Sources section, just omit its sources."
     )
 
     user_prompt = (
