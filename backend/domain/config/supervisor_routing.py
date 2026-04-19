@@ -56,7 +56,7 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "peer evaluation",
             "fairness review committee",
             "annual bonus",
-            "salary increase",
+            "salary",
             "file a grievance",
             "grievance handling committee",
             "vacation of post",
@@ -91,12 +91,11 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
     "finance": {
         "display_name": "Finance",
         "description": (
-            "Finance and accounting matters such as salary, payroll execution, "
+            "Finance and accounting matters such as payroll execution, "
             "allowances, reimbursement, invoices, procurement budgets, payments, "
             "purchase orders, expense claims, and financial guidelines."
         ),
         "keywords": [
-            "salary",
             "payroll",
             "allowance",
             "invoice",
@@ -109,7 +108,6 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "finance policy",
         ],
         "examples": [
-            "When is the salary credited?",
             "How do I submit an expense claim?",
             "Who approves a procurement invoice?",
         ],
@@ -238,9 +236,9 @@ FOLLOW_UP_PATTERNS: tuple[str, ...] = (
 
 # Initial tuning defaults for cosine similarity routing.
 # These should be refined later using real routing logs.
-STRONG_ROUTE_THRESHOLD = 0.42
-LOW_CONFIDENCE_THRESHOLD = 0.30
-OUT_OF_SCOPE_THRESHOLD = 0.22
+STRONG_ROUTE_THRESHOLD = 0.40
+LOW_CONFIDENCE_THRESHOLD = 0.28
+OUT_OF_SCOPE_THRESHOLD = 0.18
 MIN_ROUTE_MARGIN = 0.04
 FOLLOW_UP_STICKINESS_BOOST = 0.06
 SHORT_FOLLOW_UP_MAX_WORDS = 6
