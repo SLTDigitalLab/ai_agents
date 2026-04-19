@@ -11,40 +11,92 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
     "hr": {
         "display_name": "HR",
         "description": (
-            "Human resources matters such as leave balance, leave entitlement, "
-            "annual leave, casual leave, sick leave, attendance, recruitment, "
-            "employee benefits, HR letters, internal people policies, and staff support."
+            "This domain handles employee-related matters at SLTMobitel, including "
+            "attendance marking, various leave types (annual, casual, sick, maternity, "
+            "overseas), and contract employment administration. It also covers employee "
+            "benefits and financial support like medical claims (including Agrahara) and "
+            "staff loans, as well as performance management, grievance handling, and "
+            "workplace policies such as digital media usage."
         ),
         "keywords": [
-            "leave",
+            "apply for leave",
             "leave balance",
-            "leave entitlement",
             "annual leave",
             "casual leave",
             "sick leave",
-            "attendance",
-            "employee benefits",
-            "recruitment",
-            "promotion",
-            "warning letter",
-            "hr policy",
-            "staff policy",
+            "medical leave",
+            "half day leave",
+            "short leave",
+            "maternity leave",
+            "child care leave",
+            "accident leave",
+            "overseas leave",
+            "mark attendance",
+            "finger scan machine",
+            "late attendance",
+            "unauthorized absence",
+            "ERP leave system",
+            "distress loan",
+            "motorcycle loan",
+            "motor car loan",
+            "TDC education loan",
+            "loan guarantor",
+            "top up loan",
+            "loan interest rate",
+            "medical claim",
+            "Agrahara reimbursement",
+            "spectacles claim",
+            "dental claim",
+            "hospitalization benefit",
+            "critical illness benefit",
+            "add dependents ERP",
+            "performance appraisal",
+            "KPI targets",
+            "mid-year review",
+            "peer evaluation",
+            "fairness review committee",
+            "annual bonus",
+            "salary",
+            "loan",
+            "file a grievance",
+            "grievance handling committee",
+            "vacation of post",
+            "VOP",
+            "probation period",
+            "EPF",
+            "ETF",
+            "digital media policy",
+            "social media rules",
         ],
         "examples": [
-            "How many annual leave days do I have left?",
-            "I need to check my leave balance.",
-            "Where can I find the attendance policy?",
+            "How do I apply for annual leave in the ERP system?",
+            "What is the policy for taking an afternoon half-day leave?",
+            "Where can I find the application for a distress loan?",
+            "How many sick leave days do I get in my first year of probation?",
+            "Can I apply for a motorcycle loan if I don't have 5 years of service?",
+            "How do I claim reimbursement for my new spectacles?",
+            "What documents are needed to apply for the critical illness medical benefit?",
+            "How do I add my spouse and newborn child to the Agrahara medical benefits?",
+            "What is the process for the mid-year performance review discussion?",
+            "How are individual KPI targets set and updated in the ERP system?",
+            "What should I do if I have a grievance with my manager regarding my performance rating?",
+            "Am I allowed to post about SLTMobitel on my personal Facebook account?",
+            "What is the disciplinary penalty for unauthorized absence from work?",
+            "How do I apply for overseas no-pay leave for higher studies?",
+            "Does my contract employment include EPF and ETF contributions?",
+            "What happens to my unutilized earned leave when my contract ends?",
+            "What is the maximum amount I can get for the TDC education loan?",
+            "Where do I submit the valuation report for a used motor car loan?",
         ],
     },
     "finance": {
         "display_name": "Finance",
         "description": (
-            "Finance and accounting matters such as salary, payroll execution, "
+            "Finance and accounting matters such as payroll execution, "
             "allowances, reimbursement, invoices, procurement budgets, payments, "
             "purchase orders, expense claims, and financial guidelines."
         ),
         "keywords": [
-            "salary",
             "payroll",
             "allowance",
             "invoice",
@@ -57,7 +109,6 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "finance policy",
         ],
         "examples": [
-            "When is the salary credited?",
             "How do I submit an expense claim?",
             "Who approves a procurement invoice?",
         ],
@@ -186,9 +237,21 @@ FOLLOW_UP_PATTERNS: tuple[str, ...] = (
 
 # Initial tuning defaults for cosine similarity routing.
 # These should be refined later using real routing logs.
-STRONG_ROUTE_THRESHOLD = 0.42
-LOW_CONFIDENCE_THRESHOLD = 0.30
-OUT_OF_SCOPE_THRESHOLD = 0.22
+STRONG_ROUTE_THRESHOLD = 0.40
+LOW_CONFIDENCE_THRESHOLD = 0.28
+OUT_OF_SCOPE_THRESHOLD = 0.18
 MIN_ROUTE_MARGIN = 0.04
 FOLLOW_UP_STICKINESS_BOOST = 0.06
 SHORT_FOLLOW_UP_MAX_WORDS = 6
+
+# Multi-specialist fan-out: when the top match is not strong enough to delegate
+# alone but the runner-up is also plausible, consult both specialists in parallel
+# and synthesize a single answer instead of asking the user to clarify.
+MULTI_DELEGATE_SECONDARY_THRESHOLD = 0.30
+MULTI_DELEGATE_MAX_AGENTS = 2
+
+# Keyword match boost: when a query contains one of a specialist's exact keywords
+# (word-boundary match, case-insensitive), add this to that specialist's cosine
+# score. This corrects for profile-embedding dilution on short queries where the
+# semantic model under-scores an obvious keyword hit.
+KEYWORD_MATCH_BOOST = 0.12

@@ -30,8 +30,11 @@ from domain.config.supervisor_routing import (
     FOLLOW_UP_PATTERNS,
     FOLLOW_UP_STICKINESS_BOOST,
     GENERAL_HELP_PATTERNS,
+    KEYWORD_MATCH_BOOST,
     LOW_CONFIDENCE_THRESHOLD,
     MIN_ROUTE_MARGIN,
+    MULTI_DELEGATE_MAX_AGENTS,
+    MULTI_DELEGATE_SECONDARY_THRESHOLD,
     OUT_OF_SCOPE_THRESHOLD,
     SHORT_FOLLOW_UP_MAX_WORDS,
     SPECIALIST_ROUTING_PROFILES,
@@ -226,6 +229,33 @@ def _clarification_options_from_scores(
     return [top_agent]
 
 
+@lru_cache(maxsize=1)
+def _specialist_keyword_patterns() -> dict[str, list[tuple[str, re.Pattern[str]]]]:
+    """Compile word-boundary regexes for every specialist keyword once."""
+    compiled: dict[str, list[tuple[str, re.Pattern[str]]]] = {}
+    for agent_id, profile in SPECIALIST_ROUTING_PROFILES.items():
+        patterns: list[tuple[str, re.Pattern[str]]] = []
+        for keyword in profile.get("keywords", []):
+            kw = str(keyword).strip()
+            if not kw:
+                continue
+            patterns.append(
+                (kw, re.compile(rf"\b{re.escape(kw.lower())}\b", re.IGNORECASE))
+            )
+        compiled[agent_id] = patterns
+    return compiled
+
+
+def _matched_keywords(query: str, agent_id: str) -> list[str]:
+    """Return the list of this agent's keywords that appear in the query."""
+    normalized = query.lower()
+    matches: list[str] = []
+    for keyword, pattern in _specialist_keyword_patterns().get(agent_id, []):
+        if pattern.search(normalized):
+            matches.append(keyword)
+    return matches
+
+
 async def _score_specialists(
     query: str,
     last_specialist_agent: str | None,
@@ -236,11 +266,21 @@ async def _score_specialists(
     profile_vectors = _specialist_profile_vectors()
 
     scored: list[tuple[str, float]] = []
+    boost_log: dict[str, list[str]] = {}
     for agent_id, vector in profile_vectors.items():
         score = _cosine_similarity(query_vector, vector)
+
+        keyword_hits = _matched_keywords(query, agent_id)
+        if keyword_hits:
+            score += KEYWORD_MATCH_BOOST
+            boost_log[agent_id] = keyword_hits
+
         if last_specialist_agent == agent_id and _is_short_follow_up(query):
             score += FOLLOW_UP_STICKINESS_BOOST
         scored.append((agent_id, score))
+
+    if boost_log:
+        logger.info("Supervisor keyword boost | hits=%s", boost_log)
 
     scored.sort(key=lambda item: item[1], reverse=True)
     return scored
@@ -351,6 +391,59 @@ async def route_request(state: AgentState) -> dict:
             "routing_action": "out_of_scope",
             "routing_reason": "very_low_specialist_similarity",
             "routing_scores": rounded_scores,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
+    # Medium-confidence single winner — delegate directly instead of asking the user
+    # to confirm a single option. Only kicks in when runner-up isn't plausible enough
+    # to justify a fan-out.
+    if (
+        top_score >= LOW_CONFIDENCE_THRESHOLD
+        and score_gap >= MIN_ROUTE_MARGIN
+        and second_score < MULTI_DELEGATE_SECONDARY_THRESHOLD
+    ):
+        logger.info(
+            "Supervisor route | action=delegate | reason=medium_confidence_clear_winner | target=%s | top=%.4f | second=%s %.4f | query=%r",
+            top_agent,
+            top_score,
+            second_agent,
+            second_score,
+            query[:200],
+        )
+        return {
+            "routing_action": "delegate",
+            "routed_agent_id": top_agent,
+            "routing_reason": f"medium_confidence:{top_agent}",
+            "routing_scores": rounded_scores,
+            "delegation_query": query,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
+    # Ambiguous but plausible on both top candidates — fan out instead of clarifying.
+    if (
+        top_score >= LOW_CONFIDENCE_THRESHOLD
+        and second_score >= MULTI_DELEGATE_SECONDARY_THRESHOLD
+    ):
+        fan_out_targets = [top_agent, second_agent][:MULTI_DELEGATE_MAX_AGENTS]
+        logger.info(
+            "Supervisor route | action=multi_delegate | targets=%s | top=%s %.4f | second=%s %.4f | query=%r",
+            fan_out_targets,
+            top_agent,
+            top_score,
+            second_agent,
+            second_score,
+            query[:200],
+        )
+        return {
+            "routing_action": "multi_delegate",
+            "routed_agent_ids": fan_out_targets,
+            "routing_reason": f"multi_delegate:{'+'.join(fan_out_targets)}",
+            "routing_scores": rounded_scores,
+            "delegation_query": query,
             "pending_clarification": False,
             "clarification_options": [],
             "original_query": "",
@@ -531,6 +624,178 @@ def _build_delegate_node(agent_id: str):
     return _delegate_to_specialist
 
 
+@lru_cache(maxsize=None)
+def _compiled_specialist(agent_id: str):
+    """Compile a specialist graph once per agent and cache it."""
+    return SPECIALIST_BUILDERS[agent_id]().compile()
+
+
+async def _invoke_specialist_for_fan_out(
+    agent_id: str,
+    base_state: AgentState,
+    delegation_query: str,
+) -> tuple[str, str]:
+    """Run a single specialist and return its final answer text (or a decline marker)."""
+    specialist_state = dict(base_state)
+    specialist_state["agent_id"] = agent_id
+    if delegation_query:
+        specialist_state["messages"] = _replace_latest_human_message(
+            base_state.get("messages", []),
+            delegation_query,
+        )
+
+    try:
+        result = await _compiled_specialist(agent_id).ainvoke(specialist_state)
+        ai_messages = [
+            message
+            for message in result.get("messages", [])
+            if getattr(message, "type", None) == "ai"
+        ]
+        if not ai_messages:
+            return agent_id, ""
+        return agent_id, _extract_text(ai_messages[-1].content)
+    except Exception:
+        logger.exception("Supervisor multi-delegate failed for agent=%s", agent_id)
+        return agent_id, ""
+
+
+async def multi_delegate(state: AgentState) -> dict:
+    """Run the top specialists in parallel and stash their answers for synthesis."""
+    agent_ids = list(state.get("routed_agent_ids") or [])
+    if not agent_ids:
+        return {
+            "specialist_answers": {},
+            "last_specialist_agent": None,
+        }
+
+    delegation_query = state.get("delegation_query") or _latest_user_query(state)
+
+    results = await asyncio.gather(
+        *[
+            _invoke_specialist_for_fan_out(agent_id, state, delegation_query)
+            for agent_id in agent_ids
+        ]
+    )
+
+    specialist_answers = {agent_id: answer for agent_id, answer in results}
+    logger.info(
+        "Supervisor multi_delegate | agents=%s | answer_lengths=%s",
+        agent_ids,
+        {aid: len(ans) for aid, ans in specialist_answers.items()},
+    )
+
+    return {
+        "specialist_answers": specialist_answers,
+        "last_specialist_agent": None,
+        "pending_clarification": False,
+        "clarification_options": [],
+        "original_query": "",
+        "delegation_query": "",
+    }
+
+
+_DECLINE_PATTERNS: tuple[str, ...] = (
+    r"\bi (?:can(?:not|'t)|am (?:not|unable)) (?:help|answer|assist)\b",
+    r"\b(?:not|outside) (?:my|the) (?:domain|area|scope|expertise)\b",
+    r"\bask (?:the )?(?:hr|finance|it|cio|admin) (?:team|agent|specialist)\b",
+    r"\bplease (?:contact|reach out to) (?:hr|finance|it|cio|admin)\b",
+    r"\bno relevant (?:documents|information) (?:were |was )?found\b",
+    r"\bcould not (?:find|retrieve) (?:the |any )?(?:relevant )?(?:information|answer)\b",
+    r"\bi don'?t have (?:the )?(?:information|details|answer)\b",
+)
+
+
+def _looks_like_decline(text: str) -> bool:
+    """Detect specialist answers that are non-answers (declines, redirects, empties)."""
+    stripped = text.strip().lower()
+    if len(stripped) < 20:
+        return True
+    return any(re.search(pattern, stripped) for pattern in _DECLINE_PATTERNS)
+
+
+async def synthesize_multi_answer(state: AgentState) -> dict:
+    """Merge multiple specialist answers into one final user-facing reply."""
+    specialist_answers: dict[str, str] = state.get("specialist_answers") or {}
+    query = _latest_user_query(state)
+
+    useful = {
+        agent_id: answer.strip()
+        for agent_id, answer in specialist_answers.items()
+        if answer and answer.strip() and not _looks_like_decline(answer)
+    }
+
+    if not useful:
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        "I could not find a clear answer for this in our HR, Finance, "
+                        "Admin, IT, or CIO knowledge bases. Could you rephrase or add a bit more detail?"
+                    )
+                )
+            ],
+            "specialist_answers": {},
+        }
+
+    # Only one specialist gave useful info — return it verbatim, no merging LLM call.
+    if len(useful) == 1:
+        only_answer = next(iter(useful.values()))
+        return {
+            "messages": [AIMessage(content=only_answer)],
+            "specialist_answers": {},
+        }
+
+    answer_blocks: list[str] = []
+    for agent_id, answer in useful.items():
+        display_name = SPECIALIST_ROUTING_PROFILES.get(agent_id, {}).get(
+            "display_name", agent_id.upper()
+        )
+        answer_blocks.append(f"[{display_name} specialist answer]\n{answer}")
+
+    system_prompt = (
+        "You are Workmate AI composing a single final answer for the user from TWO "
+        "specialist answers below. Write clean, well-formed markdown prose.\n\n"
+        "HARD RULES:\n"
+        "- Do NOT interleave, blend, or stitch the two answers word-by-word or phrase-by-phrase. "
+        "That produces garbled text like 'Companyl providedorries' — never do this.\n"
+        "- If the two answers say substantially the same thing, pick the clearer, better-formed "
+        "one and use it as your base. You may add any unique factual detail from the other, "
+        "but only as a separate sentence or bullet.\n"
+        "- If the two answers cover different facets of the question, combine them as distinct, "
+        "clearly-written sections or bullets — each facet in its own complete sentence.\n"
+        "- Rewrite into clean grammatical English. Fix any obviously broken tokenization or "
+        "spacing you see in the source answers (e.g. missing spaces, merged words).\n"
+        "- Do not invent facts not supported by the specialist answers.\n"
+        "- Do not mention routing, multiple specialists, or that a merge happened.\n"
+        "- Be concise and practical. Do not end with a closing question.\n\n"
+        "SOURCE CITATIONS:\n"
+        "- Each specialist answer may contain a 'Sources:' section with markdown links like "
+        "[Filename](URL). You MUST preserve every unique source link you used.\n"
+        "- End your final answer with a single 'Sources:' section that lists the deduplicated "
+        "union of all [Filename](URL) links from the specialist answers you drew facts from.\n"
+        "- Do not invent source filenames or URLs. Only keep links that already appear in the "
+        "specialist answers above.\n"
+        "- If a specialist answer has no Sources section, just omit its sources."
+    )
+
+    user_prompt = (
+        f"User question:\n{query}\n\n"
+        + "\n\n".join(answer_blocks)
+    )
+
+    response = await llm.ainvoke(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+    )
+
+    return {
+        "messages": [response],
+        "specialist_answers": {},
+    }
+
+
 def _route_to_node(state: AgentState) -> str:
     """Translate routing state into the next LangGraph node name."""
     action = state.get("routing_action")
@@ -545,6 +810,9 @@ def _route_to_node(state: AgentState) -> str:
         routed_agent_id = state.get("routed_agent_id")
         if routed_agent_id in SPECIALIST_BUILDERS:
             return f"delegate_{routed_agent_id}"
+    if action == "multi_delegate":
+        if state.get("routed_agent_ids"):
+            return "multi_delegate"
     return "ask_for_clarification"
 
 
@@ -556,6 +824,8 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_node("answer_directly", answer_directly)
     workflow.add_node("ask_for_clarification", ask_for_clarification)
     workflow.add_node("respond_out_of_scope", respond_out_of_scope)
+    workflow.add_node("multi_delegate", multi_delegate)
+    workflow.add_node("synthesize_multi_answer", synthesize_multi_answer)
 
     for agent_id in SPECIALIST_BUILDERS:
         workflow.add_node(f"delegate_{agent_id}", _build_delegate_node(agent_id))
@@ -568,6 +838,7 @@ def build_supervisor_workflow() -> StateGraph:
             "answer_directly": "answer_directly",
             "ask_for_clarification": "ask_for_clarification",
             "respond_out_of_scope": "respond_out_of_scope",
+            "multi_delegate": "multi_delegate",
             "delegate_hr": "delegate_hr",
             "delegate_finance": "delegate_finance",
             "delegate_admin": "delegate_admin",
@@ -579,6 +850,8 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("answer_directly", END)
     workflow.add_edge("ask_for_clarification", END)
     workflow.add_edge("respond_out_of_scope", END)
+    workflow.add_edge("multi_delegate", "synthesize_multi_answer")
+    workflow.add_edge("synthesize_multi_answer", END)
     workflow.add_edge("delegate_hr", END)
     workflow.add_edge("delegate_finance", END)
     workflow.add_edge("delegate_admin", END)
