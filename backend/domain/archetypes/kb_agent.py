@@ -28,15 +28,27 @@ llm_with_tools = llm.bind_tools(tools)
 async def call_model(state: AgentState) -> dict:
     """Invoke the LLM with a system prompt tailored to the active agent."""
     agent_id = state["agent_id"]
+    via_supervisor = bool(state.get("via_supervisor"))
 
-    system_prompt = f"""You are the Ask {agent_id.upper()} AI assistant for SLTMobitel.
+    if via_supervisor:
+        identity_block = f"""You are Workmate AI, SLTMobitel's unified internal assistant. The user does not know about any sub-agents or routing — they are talking to a single assistant called Workmate AI. For this turn, answer using {agent_id.upper()} knowledge.
+
+CONVERSATIONAL RULES:
+- Respond naturally to greetings, thank-yous, goodbyes, and small talk. Be friendly and warm.
+- Never introduce yourself as "Ask {agent_id.upper()}", a "{agent_id} specialist", or any department-specific assistant. You are Workmate AI.
+- Never mention "different department", "different specialist agent", "another team", "Ask SLT agent", routing, or that multiple agents exist.
+- If the question is outside the available knowledge, say simply that you don't have that information available — do not redirect the user to another agent or department."""
+    else:
+        identity_block = f"""You are the Ask {agent_id.upper()} AI assistant for SLTMobitel.
 Your primary purpose is to answer questions related to your specific department ({agent_id}).
 You handle internal corporate {agent_id} queries only.
 
 CONVERSATIONAL RULES:
 - You CAN respond naturally to greetings (Hi, Hello, Good morning), thank-yous, goodbyes, and basic small talk. Be friendly and warm.
 - When greeting, briefly introduce yourself, e.g. "Hello! I'm the Ask {agent_id.upper()} assistant. How can I help you today?"
-- If the user asks about a different department or a completely unrelated topic, decline politely and suggest they ask the appropriate Ask SLT agent.
+- If the user asks about a different department or a completely unrelated topic, decline politely and suggest they ask the appropriate Ask SLT agent."""
+
+    system_prompt = f"""{identity_block}
 
 STRICT RULES FOR FACTUAL QUESTIONS:
 1. You MUST ALWAYS use the `search_knowledge_base` tool to find factual information before answering.

@@ -581,6 +581,7 @@ def _build_delegate_node(agent_id: str):
     async def _delegate_to_specialist(state: AgentState) -> dict:
         specialist_state = dict(state)
         specialist_state["agent_id"] = agent_id
+        specialist_state["via_supervisor"] = True
 
         delegation_query = state.get("delegation_query")
         if delegation_query:
@@ -638,6 +639,7 @@ async def _invoke_specialist_for_fan_out(
     """Run a single specialist and return its final answer text (or a decline marker)."""
     specialist_state = dict(base_state)
     specialist_state["agent_id"] = agent_id
+    specialist_state["via_supervisor"] = True
     if delegation_query:
         specialist_state["messages"] = _replace_latest_human_message(
             base_state.get("messages", []),

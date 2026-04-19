@@ -3,10 +3,10 @@ export const AGENTS = {
     askslt: {
         id: "supervisor",
         title: "Workmate AI",
-        subtitle: "Start here. Workmate AI can answer platform questions directly and route you to the right specialist when needed.",
+        subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, CIO, or Admin — all in one place.",
         color: "from-cyan-900 to-cyan-600",
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
-        disclaimer: "Workmate AI may answer directly, ask for clarification, or route your request to a specialist agent."
+        disclaimer: "Workmate AI provides internal workplace information. Please verify critical details with the relevant department."
     },
 
     // 1. HR
