@@ -709,6 +709,8 @@ async def multi_delegate(state: AgentState) -> dict:
         agent_ids,
         {aid: len(ans) for aid, ans in specialist_answers.items()},
     )
+    for aid, ans in specialist_answers.items():
+        logger.info("Supervisor multi_delegate raw | agent=%s | answer=%r", aid, ans[:600])
 
     return {
         "specialist_answers": specialist_answers,
@@ -784,6 +786,11 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
         "HARD RULES:\n"
         "- Do NOT interleave, blend, or stitch the two answers word-by-word or phrase-by-phrase. "
         "That produces garbled text like 'Companyl providedorries' — never do this.\n"
+        "- CRITICAL: If one specialist answer provides substantive factual content and the "
+        "other says it does not know, cannot answer, has no information, or declines in any "
+        "form — IGNORE the decline completely and base your answer ONLY on the substantive "
+        "answer. NEVER output 'I don't have enough information' when any specialist gave a "
+        "real answer.\n"
         "- If the two answers say substantially the same thing, pick the clearer, better-formed "
         "one and use it as your base. You may add any unique factual detail from the other, "
         "but only as a separate sentence or bullet.\n"
