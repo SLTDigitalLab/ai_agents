@@ -45,3 +45,7 @@ class AgentState(TypedDict):
     clarification_options: NotRequired[list[str]]
     original_query: NotRequired[str]
     delegation_query: NotRequired[str]
+
+    # Multi-specialist fan-out (set when routing is ambiguous between two specialists).
+    routed_agent_ids: NotRequired[list[str]]
+    specialist_answers: NotRequired[dict[str, str]]
