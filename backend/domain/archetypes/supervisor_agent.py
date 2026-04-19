@@ -30,6 +30,7 @@ from domain.config.supervisor_routing import (
     FOLLOW_UP_PATTERNS,
     FOLLOW_UP_STICKINESS_BOOST,
     GENERAL_HELP_PATTERNS,
+    KEYWORD_MATCH_BOOST,
     LOW_CONFIDENCE_THRESHOLD,
     MIN_ROUTE_MARGIN,
     MULTI_DELEGATE_MAX_AGENTS,
@@ -228,6 +229,33 @@ def _clarification_options_from_scores(
     return [top_agent]
 
 
+@lru_cache(maxsize=1)
+def _specialist_keyword_patterns() -> dict[str, list[tuple[str, re.Pattern[str]]]]:
+    """Compile word-boundary regexes for every specialist keyword once."""
+    compiled: dict[str, list[tuple[str, re.Pattern[str]]]] = {}
+    for agent_id, profile in SPECIALIST_ROUTING_PROFILES.items():
+        patterns: list[tuple[str, re.Pattern[str]]] = []
+        for keyword in profile.get("keywords", []):
+            kw = str(keyword).strip()
+            if not kw:
+                continue
+            patterns.append(
+                (kw, re.compile(rf"\b{re.escape(kw.lower())}\b", re.IGNORECASE))
+            )
+        compiled[agent_id] = patterns
+    return compiled
+
+
+def _matched_keywords(query: str, agent_id: str) -> list[str]:
+    """Return the list of this agent's keywords that appear in the query."""
+    normalized = query.lower()
+    matches: list[str] = []
+    for keyword, pattern in _specialist_keyword_patterns().get(agent_id, []):
+        if pattern.search(normalized):
+            matches.append(keyword)
+    return matches
+
+
 async def _score_specialists(
     query: str,
     last_specialist_agent: str | None,
@@ -238,11 +266,21 @@ async def _score_specialists(
     profile_vectors = _specialist_profile_vectors()
 
     scored: list[tuple[str, float]] = []
+    boost_log: dict[str, list[str]] = {}
     for agent_id, vector in profile_vectors.items():
         score = _cosine_similarity(query_vector, vector)
+
+        keyword_hits = _matched_keywords(query, agent_id)
+        if keyword_hits:
+            score += KEYWORD_MATCH_BOOST
+            boost_log[agent_id] = keyword_hits
+
         if last_specialist_agent == agent_id and _is_short_follow_up(query):
             score += FOLLOW_UP_STICKINESS_BOOST
         scored.append((agent_id, score))
+
+    if boost_log:
+        logger.info("Supervisor keyword boost | hits=%s", boost_log)
 
     scored.sort(key=lambda item: item[1], reverse=True)
     return scored

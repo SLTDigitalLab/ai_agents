@@ -248,3 +248,9 @@ SHORT_FOLLOW_UP_MAX_WORDS = 6
 # and synthesize a single answer instead of asking the user to clarify.
 MULTI_DELEGATE_SECONDARY_THRESHOLD = 0.30
 MULTI_DELEGATE_MAX_AGENTS = 2
+
+# Keyword match boost: when a query contains one of a specialist's exact keywords
+# (word-boundary match, case-insensitive), add this to that specialist's cosine
+# score. This corrects for profile-embedding dilution on short queries where the
+# semantic model under-scores an obvious keyword hit.
+KEYWORD_MATCH_BOOST = 0.12
