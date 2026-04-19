@@ -11,7 +11,7 @@ from langchain_core.documents import Document
 from core.llm import get_embedding_model
 from langchain_text_splitters import HTMLHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_unstructured import UnstructuredLoader
-from langchain_qdrant import QdrantVectorStore
+from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from qdrant_client import QdrantClient, models
 import pytesseract
 
@@ -33,17 +33,27 @@ class IngestionService:
         # 1. Initialize the Embedding Model from Factory
         self.embeddings = get_embedding_model()
 
-        # 2. Initialize Qdrant Client
+        # 2. Sparse embedding model (BM25) for hybrid search.
+        # Combines lexical matching with dense semantic search - essential
+        # for catching exact product codes, SKUs, IDs, and proper nouns
+        # that dense embeddings often mis-rank.
+        self.sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+
+        # 3. Initialize Qdrant Client
         self.client = QdrantClient(url=settings.QDRANT_URL)
 
-        # 3. Secondary splitter for chunks that are still too large
+        # 4. Secondary splitter for chunks that are still too large
         self.recursive_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1600,
             chunk_overlap=300,
         )
 
     async def _ensure_collection_exists(self, collection_name: str):
-        """Manually checks if a collection exists. If not, creates it safely."""
+        """Manually checks if a collection exists. If not, creates it safely.
+
+        Collections are created with NAMED dense + sparse vector configs to
+        support hybrid retrieval (dense semantic + BM25 lexical).
+        """
         try:
             self.client.get_collection(collection_name)
         except Exception:
@@ -51,10 +61,17 @@ class IngestionService:
             # Use the dimension size from settings (default 3072 for Gemini)
             self.client.create_collection(
                 collection_name=collection_name,
-                vectors_config=models.VectorParams(
-                    size=settings.EMBEDDING_DIMENSIONS,
-                    distance=models.Distance.COSINE,
-                ),
+                vectors_config={
+                    "dense": models.VectorParams(
+                        size=settings.EMBEDDING_DIMENSIONS,
+                        distance=models.Distance.COSINE,
+                    ),
+                },
+                sparse_vectors_config={
+                    "sparse": models.SparseVectorParams(
+                        index=models.SparseIndexParams(on_disk=False),
+                    ),
+                },
             )
 
     async def ingest_website(self, url: str, agent_name: str):
@@ -104,11 +121,15 @@ class IngestionService:
         # Create collection manually first
         await self._ensure_collection_exists(collection_name)
 
-        # Upsert to Qdrant
+        # Upsert to Qdrant (hybrid: dense + sparse)
         vector_store = QdrantVectorStore(
             client=self.client,
             collection_name=collection_name,
             embedding=self.embeddings,
+            sparse_embedding=self.sparse_embeddings,
+            retrieval_mode=RetrievalMode.HYBRID,
+            vector_name="dense",
+            sparse_vector_name="sparse",
         )
         vector_store.add_documents(docs)
 
@@ -250,11 +271,15 @@ class IngestionService:
             collection_name = f"{agent_name}_docs"
             await self._ensure_collection_exists(collection_name)
             
-            # Initialize Vector Store once
+            # Initialize Vector Store once (hybrid: dense + sparse)
             vector_store = QdrantVectorStore(
                 client=self.client,
                 collection_name=collection_name,
                 embedding=self.embeddings,
+                sparse_embedding=self.sparse_embeddings,
+                retrieval_mode=RetrievalMode.HYBRID,
+                vector_name="dense",
+                sparse_vector_name="sparse",
             )
 
             skipped_files = []

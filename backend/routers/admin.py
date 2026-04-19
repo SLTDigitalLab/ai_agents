@@ -30,8 +30,13 @@ async def ingest_url(request: UrlIngestRequest):
     Ingest content from a URL and store embeddings in Qdrant.
     """
     ingestion_status.start(agent_name=request.agent_name, source="url")
+    result = None
     try:
         result = await ingestion_service.ingest_website(request.url, request.agent_name)
+    except Exception as exc:
+        logger.exception(f"URL ingestion failed for agent='{request.agent_name}' url='{request.url}'")
+        result = {"status": "error", "message": f"{type(exc).__name__}: {exc}"}
+        raise
     finally:
         ingestion_status.finish(result if isinstance(result, dict) else {"status": "error", "message": "Unknown error"})
     return result
@@ -43,6 +48,7 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
     from a OneDrive folder using the Graph API.
     """
     ingestion_status.start(agent_name=request.agent_name, source="onedrive")
+    result = None
     try:
         result = await ingestion_service.process_onedrive_ingestion(
             folder_id=request.folder_id,
@@ -50,6 +56,10 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
             agent_name=request.agent_name,
             force=request.force,
         )
+    except Exception as exc:
+        logger.exception(f"OneDrive ingestion failed for agent='{request.agent_name}' folder='{request.folder_id}'")
+        result = {"status": "error", "message": f"{type(exc).__name__}: {exc}"}
+        raise
     finally:
         ingestion_status.finish(result if isinstance(result, dict) else {"status": "error", "message": "Unknown error"})
     return result
