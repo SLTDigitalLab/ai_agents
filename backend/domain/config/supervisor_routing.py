@@ -192,3 +192,9 @@ OUT_OF_SCOPE_THRESHOLD = 0.22
 MIN_ROUTE_MARGIN = 0.04
 FOLLOW_UP_STICKINESS_BOOST = 0.06
 SHORT_FOLLOW_UP_MAX_WORDS = 6
+
+# Multi-specialist fan-out: when the top match is not strong enough to delegate
+# alone but the runner-up is also plausible, consult both specialists in parallel
+# and synthesize a single answer instead of asking the user to clarify.
+MULTI_DELEGATE_SECONDARY_THRESHOLD = 0.30
+MULTI_DELEGATE_MAX_AGENTS = 2
