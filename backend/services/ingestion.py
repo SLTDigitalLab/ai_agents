@@ -231,12 +231,14 @@ class IngestionService:
         session.mount('https://', HTTPAdapter(max_retries=retries))
         session.mount('http://', HTTPAdapter(max_retries=retries))
 
-        # 1. List files in the folder (follow pagination until exhausted)
+        # 1. List files in the folder (follow pagination until exhausted).
+        # NOTE: do NOT use $select here — @microsoft.graph.downloadUrl is an
+        # OData instance annotation and gets dropped when $select is set,
+        # which causes every file to be silently skipped.
         headers = {"Authorization": f"Bearer {access_token}"}
-        select = "id,name,file,folder,webUrl,lastModifiedDateTime,@microsoft.graph.downloadUrl"
         url = (
             f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
-            f"?$top=200&$select={select}"
+            f"?$top=200"
         )
 
         items = []
@@ -298,6 +300,8 @@ class IngestionService:
                 file_name = item["name"]
                 download_url = item.get("@microsoft.graph.downloadUrl")
                 if not download_url:
+                    log.error(f"No download URL for {file_name}; skipping.")
+                    failed_files.append({"file": file_name, "reason": "no download URL from Graph"})
                     continue
 
                 onedrive_id = item.get("id", "unknown")
