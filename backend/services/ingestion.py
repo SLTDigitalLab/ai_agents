@@ -231,24 +231,33 @@ class IngestionService:
         session.mount('https://', HTTPAdapter(max_retries=retries))
         session.mount('http://', HTTPAdapter(max_retries=retries))
 
-        # 1. List files in the folder
+        # 1. List files in the folder (follow pagination until exhausted)
         headers = {"Authorization": f"Bearer {access_token}"}
-        url = f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
-        
+        select = "id,name,file,folder,webUrl,lastModifiedDateTime,@microsoft.graph.downloadUrl"
+        url = (
+            f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
+            f"?$top=200&$select={select}"
+        )
+
+        items = []
         try:
-            resp = session.get(url, headers=headers, timeout=30)
-            if resp.status_code != 200:
-                return {
-                    "status": "error",
-                    "message": f"Graph API Error: {resp.status_code} {resp.text}",
-                }
+            while url:
+                resp = session.get(url, headers=headers, timeout=30)
+                if resp.status_code != 200:
+                    return {
+                        "status": "error",
+                        "message": f"Graph API Error: {resp.status_code} {resp.text}",
+                    }
+                payload = resp.json()
+                items.extend(payload.get("value", []))
+                url = payload.get("@odata.nextLink")
         except Exception as e:
             return {
                 "status": "error",
                 "message": f"Failed to connect to Microsoft Graph API: {e}",
             }
 
-        items = resp.json().get("value", [])
+        log.info(f"Graph API returned {len(items)} total items for folder {folder_id}")
         ALLOWED_EXTENSIONS = ('.pdf', '.docx', '.pptx', '.xlsx', '.png', '.jpg', '.jpeg', '.eml')
         matching_items = [
             item for item in items 
@@ -283,6 +292,7 @@ class IngestionService:
             )
 
             skipped_files = []
+            failed_files = []
 
             for item in matching_items:
                 file_name = item["name"]
@@ -308,40 +318,57 @@ class IngestionService:
                 dest_path = temp_dir / file_name
 
                 try:
-                    # Download
-                    print(f"Downloading {file_name}...")
-                    file_resp = session.get(download_url, timeout=30)
-                    if file_resp.status_code == 200:
-                        with open(dest_path, "wb") as f:
-                            f.write(file_resp.content)
+                    # Download (longer timeout for large scanned PDFs)
+                    log.info(f"Downloading {file_name}...")
+                    file_resp = session.get(download_url, timeout=120)
+                    if file_resp.status_code != 200:
+                        log.error(
+                            f"Failed to download {file_name}: HTTP {file_resp.status_code}"
+                        )
+                        failed_files.append({"file": file_name, "reason": f"download HTTP {file_resp.status_code}"})
+                        continue
 
-                        # Chunk using semantic logic
-                        chunks = self._load_and_chunk_file(dest_path)
-                        if chunks:
-                            for doc in chunks:
-                                doc.metadata["source"] = file_name
-                                doc.metadata["link"] = item.get("webUrl", "#")
-                                doc.metadata["onedrive_id"] = onedrive_id
-                                doc.metadata["source_folder"] = folder_id
-                                doc.metadata["last_modified"] = last_modified
+                    with open(dest_path, "wb") as f:
+                        f.write(file_resp.content)
 
-                            vector_store.add_documents(chunks)
-                            total_chunks += len(chunks)
-                            processed_files.append(file_name)
-                    else:
-                        print(f"Failed to download {file_name}: Status Code {file_resp.status_code}")
+                    # Chunk using semantic logic
+                    chunks = self._load_and_chunk_file(dest_path)
+                    if not chunks:
+                        # Empty output usually means a scanned/image-only PDF
+                        # with no text layer. Surface it so admins can re-run
+                        # with OCR instead of silently dropping the file.
+                        log.error(
+                            f"No chunks produced for {file_name} — likely "
+                            f"scanned PDF without text layer or unsupported content."
+                        )
+                        failed_files.append({"file": file_name, "reason": "no extractable text (OCR needed?)"})
+                        continue
+
+                    for doc in chunks:
+                        doc.metadata["source"] = file_name
+                        doc.metadata["link"] = item.get("webUrl", "#")
+                        doc.metadata["onedrive_id"] = onedrive_id
+                        doc.metadata["source_folder"] = folder_id
+                        doc.metadata["last_modified"] = last_modified
+
+                    vector_store.add_documents(chunks)
+                    total_chunks += len(chunks)
+                    processed_files.append(file_name)
                 except Exception as e:
-                    print(f"Failed to process {file_name}: {e}")
+                    log.exception(f"Failed to process {file_name}: {e}")
+                    failed_files.append({"file": file_name, "reason": str(e)})
                     continue
 
             return {
                 "status": "success",
                 "message": (
                     f"Ingested {total_chunks} chunks from {len(processed_files)} files. "
-                    f"Skipped {len(skipped_files)} unchanged files."
+                    f"Skipped {len(skipped_files)} unchanged files. "
+                    f"Failed {len(failed_files)} files."
                 ),
                 "files": processed_files,
                 "skipped": skipped_files,
+                "failed": failed_files,
             }
 
 

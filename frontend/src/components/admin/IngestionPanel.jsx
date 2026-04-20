@@ -141,15 +141,26 @@ const IngestionPanel = () => {
 
             if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
-            setStatus({
-                type: data.status === 'success' ? 'success' : 'warning',
-                title: data.status === 'success' ? 'Ingestion Complete' : 'Warning',
-                message: data.message,
-            });
-            if (data.status === 'success') setUrlForm(prev => ({ ...prev, url: '' }));
+            // Backend runs ingestion asynchronously now; a 'started' response
+            // means the job was accepted. Progress + final result come from
+            // the /ingestion-status poller above.
+            if (data.status === 'started') {
+                setStatus({
+                    type: 'success',
+                    title: 'Ingestion Started',
+                    message: 'Running in the background — see progress banner.',
+                });
+                setUrlForm(prev => ({ ...prev, url: '' }));
+            } else {
+                setStatus({
+                    type: data.status === 'success' ? 'success' : 'warning',
+                    title: data.status === 'success' ? 'Ingestion Complete' : 'Warning',
+                    message: data.message,
+                });
+                if (data.status === 'success') setUrlForm(prev => ({ ...prev, url: '' }));
+            }
         } catch (err) {
             setStatus({ type: 'error', title: 'Ingestion Failed', message: err.message });
-        } finally {
             setUrlLoading(false);
         }
     };
@@ -171,16 +182,24 @@ const IngestionPanel = () => {
 
             if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
 
-            setStatus({
-                type: data.status === 'success' ? 'success' : data.status === 'warning' ? 'warning' : 'error',
-                title: data.status === 'success' ? 'Ingestion Complete' : data.status === 'warning' ? 'Warning' : 'Error',
-                message: data.message,
-                files: data.files || [],
-            });
-            if (data.status === 'success') setOdForm(prev => ({ ...prev, folder_id: '', token: '' }));
+            if (data.status === 'started') {
+                setStatus({
+                    type: 'success',
+                    title: 'Ingestion Started',
+                    message: 'Running in the background — see progress banner.',
+                });
+                setOdForm(prev => ({ ...prev, folder_id: '', token: '' }));
+            } else {
+                setStatus({
+                    type: data.status === 'success' ? 'success' : data.status === 'warning' ? 'warning' : 'error',
+                    title: data.status === 'success' ? 'Ingestion Complete' : data.status === 'warning' ? 'Warning' : 'Error',
+                    message: data.message,
+                    files: data.files || [],
+                });
+                if (data.status === 'success') setOdForm(prev => ({ ...prev, folder_id: '', token: '' }));
+            }
         } catch (err) {
             setStatus({ type: 'error', title: 'Ingestion Failed', message: err.message });
-        } finally {
             setOdLoading(false);
         }
     };
