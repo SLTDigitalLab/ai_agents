@@ -745,36 +745,6 @@ def _looks_like_decline(text: str) -> bool:
     return any(re.search(pattern, stripped) for pattern in _DECLINE_PATTERNS)
 
 
-def _normalize_for_match(text: str) -> str:
-    """Lowercase + collapse whitespace + strip markdown for substring comparison."""
-    stripped = re.sub(r"\*+", "", text)
-    stripped = re.sub(r"\s+", " ", stripped)
-    return stripped.strip().lower()
-
-
-def _base_signature(base_answer: str) -> str:
-    """Extract a short signature from BASE that should appear verbatim in synthesis.
-
-    We pick the longest "clean" run of body text (skipping markdown noise like
-    bullets, headings, and the Sources block). The synthesis prompt instructs
-    the LLM to copy BASE verbatim, so this chunk must survive. If it does not,
-    synthesis paraphrased or garbled and we fall back.
-    """
-    # Drop the Sources block so we don't match on source URLs
-    body = re.split(r"\n\s*\*?\*?\s*sources\s*:", base_answer, maxsplit=1, flags=re.IGNORECASE)[0]
-    normalized = _normalize_for_match(body)
-    # Remove bullet / list markers inside the normalized text
-    normalized = re.sub(r"(^|\s)[-•]\s+", " ", normalized)
-    # Pick the longest 80+ char run of plain prose — this is what we expect to
-    # survive verbatim copying. If the body is shorter than 40 chars, skip check.
-    if len(normalized) < 40:
-        return ""
-    # Use a 60-char window from near the start (skip the very first few tokens
-    # in case the LLM prepends a short header).
-    start = min(20, max(0, len(normalized) - 60))
-    return normalized[start : start + 60]
-
-
 def _flatten_for_synthesis(text: str) -> str:
     """Remove bullet markers and bold emphasis so the synthesis LLM does not see
     two parallel bullet lists it is tempted to interleave. Preserves markdown
@@ -887,36 +857,12 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
         len(secondary_answer),
     )
 
-    # Signature = the first chunk of meaningful BASE text stripped of markdown
-    # formatting. If synthesis really copied BASE verbatim, this signature will
-    # appear in the output. If it does not, the LLM paraphrased or garbled — we
-    # retry once, then fall back to BASE verbatim.
-    signature = _base_signature(base_answer)
-
-    messages_for_llm = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    response = await llm.ainvoke(messages_for_llm)
-    response_text = _extract_text(response.content)
-
-    if signature and signature not in _normalize_for_match(response_text):
-        logger.warning(
-            "Supervisor synthesis | validation failed (base signature missing) | retrying once"
-        )
-        response = await llm.ainvoke(messages_for_llm)
-        response_text = _extract_text(response.content)
-
-        if signature and signature not in _normalize_for_match(response_text):
-            logger.warning(
-                "Supervisor synthesis | validation failed after retry | falling back to BASE verbatim (agent=%s)",
-                base_agent_id,
-            )
-            return {
-                "messages": [AIMessage(content=base_answer)],
-                "specialist_answers": {},
-            }
+    response = await llm.ainvoke(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+    )
 
     return {
         "messages": [response],

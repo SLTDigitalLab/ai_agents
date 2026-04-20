@@ -144,12 +144,25 @@ async def chat(request: ChatRequest):
 
                 project_name = f"Ask SLT - {request.agent_id.upper()}"
                 with tracing_v2_enabled(project_name=project_name):
-                    # We use astream_events (v2) for fine-grained streaming
+                    # We use astream_events (v2) for fine-grained streaming.
+                    #
+                    # Nodes whose token stream must be SUPPRESSED — these fan
+                    # out multiple concurrent LLM calls whose tokens would
+                    # otherwise interleave in the HTTP stream and render as
+                    # garbled text on the client. The final merged reply from
+                    # the downstream synthesis node still streams cleanly.
+                    SUPPRESS_STREAM_NODES = {"multi_delegate"}
+
                     async for event in graph.astream_events(state, config, version="v2"):
                         # ── Extract tokens from stream events ────────
                         kind = event["event"]
 
                         if kind == "on_chat_model_stream":
+                            metadata = event.get("metadata") or {}
+                            node = metadata.get("langgraph_node")
+                            if node in SUPPRESS_STREAM_NODES:
+                                continue
+
                             content = event["data"]["chunk"].content
                             text = _message_content_to_text(content, strip=False)
 
