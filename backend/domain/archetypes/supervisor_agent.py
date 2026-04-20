@@ -741,6 +741,29 @@ def _looks_like_decline(text: str) -> bool:
     return any(re.search(pattern, stripped) for pattern in _DECLINE_PATTERNS)
 
 
+def _flatten_for_synthesis(text: str) -> str:
+    """Remove bullet markers and bold emphasis so the synthesis LLM does not see
+    two parallel bullet lists it is tempted to interleave. Preserves markdown
+    links like [name](url) and paragraph structure.
+    """
+    lines = text.split("\n")
+    cleaned: list[str] = []
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        # Strip leading bullet / list markers
+        line = re.sub(r"^\s*[-*•]\s+", "", line)
+        # Strip leading numbered list markers like "1. " or "1) "
+        line = re.sub(r"^\s*\d+[.)]\s+", "", line)
+        # Strip markdown bold / emphasis wrappers but keep inner text
+        line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+        line = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", line)
+        cleaned.append(line)
+    flattened = "\n".join(cleaned)
+    # Collapse excessive blank lines
+    flattened = re.sub(r"\n{3,}", "\n\n", flattened)
+    return flattened.strip()
+
+
 async def synthesize_multi_answer(state: AgentState) -> dict:
     """Merge multiple specialist answers into one final user-facing reply."""
     specialist_answers: dict[str, str] = state.get("specialist_answers") or {}
@@ -773,47 +796,61 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
             "specialist_answers": {},
         }
 
-    answer_blocks: list[str] = []
-    for agent_id, answer in useful.items():
-        display_name = SPECIALIST_ROUTING_PROFILES.get(agent_id, {}).get(
-            "display_name", agent_id.upper()
-        )
-        answer_blocks.append(f"[{display_name} specialist answer]\n{answer}")
+    # Pick a BASE (the longer, likely more substantive answer) and a SECONDARY.
+    # Quote-then-augment: the LLM copies BASE verbatim and only appends non-duplicate
+    # facts from SECONDARY. This prevents word-by-word stitching between parallel
+    # bullet lists.
+    sorted_answers = sorted(useful.items(), key=lambda item: len(item[1]), reverse=True)
+    base_agent_id, base_answer = sorted_answers[0]
+    secondary_agent_id, secondary_answer = sorted_answers[1]
+
+    secondary_flat = _flatten_for_synthesis(secondary_answer)
 
     system_prompt = (
-        "You are Workmate AI composing a single final answer for the user from TWO "
-        "specialist answers below. Write clean, well-formed markdown prose.\n\n"
-        "HARD RULES:\n"
-        "- Do NOT interleave, blend, or stitch the two answers word-by-word or phrase-by-phrase. "
-        "That produces garbled text like 'Companyl providedorries' — never do this.\n"
-        "- CRITICAL: If one specialist answer provides substantive factual content and the "
-        "other says it does not know, cannot answer, has no information, or declines in any "
-        "form — IGNORE the decline completely and base your answer ONLY on the substantive "
-        "answer. NEVER output 'I don't have enough information' when any specialist gave a "
-        "real answer.\n"
-        "- If the two answers say substantially the same thing, pick the clearer, better-formed "
-        "one and use it as your base. You may add any unique factual detail from the other, "
-        "but only as a separate sentence or bullet.\n"
-        "- If the two answers cover different facets of the question, combine them as distinct, "
-        "clearly-written sections or bullets — each facet in its own complete sentence.\n"
-        "- Rewrite into clean grammatical English. Fix any obviously broken tokenization or "
-        "spacing you see in the source answers (e.g. missing spaces, merged words).\n"
-        "- Do not invent facts not supported by the specialist answers.\n"
-        "- Do not mention routing, multiple specialists, or that a merge happened.\n"
-        "- Be concise and practical. Do not end with a closing question.\n\n"
-        "SOURCE CITATIONS:\n"
-        "- Each specialist answer may contain a 'Sources:' section with markdown links like "
-        "[Filename](URL). You MUST preserve every unique source link you used.\n"
-        "- End your final answer with a single 'Sources:' section that lists the deduplicated "
-        "union of all [Filename](URL) links from the specialist answers you drew facts from.\n"
-        "- Do not invent source filenames or URLs. Only keep links that already appear in the "
-        "specialist answers above.\n"
-        "- If a specialist answer has no Sources section, just omit its sources."
+        "You are Workmate AI composing a single final answer for the user.\n"
+        "Two internal knowledge sources produced candidate answers. Your job is NOT to "
+        "merge them sentence-by-sentence. Follow this exact procedure:\n\n"
+        "STEP 1 — USE BASE AS THE ANSWER:\n"
+        "Copy the BASE answer below verbatim as the start of your reply, including its "
+        "existing bullets, bold formatting, and Sources section. Do NOT paraphrase, "
+        "reword, shorten, or restructure the BASE answer. Every character of BASE text "
+        "(other than the Sources block, which you will handle in step 3) must appear "
+        "in your reply exactly as written.\n\n"
+        "STEP 2 — AUGMENT IF (AND ONLY IF) SECONDARY HAS UNIQUE FACTS:\n"
+        "Read the SECONDARY answer. If it contains a factual detail that is NOT already "
+        "in BASE, insert an '**Additional details:**' section between the BASE body and "
+        "the Sources section. List each unique fact as its own bullet, copied as a "
+        "complete sentence from SECONDARY (you may fix obvious typos but do not blend "
+        "words from BASE into it). If SECONDARY adds nothing new, omit this section.\n\n"
+        "STEP 3 — SOURCES:\n"
+        "End the reply with ONE 'Sources:' line that is the deduplicated union of "
+        "[Filename](URL) links from BASE and from SECONDARY (only if you used a SECONDARY "
+        "fact). Do not invent URLs.\n\n"
+        "HARD NEVERS:\n"
+        "- NEVER interleave words, phrases, or clauses from BASE and SECONDARY within a "
+        "single sentence or bullet. Garbled tokens like 'governanceAI' or "
+        "'improvementautomation' come from doing exactly that — do not.\n"
+        "- If SECONDARY is a decline, says it lacks information, or is very short, IGNORE "
+        "it completely and return BASE unchanged. Never output 'I don't have enough "
+        "information' when BASE gave a real answer.\n"
+        "- Do not mention routing, multiple specialists, different departments, or that "
+        "two sources were consulted. The user sees one unified assistant.\n"
+        "- Do not add a closing question."
     )
 
     user_prompt = (
         f"User question:\n{query}\n\n"
-        + "\n\n".join(answer_blocks)
+        f"=== BASE (copy this verbatim in step 1) ===\n{base_answer}\n\n"
+        f"=== SECONDARY (scan for NEW facts only; flattened to discourage word-level "
+        f"blending) ===\n{secondary_flat}"
+    )
+
+    logger.info(
+        "Supervisor synthesis | base=%s (%d chars) | secondary=%s (%d chars)",
+        base_agent_id,
+        len(base_answer),
+        secondary_agent_id,
+        len(secondary_answer),
     )
 
     response = await llm.ainvoke(
