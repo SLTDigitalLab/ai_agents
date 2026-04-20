@@ -15,6 +15,18 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
+// Strip unmatched ** bold markers so stray asterisks don't render literally.
+const sanitizeMarkdownBold = (text) => {
+  if (!text) return text;
+  const positions = [];
+  const regex = /\*\*/g;
+  let m;
+  while ((m = regex.exec(text)) !== null) positions.push(m.index);
+  if (positions.length % 2 === 0) return text;
+  const last = positions[positions.length - 1];
+  return text.slice(0, last) + text.slice(last + 2);
+};
+
 // Utility function to append incoming text chunks to the current message text
 const appendChunkSmartly = (current, incoming) => {
   return (current || "") + (incoming || "");
@@ -456,7 +468,7 @@ const ChatInterface = ({ agentConfig }) => {
                                                                     }
                                                                 }}
                                                             >
-                                                                {mainText}
+                                                                {sanitizeMarkdownBold(mainText)}
                                                             </ReactMarkdown>
                                                             {msg.type === 'bot' && (
                                                                 <SourcesSection sources={sources} color={agentConfig.color} />

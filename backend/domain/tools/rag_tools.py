@@ -55,6 +55,26 @@ async def search_knowledge_base(
         client = QdrantClient(url=settings.QDRANT_URL)
         collection_name = f"{agent_id}_docs"
 
+        # Distinguish "collection does not exist" from "collection empty / no match".
+        # Without this check, a missing collection surfaces as an ambiguous Qdrant
+        # error that gets downgraded to "No relevant documents found." — the LLM
+        # then treats it as a normal empty-result and is tempted to hallucinate.
+        try:
+            collection_present = client.collection_exists(collection_name)
+        except Exception as probe_err:
+            log.warning(
+                f"Qdrant collection_exists probe failed for '{collection_name}': "
+                f"{type(probe_err).__name__}: {probe_err}"
+            )
+            collection_present = True  # fall through to real search; it will error cleanly
+
+        if not collection_present:
+            log.error(
+                f"Qdrant collection '{collection_name}' does not exist. "
+                f"Agent '{agent_id}' has no knowledge base configured."
+            )
+            return "[KB_UNAVAILABLE] No knowledge base is configured for this agent."
+
         vector_store = QdrantVectorStore(
             client=client,
             collection_name=collection_name,

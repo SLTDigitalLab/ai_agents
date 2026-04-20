@@ -732,6 +732,11 @@ _DECLINE_PATTERNS: tuple[str, ...] = (
     r"\bi don'?t have\s+(?:\w+\s+){0,3}(?:information|details|answer|data|info)\b",
     r"\bi don'?t have\s+(?:that|the|any|enough|sufficient|relevant)\b",
     r"\b(?:information|answer|details?)\s+(?:is |are )?not available\b",
+    # Missing Qdrant collection sentinel surfaced by rag_tools.py.
+    r"\[kb_unavailable\]",
+    r"\bno knowledge base is configured\b",
+    # Scoped decline from the via_supervisor kb_agent prompt.
+    r"\bi can'?t answer that from the available\b",
 )
 
 
