@@ -729,7 +729,11 @@ _DECLINE_PATTERNS: tuple[str, ...] = (
     r"\bplease (?:contact|reach out to) (?:hr|finance|it|cio|admin)\b",
     r"\bno relevant (?:documents|information) (?:were |was )?found\b",
     r"\bcould not (?:find|retrieve) (?:the |any )?(?:relevant )?(?:information|answer)\b",
-    r"\bi don'?t have (?:the )?(?:information|details|answer)\b",
+    # Covers: "I don't have the information", "I don't have that information",
+    # "I don't have any details", "I don't have enough data", "I don't have information available", etc.
+    r"\bi don'?t have\s+(?:\w+\s+){0,3}(?:information|details|answer|data|info)\b",
+    r"\bi don'?t have\s+(?:that|the|any|enough|sufficient|relevant)\b",
+    r"\b(?:information|answer|details?)\s+(?:is |are )?not available\b",
 )
 
 
