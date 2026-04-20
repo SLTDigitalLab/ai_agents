@@ -151,7 +151,15 @@ async def chat(request: ChatRequest):
                     # otherwise interleave in the HTTP stream and render as
                     # garbled text on the client. The final merged reply from
                     # the downstream synthesis node still streams cleanly.
+                    #
+                    # Specialists invoked inside multi_delegate run as compiled
+                    # subgraphs, so their LLM events bubble up with the subgraph's
+                    # internal node name ("agent") rather than the parent node.
+                    # We must also match on ``langgraph_checkpoint_ns`` (a
+                    # namespace string like "multi_delegate:<hash>|agent:<hash>")
+                    # to suppress nested events too.
                     SUPPRESS_STREAM_NODES = {"multi_delegate"}
+                    logged_metadata_sample = False
 
                     async for event in graph.astream_events(state, config, version="v2"):
                         # ── Extract tokens from stream events ────────
@@ -159,8 +167,26 @@ async def chat(request: ChatRequest):
 
                         if kind == "on_chat_model_stream":
                             metadata = event.get("metadata") or {}
+
+                            if not logged_metadata_sample:
+                                logger.info(
+                                    "Stream metadata sample | node=%r | checkpoint_ns=%r | tags=%r",
+                                    metadata.get("langgraph_node"),
+                                    metadata.get("langgraph_checkpoint_ns"),
+                                    event.get("tags"),
+                                )
+                                logged_metadata_sample = True
+
                             node = metadata.get("langgraph_node")
-                            if node in SUPPRESS_STREAM_NODES:
+                            checkpoint_ns = metadata.get("langgraph_checkpoint_ns") or ""
+                            suppressed = (
+                                node in SUPPRESS_STREAM_NODES
+                                or any(
+                                    suppressed_node in checkpoint_ns
+                                    for suppressed_node in SUPPRESS_STREAM_NODES
+                                )
+                            )
+                            if suppressed:
                                 continue
 
                             content = event["data"]["chunk"].content
