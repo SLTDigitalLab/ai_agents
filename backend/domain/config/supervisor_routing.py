@@ -164,27 +164,6 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "How can I request a new laptop?",
         ],
     },
-    "cio": {
-        "display_name": "CIO",
-        "description": (
-            "CIO matters such as IT strategy, digital transformation, technology roadmap, "
-            "enterprise architecture, governance, vendor management, and cybersecurity strategy."
-        ),
-        "keywords": [
-            "cio",
-            "strategy",
-            "roadmap",
-            "digital transformation",
-            "governance",
-            "architecture",
-            "cybersecurity strategy",
-        ],
-        "examples": [
-            "What is the IT strategy for this year?",
-            "Tell me about the digital transformation roadmap.",
-            "Where can I find the enterprise architecture guidelines?",
-        ],
-    },
 }
 
 GENERAL_HELP_PATTERNS: tuple[str, ...] = (
@@ -220,7 +199,6 @@ CLARIFICATION_CHOICE_ALIASES: dict[str, tuple[str, ...]] = {
     "finance": ("finance", "financial", "accounts", "accounting"),
     "admin": ("admin", "administration", "facilities"),
     "it": ("it", "information technology", "tech support", "technical support"),
-    "cio": ("cio", "chief information officer", "technology strategy"),
 }
 
 FOLLOW_UP_PATTERNS: tuple[str, ...] = (
