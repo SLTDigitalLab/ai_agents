@@ -140,21 +140,56 @@ class IngestionService:
 
         # Cleaned up _authenticate_graph method
 
-    def _load_and_chunk_file(self, file_path: Path) -> list[Document]:
-        """Use unstructured's native semantic chunking by headers and sections."""
-        ext = file_path.suffix.lower()
-        if ext == ".xlsx":
-            log.info(f"   📊 Excel file detected ({file_path.name}).")
-
+    def _load_with_strategy(self, file_path: Path, strategy: str) -> list[Document]:
+        """Run UnstructuredLoader with a specific strategy."""
         loader = UnstructuredLoader(
             file_path=str(file_path),
             chunking_strategy="by_title",
             max_characters=2500,
             combine_text_under_n_chars=500,
-            strategy="hi_res",
+            strategy=strategy,
             languages=["eng", "sin"],
         )
-        docs = loader.load()
+        return loader.load()
+
+    def _load_and_chunk_file(self, file_path: Path) -> list[Document]:
+        """Use unstructured's native semantic chunking by headers and sections.
+
+        Strategy ladder:
+          1. "fast"    — pulls embedded text layer. Seconds per PDF,
+                         low memory. Works for most digital PDFs and
+                         all .docx/.pptx/.xlsx.
+          2. "hi_res"  — layout detection + OCR (English + Sinhala).
+                         Minutes per PDF, GB of RAM. Used only when
+                         "fast" yields no/minimal text (scanned PDFs).
+        """
+        ext = file_path.suffix.lower()
+        if ext == ".xlsx":
+            log.info(f"   📊 Excel file detected ({file_path.name}).")
+
+        # Images always need OCR
+        if ext in (".png", ".jpg", ".jpeg"):
+            docs = self._load_with_strategy(file_path, "hi_res")
+        else:
+            # 1. Try fast first
+            try:
+                docs = self._load_with_strategy(file_path, "fast")
+            except Exception as e:
+                log.warning(f"fast strategy failed for {file_path.name}: {e}; falling back to hi_res")
+                docs = []
+
+            total_chars = sum(len(d.page_content) for d in docs)
+            # 2. Fall back to hi_res (OCR) when the text layer is missing or nearly empty
+            if total_chars < 50:
+                log.info(
+                    f"{file_path.name}: fast produced {total_chars} chars — "
+                    f"falling back to hi_res + OCR."
+                )
+                try:
+                    docs = self._load_with_strategy(file_path, "hi_res")
+                except Exception as e:
+                    log.error(f"hi_res strategy failed for {file_path.name}: {e}")
+                    docs = []
 
         # Re-split any chunks that are still too large after semantic
         # chunking.  Oversized chunks dilute embedding precision because
