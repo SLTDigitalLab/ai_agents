@@ -194,6 +194,7 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "gate pass form",
             "Item Declaration Form",
             "IDF",
+            "SLTiDC"
             "children book",
             "visitor entry form",
             "security help desk",
