@@ -41,6 +41,7 @@ from domain.config.supervisor_routing import (
     STRONG_ROUTE_THRESHOLD,
     VAGUE_SPECIALIST_PATTERNS,
 )
+from domain.llm_router import classify_route
 from domain.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -350,145 +351,165 @@ async def route_request(state: AgentState) -> dict:
             "original_query": query,
         }
 
-    scored = await _score_specialists(query, last_specialist_agent)
-    top_agent, top_score = scored[0]
-    second_agent, second_score = scored[1]
-    score_gap = top_score - second_score
-    rounded_scores = {agent_id: round(score, 4) for agent_id, score in scored}
+    # ── Keyword fast-path ────────────────────────────────────────────
+    # If the query contains distinctive keywords that match exactly ONE
+    # specialist, skip the LLM router and delegate directly. This keeps
+    # latency low on high-signal cases (acronyms, committee names, named
+    # forms) and guarantees an exact-match hit is never overruled.
+    keyword_hits: dict[str, list[str]] = {}
+    for agent_id in SPECIALIST_ROUTING_PROFILES:
+        hits = _matched_keywords(query, agent_id)
+        if hits:
+            keyword_hits[agent_id] = hits
 
-    if top_score >= STRONG_ROUTE_THRESHOLD and score_gap >= MIN_ROUTE_MARGIN:
+    if len(keyword_hits) == 1:
+        only_agent = next(iter(keyword_hits))
         logger.info(
-            "Supervisor route | action=delegate | target=%s | top=%.4f | second=%s %.4f | last=%s | query=%r",
-            top_agent,
-            top_score,
-            second_agent,
-            second_score,
-            last_specialist_agent,
+            "Supervisor route | action=delegate | reason=keyword_fast_path | target=%s | hits=%s | query=%r",
+            only_agent,
+            keyword_hits[only_agent],
             query[:200],
         )
         return {
             "routing_action": "delegate",
-            "routed_agent_id": top_agent,
-            "routing_reason": f"vector_match:{top_agent}",
-            "routing_scores": rounded_scores,
+            "routed_agent_id": only_agent,
+            "routing_reason": f"keyword_fast_path:{only_agent}",
+            "routing_scores": {only_agent: 1.0},
             "delegation_query": query,
             "pending_clarification": False,
             "clarification_options": [],
             "original_query": "",
         }
 
-    if top_score < OUT_OF_SCOPE_THRESHOLD:
+    # ── LLM router ────────────────────────────────────────────────────
+    # Build a short conversation tail (most recent AI + most recent human
+    # turn BEFORE the current one) so the router can handle follow-ups.
+    history_tail: list[dict[str, str]] = []
+    messages = state.get("messages", []) or []
+    prior_messages = list(messages[:-1]) if messages else []
+    seen_roles: set[str] = set()
+    for message in reversed(prior_messages):
+        msg_type = getattr(message, "type", None)
+        if msg_type not in ("human", "ai"):
+            continue
+        role = "user" if msg_type == "human" else "assistant"
+        if role in seen_roles:
+            continue
+        content_text = _extract_text(message.content)
+        if not content_text:
+            continue
+        history_tail.append({"role": role, "content": content_text})
+        seen_roles.add(role)
+        if len(seen_roles) >= 2:
+            break
+    history_tail.reverse()
+
+    decision = await classify_route(
+        query,
+        last_specialist_agent=last_specialist_agent,
+        history_tail=history_tail,
+    )
+
+    # Synthetic "scores" for downstream logging / synthesis BASE selection.
+    # Top agent gets the classifier's confidence, others get 0.
+    synthetic_scores: dict[str, float] = {
+        agent_id: 0.0 for agent_id in SPECIALIST_ROUTING_PROFILES
+    }
+    for rank, agent_id in enumerate(decision.agents):
+        # Top agent = confidence, runner-up = confidence * 0.8 so synthesis
+        # still has an ordering to pick BASE by.
+        synthetic_scores[agent_id] = round(
+            decision.confidence * (1.0 if rank == 0 else 0.8), 4
+        )
+
+    if decision.action == "direct":
         logger.info(
-            "Supervisor route | action=out_of_scope | top=%s %.4f | second=%s %.4f | query=%r",
-            top_agent,
-            top_score,
-            second_agent,
-            second_score,
+            "Supervisor route | action=direct | reason=llm_router:%s | query=%r",
+            decision.reason[:120],
+            query[:200],
+        )
+        return {
+            "routing_action": "direct",
+            "routing_reason": f"llm_router:direct:{decision.reason[:80]}",
+            "routing_scores": synthetic_scores,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
+    if decision.action == "out_of_scope":
+        logger.info(
+            "Supervisor route | action=out_of_scope | reason=llm_router:%s | query=%r",
+            decision.reason[:120],
             query[:200],
         )
         return {
             "routing_action": "out_of_scope",
-            "routing_reason": "very_low_specialist_similarity",
-            "routing_scores": rounded_scores,
+            "routing_reason": f"llm_router:out_of_scope:{decision.reason[:80]}",
+            "routing_scores": synthetic_scores,
             "pending_clarification": False,
             "clarification_options": [],
             "original_query": "",
         }
 
-    # Medium-confidence single winner — delegate directly instead of asking the user
-    # to confirm a single option. Only kicks in when runner-up isn't plausible enough
-    # to justify a fan-out.
-    if (
-        top_score >= LOW_CONFIDENCE_THRESHOLD
-        and score_gap >= MIN_ROUTE_MARGIN
-        and second_score < MULTI_DELEGATE_SECONDARY_THRESHOLD
-    ):
+    if decision.action == "delegate" and decision.agents:
+        target = decision.agents[0]
         logger.info(
-            "Supervisor route | action=delegate | reason=medium_confidence_clear_winner | target=%s | top=%.4f | second=%s %.4f | query=%r",
-            top_agent,
-            top_score,
-            second_agent,
-            second_score,
+            "Supervisor route | action=delegate | target=%s | confidence=%.2f | reason=%s | query=%r",
+            target,
+            decision.confidence,
+            decision.reason[:120],
             query[:200],
         )
         return {
             "routing_action": "delegate",
-            "routed_agent_id": top_agent,
-            "routing_reason": f"medium_confidence:{top_agent}",
-            "routing_scores": rounded_scores,
+            "routed_agent_id": target,
+            "routing_reason": f"llm_router:{target}:{decision.reason[:80]}",
+            "routing_scores": synthetic_scores,
             "delegation_query": query,
             "pending_clarification": False,
             "clarification_options": [],
             "original_query": "",
         }
 
-    # Ambiguous but plausible on both top candidates — fan out instead of clarifying.
-    if (
-        top_score >= LOW_CONFIDENCE_THRESHOLD
-        and second_score >= MULTI_DELEGATE_SECONDARY_THRESHOLD
-    ):
-        fan_out_targets = [top_agent, second_agent][:MULTI_DELEGATE_MAX_AGENTS]
+    if decision.action == "multi_delegate" and len(decision.agents) >= 2:
+        fan_out_targets = decision.agents[:MULTI_DELEGATE_MAX_AGENTS]
         logger.info(
-            "Supervisor route | action=multi_delegate | targets=%s | top=%s %.4f | second=%s %.4f | query=%r",
+            "Supervisor route | action=multi_delegate | targets=%s | confidence=%.2f | reason=%s | query=%r",
             fan_out_targets,
-            top_agent,
-            top_score,
-            second_agent,
-            second_score,
+            decision.confidence,
+            decision.reason[:120],
             query[:200],
         )
         return {
             "routing_action": "multi_delegate",
             "routed_agent_ids": fan_out_targets,
-            "routing_reason": f"multi_delegate:{'+'.join(fan_out_targets)}",
-            "routing_scores": rounded_scores,
+            "routing_reason": f"llm_router:multi_delegate:{'+'.join(fan_out_targets)}",
+            "routing_scores": synthetic_scores,
             "delegation_query": query,
             "pending_clarification": False,
             "clarification_options": [],
             "original_query": "",
         }
 
-    clarification_targets = _clarification_options_from_scores(scored, score_gap)
-
-    # Weak/ambiguous but two plausible specialists — fan out instead of asking
-    # the user to clarify. Synthesis gracefully handles declines.
-    if len(clarification_targets) >= 2:
-        fan_out_targets = clarification_targets[:MULTI_DELEGATE_MAX_AGENTS]
-        logger.info(
-            "Supervisor route | action=multi_delegate | reason=weak_ambiguous_fanout | targets=%s | top=%s %.4f | second=%s %.4f | query=%r",
-            fan_out_targets,
-            top_agent,
-            top_score,
-            second_agent,
-            second_score,
-            query[:200],
-        )
-        return {
-            "routing_action": "multi_delegate",
-            "routed_agent_ids": fan_out_targets,
-            "routing_reason": f"weak_ambiguous_fanout:{'+'.join(fan_out_targets)}",
-            "routing_scores": rounded_scores,
-            "delegation_query": query,
-            "pending_clarification": False,
-            "clarification_options": [],
-            "original_query": "",
-        }
-
+    # Default / clarify — either action=="clarify", or a malformed response.
+    clarification_targets = (
+        decision.agents[:2]
+        if decision.agents
+        else list(SPECIALIST_ROUTING_PROFILES.keys())[:2]
+    )
     logger.info(
-        "Supervisor route | action=clarify | top=%s %.4f | second=%s %.4f | last=%s | options=%s | query=%r",
-        top_agent,
-        top_score,
-        second_agent,
-        second_score,
-        last_specialist_agent,
+        "Supervisor route | action=clarify | options=%s | confidence=%.2f | reason=%s | query=%r",
         clarification_targets,
+        decision.confidence,
+        decision.reason[:120],
         query[:200],
     )
     return {
         "routing_action": "clarify",
-        "routed_agent_id": top_agent,
-        "routing_reason": "low_confidence_or_small_margin",
-        "routing_scores": rounded_scores,
+        "routed_agent_id": clarification_targets[0] if clarification_targets else None,
+        "routing_reason": f"llm_router:clarify:{decision.reason[:80]}",
+        "routing_scores": synthetic_scores,
         "pending_clarification": True,
         "clarification_options": clarification_targets,
         "original_query": query,
