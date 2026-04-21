@@ -351,13 +351,12 @@ class IngestionService:
                     skipped_files.append(file_name)
                     continue
 
-                # Delete old vectors before re-ingesting modified files
-                self._delete_file_vectors(collection_name, onedrive_id, file_name)
-
                 dest_path = temp_dir / file_name
 
                 try:
-                    # Download (longer timeout for large scanned PDFs)
+                    # Download FIRST. Do NOT delete old vectors until we're
+                    # sure we have replacement chunks ready to upsert —
+                    # otherwise a download/parse failure wipes existing data.
                     log.info(f"Downloading {file_name}...")
                     file_resp = session.get(download_url, timeout=120)
                     if file_resp.status_code != 200:
@@ -390,6 +389,9 @@ class IngestionService:
                         doc.metadata["source_folder"] = folder_id
                         doc.metadata["last_modified"] = last_modified
 
+                    # Now that we have valid replacement chunks, remove the
+                    # stale vectors and write the new ones.
+                    self._delete_file_vectors(collection_name, onedrive_id, file_name)
                     vector_store.add_documents(chunks)
                     total_chunks += len(chunks)
                     processed_files.append(file_name)
