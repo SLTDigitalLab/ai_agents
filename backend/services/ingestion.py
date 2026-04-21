@@ -140,6 +140,30 @@ class IngestionService:
 
         # Cleaned up _authenticate_graph method
 
+    def _load_xlsx(self, file_path: Path) -> list[Document]:
+        """Read an .xlsx file sheet-by-sheet with pandas.
+
+        Each sheet becomes one Document whose text is a markdown table.
+        The recursive splitter downstream breaks oversized sheets into
+        chunks, preserving the sheet-name metadata.
+        """
+        import pandas as pd
+
+        sheets = pd.read_excel(file_path, sheet_name=None, dtype=str, engine="openpyxl")
+        docs: list[Document] = []
+        for sheet_name, df in sheets.items():
+            df = df.fillna("")
+            if df.empty:
+                continue
+            text = f"[Sheet: {sheet_name}]\n{df.to_markdown(index=False)}"
+            docs.append(
+                Document(
+                    page_content=text,
+                    metadata={"source": str(file_path), "sheet": sheet_name},
+                )
+            )
+        return docs
+
     def _load_with_strategy(self, file_path: Path, strategy: str) -> list[Document]:
         """Run UnstructuredLoader with a specific strategy."""
         loader = UnstructuredLoader(
@@ -164,11 +188,15 @@ class IngestionService:
                          "fast" yields no/minimal text (scanned PDFs).
         """
         ext = file_path.suffix.lower()
+
+        # Excel: read with pandas. Unstructured partitions every cell and
+        # spams "No features in text" for empty cells, which is both slow
+        # and low-signal on tabular invoice sheets.
         if ext == ".xlsx":
             log.info(f"   📊 Excel file detected ({file_path.name}).")
-
+            docs = self._load_xlsx(file_path)
         # Images always need OCR
-        if ext in (".png", ".jpg", ".jpeg"):
+        elif ext in (".png", ".jpg", ".jpeg"):
             docs = self._load_with_strategy(file_path, "hi_res")
         else:
             # 1. Try fast first
