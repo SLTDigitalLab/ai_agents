@@ -155,7 +155,7 @@ class IngestionService:
             df = df.fillna("")
             if df.empty:
                 continue
-            text = f"[Sheet: {sheet_name}]\n{df.to_markdown(index=False)}"
+            text = f"[Sheet: {sheet_name}]\n{df.to_csv(index=False)}"
             docs.append(
                 Document(
                     page_content=text,
