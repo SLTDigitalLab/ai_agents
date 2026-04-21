@@ -803,11 +803,24 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
             "specialist_answers": {},
         }
 
-    # Pick a BASE (the longer, likely more substantive answer) and a SECONDARY.
+    # Pick a BASE (the more trustworthy answer) and a SECONDARY.
+    # Preference order:
+    #   1. Highest routing score in state["routing_scores"] — the specialist the
+    #      router judged most semantically aligned with the query. Longer ≠ more
+    #      grounded; a confidently-hallucinated longer answer has beaten a
+    #      correct shorter one in practice.
+    #   2. Fall back to longer answer only when routing scores are missing or tied.
     # Quote-then-augment: the LLM copies BASE verbatim and only appends non-duplicate
     # facts from SECONDARY. This prevents word-by-word stitching between parallel
     # bullet lists.
-    sorted_answers = sorted(useful.items(), key=lambda item: len(item[1]), reverse=True)
+    routing_scores: dict[str, float] = state.get("routing_scores") or {}
+
+    def _rank_key(item: tuple[str, str]) -> tuple[float, int]:
+        agent_id, answer_text = item
+        score = float(routing_scores.get(agent_id, 0.0))
+        return (score, len(answer_text))
+
+    sorted_answers = sorted(useful.items(), key=_rank_key, reverse=True)
     base_agent_id, base_answer = sorted_answers[0]
     secondary_agent_id, secondary_answer = sorted_answers[1]
 
