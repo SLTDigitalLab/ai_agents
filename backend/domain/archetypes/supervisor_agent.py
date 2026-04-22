@@ -474,24 +474,28 @@ async def route_request(state: AgentState) -> dict:
             "original_query": "",
         }
 
+    # Single plausible-but-not-strong candidate. Skip the "I think this belongs
+    # to X, please confirm" prompt — it's friction with no real upside. Just
+    # delegate. If we're wrong, the specialist's GROUNDING + ANTI-ADJACENCY
+    # rules make it decline cleanly instead of hallucinating.
     logger.info(
-        "Supervisor route | action=clarify | top=%s %.4f | second=%s %.4f | last=%s | options=%s | query=%r",
+        "Supervisor route | action=delegate | reason=single_plausible_candidate | target=%s | top=%.4f | second=%s %.4f | last=%s | query=%r",
         top_agent,
         top_score,
         second_agent,
         second_score,
         last_specialist_agent,
-        clarification_targets,
         query[:200],
     )
     return {
-        "routing_action": "clarify",
+        "routing_action": "delegate",
         "routed_agent_id": top_agent,
-        "routing_reason": "low_confidence_or_small_margin",
+        "routing_reason": f"single_plausible_candidate:{top_agent}",
         "routing_scores": rounded_scores,
-        "pending_clarification": True,
-        "clarification_options": clarification_targets,
-        "original_query": query,
+        "delegation_query": query,
+        "pending_clarification": False,
+        "clarification_options": [],
+        "original_query": "",
     }
 
 
