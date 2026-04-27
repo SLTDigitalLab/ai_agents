@@ -65,10 +65,10 @@ async def search_knowledge_base(
             sparse_vector_name="sparse",
         )
 
-        # --- Hybrid similarity search (top 15 chunks) --------------------
+        # --- Hybrid similarity search (top 10 chunks) --------------------
         # Higher k gives the LLM more recall; hybrid ranking keeps
         # precision acceptable without a separate reranker.
-        results = await vector_store.asimilarity_search(query=query, k=15)
+        results = await vector_store.asimilarity_search(query=query, k=10)
 
         if not results:
             log.info(f"Hybrid search returned 0 results for agent='{agent_id}' query='{query}'")
