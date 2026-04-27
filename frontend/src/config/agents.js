@@ -1,12 +1,12 @@
 export const AGENTS = {
     // Default supervisor landing page
-    askslt: {
+    workmateai: {
         id: "supervisor",
         title: "Workmate AI",
-        subtitle: "Start here. Workmate AI can answer platform questions directly and route you to the right specialist when needed.",
+        subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, or Admin — all in one place.",
         color: "from-cyan-900 to-cyan-600",
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
-        disclaimer: "Workmate AI may answer directly, ask for clarification, or route your request to a specialist agent."
+        disclaimer: "Workmate AI provides internal workplace information. Please verify critical details with the relevant department."
     },
 
     // 1. HR
@@ -49,17 +49,7 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the IT Helpdesk."
     },
 
-    // 5. CIO
-    askcio: {
-        id: "cio",
-        title: "ASK CIO",
-        subtitle: "Get insights into IT strategy, digital transformation, and enterprise architecture.",
-        color: "from-amber-900 to-amber-600",
-        buttonColor: "bg-amber-600 hover:bg-amber-700",
-        disclaimer: "If you need any further clarifications, please reach out to the CIO Office."
-    },
-
-    // 4. Process 
+    // 4. Process
     askprocess: {
         id: "process",
         title: "ASK PROCESS",

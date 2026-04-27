@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     QDRANT_URL: str
     POSTGRES_URL: str
 
+    # API key for external clients (e.g. voice assistant) hitting the Finance retrieval endpoint
+    VOICE_ASSISTANT_API_KEY: Optional[str] = None
+
     # Bitrix24 CRM
     BITRIX24_WEBHOOK_URL: str = ""
 

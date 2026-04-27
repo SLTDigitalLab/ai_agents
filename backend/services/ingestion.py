@@ -140,21 +140,84 @@ class IngestionService:
 
         # Cleaned up _authenticate_graph method
 
-    def _load_and_chunk_file(self, file_path: Path) -> list[Document]:
-        """Use unstructured's native semantic chunking by headers and sections."""
-        ext = file_path.suffix.lower()
-        if ext == ".xlsx":
-            log.info(f"   📊 Excel file detected ({file_path.name}).")
+    def _load_xlsx(self, file_path: Path) -> list[Document]:
+        """Read an .xlsx file sheet-by-sheet with pandas.
 
+        Each sheet becomes one Document whose text is a markdown table.
+        The recursive splitter downstream breaks oversized sheets into
+        chunks, preserving the sheet-name metadata.
+        """
+        import pandas as pd
+
+        sheets = pd.read_excel(file_path, sheet_name=None, dtype=str, engine="openpyxl")
+        docs: list[Document] = []
+        for sheet_name, df in sheets.items():
+            df = df.fillna("")
+            if df.empty:
+                continue
+            text = f"[Sheet: {sheet_name}]\n{df.to_csv(index=False)}"
+            docs.append(
+                Document(
+                    page_content=text,
+                    metadata={"source": str(file_path), "sheet": sheet_name},
+                )
+            )
+        return docs
+
+    def _load_with_strategy(self, file_path: Path, strategy: str) -> list[Document]:
+        """Run UnstructuredLoader with a specific strategy."""
         loader = UnstructuredLoader(
             file_path=str(file_path),
             chunking_strategy="by_title",
             max_characters=2500,
             combine_text_under_n_chars=500,
-            strategy="hi_res",
+            strategy=strategy,
             languages=["eng", "sin"],
         )
-        docs = loader.load()
+        return loader.load()
+
+    def _load_and_chunk_file(self, file_path: Path) -> list[Document]:
+        """Use unstructured's native semantic chunking by headers and sections.
+
+        Strategy ladder:
+          1. "fast"    — pulls embedded text layer. Seconds per PDF,
+                         low memory. Works for most digital PDFs and
+                         all .docx/.pptx/.xlsx.
+          2. "hi_res"  — layout detection + OCR (English + Sinhala).
+                         Minutes per PDF, GB of RAM. Used only when
+                         "fast" yields no/minimal text (scanned PDFs).
+        """
+        ext = file_path.suffix.lower()
+
+        # Excel: read with pandas. Unstructured partitions every cell and
+        # spams "No features in text" for empty cells, which is both slow
+        # and low-signal on tabular invoice sheets.
+        if ext == ".xlsx":
+            log.info(f"   📊 Excel file detected ({file_path.name}).")
+            docs = self._load_xlsx(file_path)
+        # Images always need OCR
+        elif ext in (".png", ".jpg", ".jpeg"):
+            docs = self._load_with_strategy(file_path, "hi_res")
+        else:
+            # 1. Try fast first
+            try:
+                docs = self._load_with_strategy(file_path, "fast")
+            except Exception as e:
+                log.warning(f"fast strategy failed for {file_path.name}: {e}; falling back to hi_res")
+                docs = []
+
+            total_chars = sum(len(d.page_content) for d in docs)
+            # 2. Fall back to hi_res (OCR) when the text layer is missing or nearly empty
+            if total_chars < 50:
+                log.info(
+                    f"{file_path.name}: fast produced {total_chars} chars — "
+                    f"falling back to hi_res + OCR."
+                )
+                try:
+                    docs = self._load_with_strategy(file_path, "hi_res")
+                except Exception as e:
+                    log.error(f"hi_res strategy failed for {file_path.name}: {e}")
+                    docs = []
 
         # Re-split any chunks that are still too large after semantic
         # chunking.  Oversized chunks dilute embedding precision because
@@ -231,24 +294,35 @@ class IngestionService:
         session.mount('https://', HTTPAdapter(max_retries=retries))
         session.mount('http://', HTTPAdapter(max_retries=retries))
 
-        # 1. List files in the folder
+        # 1. List files in the folder (follow pagination until exhausted).
+        # NOTE: do NOT use $select here — @microsoft.graph.downloadUrl is an
+        # OData instance annotation and gets dropped when $select is set,
+        # which causes every file to be silently skipped.
         headers = {"Authorization": f"Bearer {access_token}"}
-        url = f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
-        
+        url = (
+            f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}/children"
+            f"?$top=200"
+        )
+
+        items = []
         try:
-            resp = session.get(url, headers=headers, timeout=30)
-            if resp.status_code != 200:
-                return {
-                    "status": "error",
-                    "message": f"Graph API Error: {resp.status_code} {resp.text}",
-                }
+            while url:
+                resp = session.get(url, headers=headers, timeout=30)
+                if resp.status_code != 200:
+                    return {
+                        "status": "error",
+                        "message": f"Graph API Error: {resp.status_code} {resp.text}",
+                    }
+                payload = resp.json()
+                items.extend(payload.get("value", []))
+                url = payload.get("@odata.nextLink")
         except Exception as e:
             return {
                 "status": "error",
                 "message": f"Failed to connect to Microsoft Graph API: {e}",
             }
 
-        items = resp.json().get("value", [])
+        log.info(f"Graph API returned {len(items)} total items for folder {folder_id}")
         ALLOWED_EXTENSIONS = ('.pdf', '.docx', '.pptx', '.xlsx', '.png', '.jpg', '.jpeg', '.eml')
         matching_items = [
             item for item in items 
@@ -283,11 +357,14 @@ class IngestionService:
             )
 
             skipped_files = []
+            failed_files = []
 
             for item in matching_items:
                 file_name = item["name"]
                 download_url = item.get("@microsoft.graph.downloadUrl")
                 if not download_url:
+                    log.error(f"No download URL for {file_name}; skipping.")
+                    failed_files.append({"file": file_name, "reason": "no download URL from Graph"})
                     continue
 
                 onedrive_id = item.get("id", "unknown")
@@ -302,46 +379,65 @@ class IngestionService:
                     skipped_files.append(file_name)
                     continue
 
-                # Delete old vectors before re-ingesting modified files
-                self._delete_file_vectors(collection_name, onedrive_id, file_name)
-
                 dest_path = temp_dir / file_name
 
                 try:
-                    # Download
-                    print(f"Downloading {file_name}...")
-                    file_resp = session.get(download_url, timeout=30)
-                    if file_resp.status_code == 200:
-                        with open(dest_path, "wb") as f:
-                            f.write(file_resp.content)
+                    # Download FIRST. Do NOT delete old vectors until we're
+                    # sure we have replacement chunks ready to upsert —
+                    # otherwise a download/parse failure wipes existing data.
+                    log.info(f"Downloading {file_name}...")
+                    file_resp = session.get(download_url, timeout=120)
+                    if file_resp.status_code != 200:
+                        log.error(
+                            f"Failed to download {file_name}: HTTP {file_resp.status_code}"
+                        )
+                        failed_files.append({"file": file_name, "reason": f"download HTTP {file_resp.status_code}"})
+                        continue
 
-                        # Chunk using semantic logic
-                        chunks = self._load_and_chunk_file(dest_path)
-                        if chunks:
-                            for doc in chunks:
-                                doc.metadata["source"] = file_name
-                                doc.metadata["link"] = item.get("webUrl", "#")
-                                doc.metadata["onedrive_id"] = onedrive_id
-                                doc.metadata["source_folder"] = folder_id
-                                doc.metadata["last_modified"] = last_modified
+                    with open(dest_path, "wb") as f:
+                        f.write(file_resp.content)
 
-                            vector_store.add_documents(chunks)
-                            total_chunks += len(chunks)
-                            processed_files.append(file_name)
-                    else:
-                        print(f"Failed to download {file_name}: Status Code {file_resp.status_code}")
+                    # Chunk using semantic logic
+                    chunks = self._load_and_chunk_file(dest_path)
+                    if not chunks:
+                        # Empty output usually means a scanned/image-only PDF
+                        # with no text layer. Surface it so admins can re-run
+                        # with OCR instead of silently dropping the file.
+                        log.error(
+                            f"No chunks produced for {file_name} — likely "
+                            f"scanned PDF without text layer or unsupported content."
+                        )
+                        failed_files.append({"file": file_name, "reason": "no extractable text (OCR needed?)"})
+                        continue
+
+                    for doc in chunks:
+                        doc.metadata["source"] = file_name
+                        doc.metadata["link"] = item.get("webUrl", "#")
+                        doc.metadata["onedrive_id"] = onedrive_id
+                        doc.metadata["source_folder"] = folder_id
+                        doc.metadata["last_modified"] = last_modified
+
+                    # Now that we have valid replacement chunks, remove the
+                    # stale vectors and write the new ones.
+                    self._delete_file_vectors(collection_name, onedrive_id, file_name)
+                    vector_store.add_documents(chunks)
+                    total_chunks += len(chunks)
+                    processed_files.append(file_name)
                 except Exception as e:
-                    print(f"Failed to process {file_name}: {e}")
+                    log.exception(f"Failed to process {file_name}: {e}")
+                    failed_files.append({"file": file_name, "reason": str(e)})
                     continue
 
             return {
                 "status": "success",
                 "message": (
                     f"Ingested {total_chunks} chunks from {len(processed_files)} files. "
-                    f"Skipped {len(skipped_files)} unchanged files."
+                    f"Skipped {len(skipped_files)} unchanged files. "
+                    f"Failed {len(failed_files)} files."
                 ),
                 "files": processed_files,
                 "skipped": skipped_files,
+                "failed": failed_files,
             }
 
 

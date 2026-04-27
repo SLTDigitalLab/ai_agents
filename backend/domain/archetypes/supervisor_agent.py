@@ -51,7 +51,6 @@ SPECIALIST_BUILDERS = {
     "finance": build_kb_workflow,
     "admin": build_kb_workflow,
     "it": build_kb_workflow,
-    "cio": build_kb_workflow,
 }
 
 
@@ -451,24 +450,52 @@ async def route_request(state: AgentState) -> dict:
 
     clarification_targets = _clarification_options_from_scores(scored, score_gap)
 
+    # Weak/ambiguous but two plausible specialists — fan out instead of asking
+    # the user to clarify. Synthesis gracefully handles declines.
+    if len(clarification_targets) >= 2:
+        fan_out_targets = clarification_targets[:MULTI_DELEGATE_MAX_AGENTS]
+        logger.info(
+            "Supervisor route | action=multi_delegate | reason=weak_ambiguous_fanout | targets=%s | top=%s %.4f | second=%s %.4f | query=%r",
+            fan_out_targets,
+            top_agent,
+            top_score,
+            second_agent,
+            second_score,
+            query[:200],
+        )
+        return {
+            "routing_action": "multi_delegate",
+            "routed_agent_ids": fan_out_targets,
+            "routing_reason": f"weak_ambiguous_fanout:{'+'.join(fan_out_targets)}",
+            "routing_scores": rounded_scores,
+            "delegation_query": query,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
+    # Single plausible-but-not-strong candidate. Skip the "I think this belongs
+    # to X, please confirm" prompt — it's friction with no real upside. Just
+    # delegate. If we're wrong, the specialist's GROUNDING + ANTI-ADJACENCY
+    # rules make it decline cleanly instead of hallucinating.
     logger.info(
-        "Supervisor route | action=clarify | top=%s %.4f | second=%s %.4f | last=%s | options=%s | query=%r",
+        "Supervisor route | action=delegate | reason=single_plausible_candidate | target=%s | top=%.4f | second=%s %.4f | last=%s | query=%r",
         top_agent,
         top_score,
         second_agent,
         second_score,
         last_specialist_agent,
-        clarification_targets,
         query[:200],
     )
     return {
-        "routing_action": "clarify",
+        "routing_action": "delegate",
         "routed_agent_id": top_agent,
-        "routing_reason": "low_confidence_or_small_margin",
+        "routing_reason": f"single_plausible_candidate:{top_agent}",
         "routing_scores": rounded_scores,
-        "pending_clarification": True,
-        "clarification_options": clarification_targets,
-        "original_query": query,
+        "delegation_query": query,
+        "pending_clarification": False,
+        "clarification_options": [],
+        "original_query": "",
     }
 
 
@@ -483,7 +510,7 @@ async def answer_directly(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "Hi! I’m Workmate AI. I can help with platform questions "
-                        "or requests related to **HR**, **Finance**, **IT**, **CIO**, or **Admin**."
+                        "or requests related to **HR**, **Finance**, **IT**, or **Admin**."
                     )
                 )
             ],
@@ -503,13 +530,12 @@ Available specialists:
 - HR: leave, benefits, recruitment, employee policy, staff support
 - Finance: salary, payroll, budgets, invoices, expense claims, payments
 - IT: technical support, hardware, software, network, access management
-- CIO: digital transformation, IT strategy, enterprise architecture, technology roadmap
 - Admin: facilities, transport, security, parking, office support
 
 Rules:
 1. Be concise, clear, and practical.
 2. If the user asks which specialist should handle something, answer directly.
-3. Do not invent HR, finance, IT, CIO, or admin facts.
+3. Do not invent HR, finance, IT, or admin facts.
 4. If the user is clearly asking a specialist-domain factual question, say that you can route them to the right specialist and name the best fit.
 5. Do not mention routing scores, thresholds, embeddings, vectors, or internal implementation.
 6. Do not end with a closing question.
@@ -539,7 +565,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
 
     if reason == "vague_prompt" or not display_names:
         content = (
-            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **CIO**, or **Admin**."
+            "Please tell me which area this is about: **HR**, **Finance**, **IT**, or **Admin**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -553,7 +579,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
     if len(display_names) == 1:
         content = (
             f"I think this may belong to **{display_names[0]}**. "
-            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **CIO**, or **Admin**."
+            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, or **Admin**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -569,7 +595,7 @@ async def respond_out_of_scope(state: AgentState) -> dict:
     content = (
         "I cannot answer that request. "
         "I am limited to platform/help questions and requests related to "
-        "**HR**, **Finance**, **IT**, **CIO**, and **Admin**."
+        "**HR**, **Finance**, **IT**, and **Admin**."
     )
     return {"messages": [AIMessage(content=content)]}
 
@@ -581,6 +607,7 @@ def _build_delegate_node(agent_id: str):
     async def _delegate_to_specialist(state: AgentState) -> dict:
         specialist_state = dict(state)
         specialist_state["agent_id"] = agent_id
+        specialist_state["via_supervisor"] = True
 
         delegation_query = state.get("delegation_query")
         if delegation_query:
@@ -638,6 +665,7 @@ async def _invoke_specialist_for_fan_out(
     """Run a single specialist and return its final answer text (or a decline marker)."""
     specialist_state = dict(base_state)
     specialist_state["agent_id"] = agent_id
+    specialist_state["via_supervisor"] = True
     if delegation_query:
         specialist_state["messages"] = _replace_latest_human_message(
             base_state.get("messages", []),
@@ -683,6 +711,8 @@ async def multi_delegate(state: AgentState) -> dict:
         agent_ids,
         {aid: len(ans) for aid, ans in specialist_answers.items()},
     )
+    for aid, ans in specialist_answers.items():
+        logger.info("Supervisor multi_delegate raw | agent=%s | answer=%r", aid, ans[:600])
 
     return {
         "specialist_answers": specialist_answers,
@@ -697,11 +727,20 @@ async def multi_delegate(state: AgentState) -> dict:
 _DECLINE_PATTERNS: tuple[str, ...] = (
     r"\bi (?:can(?:not|'t)|am (?:not|unable)) (?:help|answer|assist)\b",
     r"\b(?:not|outside) (?:my|the) (?:domain|area|scope|expertise)\b",
-    r"\bask (?:the )?(?:hr|finance|it|cio|admin) (?:team|agent|specialist)\b",
-    r"\bplease (?:contact|reach out to) (?:hr|finance|it|cio|admin)\b",
+    r"\bask (?:the )?(?:hr|finance|it|admin) (?:team|agent|specialist)\b",
+    r"\bplease (?:contact|reach out to) (?:hr|finance|it|admin)\b",
     r"\bno relevant (?:documents|information) (?:were |was )?found\b",
     r"\bcould not (?:find|retrieve) (?:the |any )?(?:relevant )?(?:information|answer)\b",
-    r"\bi don'?t have (?:the )?(?:information|details|answer)\b",
+    # Covers: "I don't have the information", "I don't have that information",
+    # "I don't have any details", "I don't have enough data", "I don't have information available", etc.
+    r"\bi don'?t have\s+(?:\w+\s+){0,3}(?:information|details|answer|data|info)\b",
+    r"\bi don'?t have\s+(?:that|the|any|enough|sufficient|relevant)\b",
+    r"\b(?:information|answer|details?)\s+(?:is |are )?not available\b",
+    # Missing Qdrant collection sentinel surfaced by rag_tools.py.
+    r"\[kb_unavailable\]",
+    r"\bno knowledge base is configured\b",
+    # Scoped decline from the via_supervisor kb_agent prompt.
+    r"\bi can'?t answer that from the available\b",
 )
 
 
@@ -711,6 +750,29 @@ def _looks_like_decline(text: str) -> bool:
     if len(stripped) < 20:
         return True
     return any(re.search(pattern, stripped) for pattern in _DECLINE_PATTERNS)
+
+
+def _flatten_for_synthesis(text: str) -> str:
+    """Remove bullet markers and bold emphasis so the synthesis LLM does not see
+    two parallel bullet lists it is tempted to interleave. Preserves markdown
+    links like [name](url) and paragraph structure.
+    """
+    lines = text.split("\n")
+    cleaned: list[str] = []
+    for raw_line in lines:
+        line = raw_line.rstrip()
+        # Strip leading bullet / list markers
+        line = re.sub(r"^\s*[-*•]\s+", "", line)
+        # Strip leading numbered list markers like "1. " or "1) "
+        line = re.sub(r"^\s*\d+[.)]\s+", "", line)
+        # Strip markdown bold / emphasis wrappers but keep inner text
+        line = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+        line = re.sub(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)", r"\1", line)
+        cleaned.append(line)
+    flattened = "\n".join(cleaned)
+    # Collapse excessive blank lines
+    flattened = re.sub(r"\n{3,}", "\n\n", flattened)
+    return flattened.strip()
 
 
 async def synthesize_multi_answer(state: AgentState) -> dict:
@@ -730,7 +792,7 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "I could not find a clear answer for this in our HR, Finance, "
-                        "Admin, IT, or CIO knowledge bases. Could you rephrase or add a bit more detail?"
+                        "Admin, or IT knowledge bases. Could you rephrase or add a bit more detail?"
                     )
                 )
             ],
@@ -745,42 +807,74 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
             "specialist_answers": {},
         }
 
-    answer_blocks: list[str] = []
-    for agent_id, answer in useful.items():
-        display_name = SPECIALIST_ROUTING_PROFILES.get(agent_id, {}).get(
-            "display_name", agent_id.upper()
-        )
-        answer_blocks.append(f"[{display_name} specialist answer]\n{answer}")
+    # Pick a BASE (the more trustworthy answer) and a SECONDARY.
+    # Preference order:
+    #   1. Highest routing score in state["routing_scores"] — the specialist the
+    #      router judged most semantically aligned with the query. Longer ≠ more
+    #      grounded; a confidently-hallucinated longer answer has beaten a
+    #      correct shorter one in practice.
+    #   2. Fall back to longer answer only when routing scores are missing or tied.
+    # Quote-then-augment: the LLM copies BASE verbatim and only appends non-duplicate
+    # facts from SECONDARY. This prevents word-by-word stitching between parallel
+    # bullet lists.
+    routing_scores: dict[str, float] = state.get("routing_scores") or {}
+
+    def _rank_key(item: tuple[str, str]) -> tuple[float, int]:
+        agent_id, answer_text = item
+        score = float(routing_scores.get(agent_id, 0.0))
+        return (score, len(answer_text))
+
+    sorted_answers = sorted(useful.items(), key=_rank_key, reverse=True)
+    base_agent_id, base_answer = sorted_answers[0]
+    secondary_agent_id, secondary_answer = sorted_answers[1]
+
+    secondary_flat = _flatten_for_synthesis(secondary_answer)
 
     system_prompt = (
-        "You are Workmate AI composing a single final answer for the user from TWO "
-        "specialist answers below. Write clean, well-formed markdown prose.\n\n"
-        "HARD RULES:\n"
-        "- Do NOT interleave, blend, or stitch the two answers word-by-word or phrase-by-phrase. "
-        "That produces garbled text like 'Companyl providedorries' — never do this.\n"
-        "- If the two answers say substantially the same thing, pick the clearer, better-formed "
-        "one and use it as your base. You may add any unique factual detail from the other, "
-        "but only as a separate sentence or bullet.\n"
-        "- If the two answers cover different facets of the question, combine them as distinct, "
-        "clearly-written sections or bullets — each facet in its own complete sentence.\n"
-        "- Rewrite into clean grammatical English. Fix any obviously broken tokenization or "
-        "spacing you see in the source answers (e.g. missing spaces, merged words).\n"
-        "- Do not invent facts not supported by the specialist answers.\n"
-        "- Do not mention routing, multiple specialists, or that a merge happened.\n"
-        "- Be concise and practical. Do not end with a closing question.\n\n"
-        "SOURCE CITATIONS:\n"
-        "- Each specialist answer may contain a 'Sources:' section with markdown links like "
-        "[Filename](URL). You MUST preserve every unique source link you used.\n"
-        "- End your final answer with a single 'Sources:' section that lists the deduplicated "
-        "union of all [Filename](URL) links from the specialist answers you drew facts from.\n"
-        "- Do not invent source filenames or URLs. Only keep links that already appear in the "
-        "specialist answers above.\n"
-        "- If a specialist answer has no Sources section, just omit its sources."
+        "You are Workmate AI composing a single final answer for the user.\n"
+        "Two internal knowledge sources produced candidate answers. Your job is NOT to "
+        "merge them sentence-by-sentence. Follow this exact procedure:\n\n"
+        "STEP 1 — USE BASE AS THE ANSWER:\n"
+        "Copy the BASE answer below verbatim as the start of your reply, including its "
+        "existing bullets, bold formatting, and Sources section. Do NOT paraphrase, "
+        "reword, shorten, or restructure the BASE answer. Every character of BASE text "
+        "(other than the Sources block, which you will handle in step 3) must appear "
+        "in your reply exactly as written.\n\n"
+        "STEP 2 — AUGMENT IF (AND ONLY IF) SECONDARY HAS UNIQUE FACTS:\n"
+        "Read the SECONDARY answer. If it contains a factual detail that is NOT already "
+        "in BASE, insert an '**Additional details:**' section between the BASE body and "
+        "the Sources section. List each unique fact as its own bullet, copied as a "
+        "complete sentence from SECONDARY (you may fix obvious typos but do not blend "
+        "words from BASE into it). If SECONDARY adds nothing new, omit this section.\n\n"
+        "STEP 3 — SOURCES:\n"
+        "End the reply with ONE 'Sources:' line that is the deduplicated union of "
+        "[Filename](URL) links from BASE and from SECONDARY (only if you used a SECONDARY "
+        "fact). Do not invent URLs.\n\n"
+        "HARD NEVERS:\n"
+        "- NEVER interleave words, phrases, or clauses from BASE and SECONDARY within a "
+        "single sentence or bullet. Garbled tokens like 'governanceAI' or "
+        "'improvementautomation' come from doing exactly that — do not.\n"
+        "- If SECONDARY is a decline, says it lacks information, or is very short, IGNORE "
+        "it completely and return BASE unchanged. Never output 'I don't have enough "
+        "information' when BASE gave a real answer.\n"
+        "- Do not mention routing, multiple specialists, different departments, or that "
+        "two sources were consulted. The user sees one unified assistant.\n"
+        "- Do not add a closing question."
     )
 
     user_prompt = (
         f"User question:\n{query}\n\n"
-        + "\n\n".join(answer_blocks)
+        f"=== BASE (copy this verbatim in step 1) ===\n{base_answer}\n\n"
+        f"=== SECONDARY (scan for NEW facts only; flattened to discourage word-level "
+        f"blending) ===\n{secondary_flat}"
+    )
+
+    logger.info(
+        "Supervisor synthesis | base=%s (%d chars) | secondary=%s (%d chars)",
+        base_agent_id,
+        len(base_answer),
+        secondary_agent_id,
+        len(secondary_answer),
     )
 
     response = await llm.ainvoke(
@@ -843,7 +937,6 @@ def build_supervisor_workflow() -> StateGraph:
             "delegate_finance": "delegate_finance",
             "delegate_admin": "delegate_admin",
             "delegate_it": "delegate_it",
-            "delegate_cio": "delegate_cio",
         },
     )
 
@@ -856,6 +949,5 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("delegate_finance", END)
     workflow.add_edge("delegate_admin", END)
     workflow.add_edge("delegate_it", END)
-    workflow.add_edge("delegate_cio", END)
 
     return workflow
