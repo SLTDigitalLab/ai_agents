@@ -22,4 +22,4 @@ RUN apt-get update && apt-get install -y libxcb-cursor0 && rm -rf /var/lib/apt/l
 
 COPY . .
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "info"]

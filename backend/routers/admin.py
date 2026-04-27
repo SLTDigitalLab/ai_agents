@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException
 from pydantic import BaseModel
+import asyncio
 import requests
 import logging
 from services.ingestion import IngestionService
@@ -24,35 +25,63 @@ class OneDriveIngestRequest(BaseModel):
 class TestLeaveBalanceRequest(BaseModel):
     sid: str
 
+async def _run_ingestion_task(coro, *, label: str):
+    """Wrap a long-running ingestion coroutine so its result/errors are
+    captured into ingestion_status instead of bubbling out of the request."""
+    try:
+        result = await coro
+        if not isinstance(result, dict):
+            result = {"status": "error", "message": "Unknown error"}
+    except Exception as exc:
+        logger.exception(f"{label} ingestion failed")
+        result = {"status": "error", "message": f"{type(exc).__name__}: {exc}"}
+    ingestion_status.finish(result)
+
+
 @router.post("/ingest-url")
 async def ingest_url(request: UrlIngestRequest):
     """
     Ingest content from a URL and store embeddings in Qdrant.
+    Runs in the background; poll /ingestion-status for completion.
     """
+    current = ingestion_status.get_status()
+    if current.get("active"):
+        raise HTTPException(status_code=409, detail="Another ingestion job is already running.")
+
     ingestion_status.start(agent_name=request.agent_name, source="url")
-    try:
-        result = await ingestion_service.ingest_website(request.url, request.agent_name)
-    finally:
-        ingestion_status.finish(result if isinstance(result, dict) else {"status": "error", "message": "Unknown error"})
-    return result
+    asyncio.create_task(
+        _run_ingestion_task(
+            ingestion_service.ingest_website(request.url, request.agent_name),
+            label=f"URL agent='{request.agent_name}' url='{request.url}'",
+        )
+    )
+    return {"status": "started", "agent_name": request.agent_name, "source": "url"}
+
 
 @router.post("/ingest-onedrive")
 async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
     """
     Process Onedrive Ingestion Api - Ingest PDFs, Word docs, Powerpoint and Excel
     from a OneDrive folder using the Graph API.
+    Runs in the background; poll /ingestion-status for completion.
     """
+    current = ingestion_status.get_status()
+    if current.get("active"):
+        raise HTTPException(status_code=409, detail="Another ingestion job is already running.")
+
     ingestion_status.start(agent_name=request.agent_name, source="onedrive")
-    try:
-        result = await ingestion_service.process_onedrive_ingestion(
-            folder_id=request.folder_id,
-            access_token=request.token,
-            agent_name=request.agent_name,
-            force=request.force,
+    asyncio.create_task(
+        _run_ingestion_task(
+            ingestion_service.process_onedrive_ingestion(
+                folder_id=request.folder_id,
+                access_token=request.token,
+                agent_name=request.agent_name,
+                force=request.force,
+            ),
+            label=f"OneDrive agent='{request.agent_name}' folder='{request.folder_id}'",
         )
-    finally:
-        ingestion_status.finish(result if isinstance(result, dict) else {"status": "error", "message": "Unknown error"})
-    return result
+    )
+    return {"status": "started", "agent_name": request.agent_name, "source": "onedrive"}
 
 @router.get("/ingestion-status")
 async def get_ingestion_status():
