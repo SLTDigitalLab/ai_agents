@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tracers.context import tracing_v2_enabled
 
+from core.cache_constants import CACHE_TTL_SECONDS
 from core.cache_keys import (
     build_cache_key,
     normalize_question,
@@ -33,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 
-CACHE_TTL_SECONDS = 86400
 MIN_CACHEABLE_RESPONSE_LEN = 12
 
 FUZZY_THRESHOLD = 90.0

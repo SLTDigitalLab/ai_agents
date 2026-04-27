@@ -28,3 +28,4 @@ redis==5.2.1
 rapidfuzz==3.14.3
 sentence-transformers==5.3.0
 pytesseract==0.3.13
+APScheduler==3.11.0

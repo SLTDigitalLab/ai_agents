@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from typing import Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
 
 from core.config import settings
+from core.cache_constants import CACHE_TTL_SECONDS
 from core.embeddings import embed_text, get_embedding_dimension
 
 logger = logging.getLogger(__name__)
@@ -113,6 +115,18 @@ def semantic_lookup(
             return None
 
         payload = hit.payload or {}
+        # CRITICAL: enforce expiry at read-time so stale semantic cache entries
+        # are never returned, even if background cleanup is delayed or fails.
+        now = int(time.time())
+        expires_at = payload.get("expires_at")
+        try:
+            expires_at_int = int(expires_at)
+        except Exception:
+            # If expiry is missing/malformed (e.g., older points), treat as expired.
+            return None
+        if now > expires_at_int:
+            return None
+
         ans = payload.get("answer")
         if isinstance(ans, str) and ans.strip():
             return ans
@@ -146,6 +160,8 @@ def semantic_store(
 
     try:
         pid = _point_id(agent_id, normalized_question)
+        now = int(time.time())
+        expires_at = now + CACHE_TTL_SECONDS
         client.upsert(
             collection_name=SEMANTIC_COLLECTION,
             points=[
@@ -156,6 +172,7 @@ def semantic_store(
                         "agent_id": agent_id.lower(),
                         "question": normalized_question,
                         "answer": answer,
+                        "expires_at": expires_at,
                     },
                 )
             ],
