@@ -15,6 +15,18 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
+// Strip unmatched ** bold markers so stray asterisks don't render literally.
+const sanitizeMarkdownBold = (text) => {
+  if (!text) return text;
+  const positions = [];
+  const regex = /\*\*/g;
+  let m;
+  while ((m = regex.exec(text)) !== null) positions.push(m.index);
+  if (positions.length % 2 === 0) return text;
+  const last = positions[positions.length - 1];
+  return text.slice(0, last) + text.slice(last + 2);
+};
+
 // Utility function to append incoming text chunks to the current message text
 const appendChunkSmartly = (current, incoming) => {
   return (current || "") + (incoming || "");
@@ -376,7 +388,7 @@ const ChatInterface = ({ agentConfig }) => {
                 className="text-center mb-4 space-y-2"
             >
                 <h1 className="text-5xl sm:text-6xl font-extrabold text-white tracking-tight drop-shadow-lg uppercase">{agentConfig.title}</h1>
-                <p className="text-white/70 text-base sm:text-lg max-w-4xl mx-auto font-light">{agentConfig.subtitle}</p>
+                <p className="text-white/70 text-sm sm:text-base mx-auto font-light whitespace-nowrap overflow-hidden text-ellipsis">{agentConfig.subtitle}</p>
             </motion.div>
 
             {/* ── Premium Chat Workspace ─────────────────────── */}
@@ -417,9 +429,9 @@ const ChatInterface = ({ agentConfig }) => {
                                             <div className="prose prose-sm max-w-none text-inherit">
                                                 {(() => {
                                                     // Logic to separate text from sources
-                                                    const parts = msg.text.split(/(Sources:)/);
-                                                    const mainText = parts[0];
-                                                    const sourcesPart = parts.length > 2 ? parts.slice(2).join("") : "";
+                                                    const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
+                                                    const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
+                                                    const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
                                                     
                                                     // Parse sources list: "[Name](URL), [Name](URL)"
                                                     const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
@@ -456,7 +468,7 @@ const ChatInterface = ({ agentConfig }) => {
                                                                     }
                                                                 }}
                                                             >
-                                                                {mainText}
+                                                                {sanitizeMarkdownBold(mainText)}
                                                             </ReactMarkdown>
                                                             {msg.type === 'bot' && (
                                                                 <SourcesSection sources={sources} color={agentConfig.color} />
