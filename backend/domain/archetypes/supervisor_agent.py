@@ -51,6 +51,7 @@ SPECIALIST_BUILDERS = {
     "finance": build_kb_workflow,
     "admin": build_kb_workflow,
     "it": build_kb_workflow,
+    "cio": build_kb_workflow,
 }
 
 
@@ -510,7 +511,7 @@ async def answer_directly(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "Hi! I’m Workmate AI. I can help with platform questions "
-                        "or requests related to **HR**, **Finance**, **IT**, or **Admin**."
+                        "or requests related to **HR**, **Finance**, **IT**, **Admin**, or **CIO**."
                     )
                 )
             ],
@@ -531,11 +532,12 @@ Available specialists:
 - Finance: salary, payroll, budgets, invoices, expense claims, payments
 - IT: technical support, hardware, software, network, access management
 - Admin: facilities, transport, security, parking, office support
+- CIO: IT strategy, digital transformation, information governance, enterprise architecture, IT policy and standards
 
 Rules:
 1. Be concise, clear, and practical.
 2. If the user asks which specialist should handle something, answer directly.
-3. Do not invent HR, finance, IT, or admin facts.
+3. Do not invent HR, finance, IT, admin, or CIO facts.
 4. If the user is clearly asking a specialist-domain factual question, say that you can route them to the right specialist and name the best fit.
 5. Do not mention routing scores, thresholds, embeddings, vectors, or internal implementation.
 6. Do not end with a closing question.
@@ -565,7 +567,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
 
     if reason == "vague_prompt" or not display_names:
         content = (
-            "Please tell me which area this is about: **HR**, **Finance**, **IT**, or **Admin**."
+            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, or **CIO**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -579,7 +581,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
     if len(display_names) == 1:
         content = (
             f"I think this may belong to **{display_names[0]}**. "
-            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, or **Admin**."
+            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, or **CIO**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -595,7 +597,7 @@ async def respond_out_of_scope(state: AgentState) -> dict:
     content = (
         "I cannot answer that request. "
         "I am limited to platform/help questions and requests related to "
-        "**HR**, **Finance**, **IT**, and **Admin**."
+        "**HR**, **Finance**, **IT**, **Admin**, and **CIO**."
     )
     return {"messages": [AIMessage(content=content)]}
 
@@ -727,8 +729,8 @@ async def multi_delegate(state: AgentState) -> dict:
 _DECLINE_PATTERNS: tuple[str, ...] = (
     r"\bi (?:can(?:not|'t)|am (?:not|unable)) (?:help|answer|assist)\b",
     r"\b(?:not|outside) (?:my|the) (?:domain|area|scope|expertise)\b",
-    r"\bask (?:the )?(?:hr|finance|it|admin) (?:team|agent|specialist)\b",
-    r"\bplease (?:contact|reach out to) (?:hr|finance|it|admin)\b",
+    r"\bask (?:the )?(?:hr|finance|it|admin|cio) (?:team|agent|specialist|office)\b",
+    r"\bplease (?:contact|reach out to) (?:hr|finance|it|admin|cio)\b",
     r"\bno relevant (?:documents|information) (?:were |was )?found\b",
     r"\bcould not (?:find|retrieve) (?:the |any )?(?:relevant )?(?:information|answer)\b",
     # Covers: "I don't have the information", "I don't have that information",
@@ -792,7 +794,7 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "I could not find a clear answer for this in our HR, Finance, "
-                        "Admin, or IT knowledge bases. Could you rephrase or add a bit more detail?"
+                        "Admin, IT, or CIO knowledge bases. Could you rephrase or add a bit more detail?"
                     )
                 )
             ],
@@ -937,6 +939,7 @@ def build_supervisor_workflow() -> StateGraph:
             "delegate_finance": "delegate_finance",
             "delegate_admin": "delegate_admin",
             "delegate_it": "delegate_it",
+            "delegate_cio": "delegate_cio",
         },
     )
 
@@ -949,5 +952,6 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("delegate_finance", END)
     workflow.add_edge("delegate_admin", END)
     workflow.add_edge("delegate_it", END)
+    workflow.add_edge("delegate_cio", END)
 
     return workflow

@@ -49,6 +49,16 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the IT Helpdesk."
     },
 
+    // 5. CIO
+    askcio: {
+        id: "cio",
+        title: "ASK CIO",
+        subtitle: "Information governance, IT strategy, digital transformation, and CIO office policies.",
+        color: "from-rose-900 to-rose-600",
+        buttonColor: "bg-rose-600 hover:bg-rose-700",
+        disclaimer: "If you need any further clarifications, please reach out to the CIO office."
+    },
+
     // 4. Process
     askprocess: {
         id: "process",

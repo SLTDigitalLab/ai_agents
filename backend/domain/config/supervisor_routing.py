@@ -332,6 +332,56 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "How do I get approval to connect my mobile device to the corporate WiFi hotspot?",
         ],
     },
+    "cio": {
+        "display_name": "CIO",
+        "description": (
+            "Oversees corporate risk, internal controls, and compliance based on "
+            "the Sri Lanka Telecom Internal Audit Charter. Key frameworks and "
+            "governing bodies include the Enterprise Risk Management framework, "
+            "the Group Audit Committee, the Audit Committee Terms of Reference, "
+            "and the Code of Ethics and Standards of the Professional Practice "
+            "of Internal Auditing."
+        ),
+        "keywords": [
+            "Internal Audit Charter",
+            "Group Audit Committee",
+            "Enterprise Risk Management framework",
+            "risk assessment",
+            "risk management",
+            "risk communication",
+            "Audit Committee Terms of Reference",
+            "Internal Audit Manual",
+            "Code of Ethics and Standards of the Professional Practice of Internal Auditing",
+            "Institute of Internal Auditors",
+            "internal control systems",
+            "governance processes",
+            "fraud limitation",
+            "ethical and legal compliance",
+            "process improvement",
+            "audit plan",
+            "corporate risk profile",
+            "management audits",
+            "external audit reports",
+            "intangible assets control",
+        ],
+        "examples": [
+            "What is the policy for reviewing and updating the Internal Audit Charter?",
+            "What does the Audit Committee Terms of Reference say about ethical and legal compliance?",
+            "Who approves an exception to the annual Audit Plan?",
+            "How often is the self-assessment of the Internal Audit activity done?",
+            "What does the Enterprise Risk Management framework say about risk communication?",
+            "Who is responsible for the identification and prevention of fraud under the charter?",
+            "What is the established standard for the Internal Audit Manual?",
+            "How often is an external assessment of the Internal Audit required?",
+            "Who approves amendments to the Internal Audit Manual?",
+            "What are management's responsibilities regarding internal controls and business risks?",
+            "What is the governance process for safeguarding intangible assets?",
+            "Who does the Group Chief Internal Auditor report to functionally and administratively?",
+            "What does the Internal Audit Charter say about fraud limitation?",
+            "What are the compliance requirements under the Code of Ethics and Standards?",
+            "How often is the corporate risk profile updated?",
+        ],
+    },
 }
 
 GENERAL_HELP_PATTERNS: tuple[str, ...] = (
@@ -367,6 +417,7 @@ CLARIFICATION_CHOICE_ALIASES: dict[str, tuple[str, ...]] = {
     "finance": ("finance", "financial", "accounts", "accounting"),
     "admin": ("admin", "administration", "facilities"),
     "it": ("it", "information technology", "tech support", "technical support"),
+    "cio": ("cio", "cio office", "chief information officer"),
 }
 
 FOLLOW_UP_PATTERNS: tuple[str, ...] = (
