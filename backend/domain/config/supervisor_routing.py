@@ -332,8 +332,8 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "How do I get approval to connect my mobile device to the corporate WiFi hotspot?",
         ],
     },
-    "cio": {
-        "display_name": "CIO",
+    "cia": {
+        "display_name": "CIA",
         "description": (
             "Oversees corporate risk, internal controls, and compliance based on "
             "the Sri Lanka Telecom Internal Audit Charter. Key frameworks and "
@@ -417,7 +417,7 @@ CLARIFICATION_CHOICE_ALIASES: dict[str, tuple[str, ...]] = {
     "finance": ("finance", "financial", "accounts", "accounting"),
     "admin": ("admin", "administration", "facilities"),
     "it": ("it", "information technology", "tech support", "technical support"),
-    "cio": ("cio", "cio office", "chief information officer"),
+    "cia": ("cia", "cia office", "chief internal auditor"),
 }
 
 FOLLOW_UP_PATTERNS: tuple[str, ...] = (

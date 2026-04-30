@@ -49,14 +49,14 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the IT Helpdesk."
     },
 
-    // 5. CIO
-    askcio: {
-        id: "cio",
-        title: "ASK CIO",
-        subtitle: "Information governance, IT strategy, digital transformation, and CIO office policies.",
+    // 5. CIA
+    askcia: {
+        id: "cia",
+        title: "ASK CIA",
+        subtitle: "Internal audit, risk management, governance, and compliance under the Internal Audit Charter.",
         color: "from-rose-900 to-rose-600",
         buttonColor: "bg-rose-600 hover:bg-rose-700",
-        disclaimer: "If you need any further clarifications, please reach out to the CIO office."
+        disclaimer: "If you need any further clarifications, please reach out to the Internal Audit office."
     },
 
     // 4. Process
