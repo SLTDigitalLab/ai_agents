@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     GUARDRAIL_MODEL: str = "gpt-4.1-nano"
     GUARDRAIL_API_KEY: Optional[str] = None  # falls back to provider key
 
+    # Internal SLM (Ollama) — used by the Ask HR SLM demo agent only.
+    SLM_BASE_URL: str = "http://localhost:11434"
+    SLM_MODEL: str = "deepseek-r1:1.5b"
+    SLM_EMBEDDING_MODEL: str = "nomic-embed-text"
+    SLM_EMBEDDING_DIMENSIONS: int = 768
+
     QDRANT_URL: str
     POSTGRES_URL: str
 

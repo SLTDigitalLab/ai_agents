@@ -19,6 +19,7 @@ from langgraph.graph import StateGraph
 from domain.archetypes.kb_agent import build_kb_workflow
 from domain.archetypes.kb_api_agent import build_kb_api_workflow
 from domain.archetypes.kb_form_agent import build_kb_form_workflow
+from domain.archetypes.kb_slm_agent import build_kb_slm_workflow
 from domain.archetypes.supervisor_agent import build_supervisor_workflow
 
 # ── Registry ─────────────────────────────────────────────────────────────
@@ -41,6 +42,9 @@ AGENT_BUILDERS: dict[str, callable] = {
     # Archetype 3 – KB + Form (Generative UI)
     "lifestore": build_kb_form_workflow,
     "enterprise": build_kb_form_workflow,
+
+    # Archetype 4 – KB powered by internal SLM (Ollama)
+    "askhrslm": build_kb_slm_workflow,
 }
 
 
