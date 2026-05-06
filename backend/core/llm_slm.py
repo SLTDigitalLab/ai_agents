@@ -32,9 +32,9 @@ def get_slm_embedding_model():
 
     log.info(
         f"Initialized SLM embedding model: {settings.SLM_EMBEDDING_MODEL} "
-        f"@ {settings.SLM_BASE_URL}"
+        f"@ {settings.SLM_EMBEDDING_BASE_URL}"
     )
     return OllamaEmbeddings(
         model=settings.SLM_EMBEDDING_MODEL,
-        base_url=settings.SLM_BASE_URL,
+        base_url=settings.SLM_EMBEDDING_BASE_URL,
     )

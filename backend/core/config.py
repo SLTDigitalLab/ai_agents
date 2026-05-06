@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # Internal SLM (Ollama) — used by the Ask HR SLM demo agent only.
     SLM_BASE_URL: str = "http://localhost:11434"
+    SLM_EMBEDDING_BASE_URL: str = "http://localhost:11434"
     SLM_MODEL: str = "deepseek-r1:1.5b"
     SLM_EMBEDDING_MODEL: str = "nomic-embed-text"
     SLM_EMBEDDING_DIMENSIONS: int = 768

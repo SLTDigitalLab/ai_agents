@@ -58,7 +58,7 @@ async def search_hr_slm_kb(query: str) -> str:
             sparse_vector_name="sparse",
         )
 
-        results = await vector_store.asimilarity_search(query=query, k=8)
+        results = await vector_store.asimilarity_search(query=query, k=4)
         if not results:
             return "No relevant documents found."
 
