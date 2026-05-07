@@ -26,6 +26,23 @@ def get_slm_chat_model():
     )
 
 
+def get_slm_classifier_model():
+    """Non-streaming SLM instance for intent classification.
+
+    Streaming is disabled so its tokens never bubble up through the
+    chat router's `on_chat_model_stream` events to the user.
+    """
+    from langchain_ollama import ChatOllama
+
+    return ChatOllama(
+        model=settings.SLM_MODEL,
+        base_url=settings.SLM_BASE_URL,
+        temperature=0,
+        num_predict=80,
+        disable_streaming=True,
+    )
+
+
 def get_slm_embedding_model():
     """Return an OllamaEmbeddings instance for the SLM embedding model."""
     from langchain_ollama import OllamaEmbeddings
