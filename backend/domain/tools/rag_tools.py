@@ -10,6 +10,7 @@ the top-k document chunks as a single concatenated context string.
 import logging
 from typing import Annotated
 
+import httpx
 from langchain_core.tools import tool
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langgraph.prebuilt import InjectedState
@@ -23,6 +24,30 @@ log = logging.getLogger(__name__)
 # Sparse embedding model instantiated once at import time - BM25 is
 # lightweight and stateless, so a single shared instance is fine.
 _sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+
+
+async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
+    """Proxy retrieval to a remote Ask SLT instance's /api/v1/kb endpoint.
+
+    Used by local dev environments to skip ingestion and read prod vectors.
+    """
+    base = settings.KB_REMOTE_URL.rstrip("/")
+    url = f"{base}/api/v1/kb/{agent_id}/retrieve"
+    headers = {"X-API-Key": settings.KB_REMOTE_API_KEY or ""}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(url, json={"query": query, "top_k": k}, headers=headers)
+        if resp.status_code == 404:
+            return "[KB_UNAVAILABLE] No knowledge base is configured for this agent."
+        resp.raise_for_status()
+        chunks = resp.json().get("chunks", [])
+
+    if not chunks:
+        return "No relevant documents found."
+
+    return "\n\n---\n\n".join(
+        f"[Source: {c.get('source', 'Unknown Source')} | Link: {c.get('link', '#')}]\n{c.get('text', '')}"
+        for c in chunks
+    )
 
 
 @tool
@@ -45,6 +70,16 @@ async def search_knowledge_base(
         A concatenated string of the most relevant document chunks,
         or an informational message when no documents are found.
     """
+    if settings.KB_REMOTE_URL:
+        try:
+            return await _search_remote(agent_id, query, k=10)
+        except Exception as e:
+            log.exception(
+                f"Remote KB retrieval failed for agent='{agent_id}' "
+                f"url='{settings.KB_REMOTE_URL}': {type(e).__name__}: {e}"
+            )
+            return "No relevant documents found."
+
     try:
         # --- Embeddings ---------------------------------------------------
         embeddings = get_embedding_model()
