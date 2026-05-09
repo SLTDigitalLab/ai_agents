@@ -82,7 +82,7 @@ export const AGENTS = {
     // 6. Ask HR (Internal SLM demo — DeepSeek-R1 1.5B via Ollama)
     askhrslm: {
         id: "askhrslm",
-        title: "ASK HR (SLM)",
+        title: "ASK HR",
         subtitle: "HR support powered by SLTMobitel's internal small language model — fully on-prem inference, zero external API calls.",
         color: "from-fuchsia-900 to-fuchsia-600",
         buttonColor: "bg-fuchsia-600 hover:bg-fuchsia-700",
