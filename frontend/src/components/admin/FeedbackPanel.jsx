@@ -16,6 +16,8 @@ const AGENT_COLORS = {
     process: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', text: 'text-emerald-400' },
     enterprise: { bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', text: 'text-indigo-400' },
     lifestore: { bg: 'bg-orange-500/10', border: 'border-orange-500/20', text: 'text-orange-400' },
+    it: { bg: 'bg-sky-500/10', border: 'border-sky-500/20', text: 'text-sky-400' },
+    cia: { bg: 'bg-rose-500/10', border: 'border-rose-500/20', text: 'text-rose-400' },
 };
 
 const DEFAULT_COLOR = { bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', text: 'text-cyan-400' };

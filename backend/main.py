@@ -10,7 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance
 from services.ingestion import router as ingestion_router
 
-app = FastAPI(title="Ask SLT API")
+app = FastAPI(
+    title="Ask SLT API",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+)
 
 # --- 1. Add CORS Middleware ---
 app.add_middleware(

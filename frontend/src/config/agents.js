@@ -3,7 +3,7 @@ export const AGENTS = {
     workmateai: {
         id: "supervisor",
         title: "Workmate AI",
-        subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, or Admin — all in one place.",
+        subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, Admin, or CIA — all in one place.",
         color: "from-cyan-900 to-cyan-600",
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
         disclaimer: "Workmate AI provides internal workplace information. Please verify critical details with the relevant department."
@@ -47,6 +47,16 @@ export const AGENTS = {
         color: "from-sky-900 to-sky-600",
         buttonColor: "bg-sky-600 hover:bg-sky-700",
         disclaimer: "If you need any further clarifications, please reach out to the IT Helpdesk."
+    },
+
+    // 5. CIA
+    askcia: {
+        id: "cia",
+        title: "ASK CIA",
+        subtitle: "Internal audit, risk management, governance, and compliance under the Internal Audit Charter.",
+        color: "from-rose-900 to-rose-600",
+        buttonColor: "bg-rose-600 hover:bg-rose-700",
+        disclaimer: "If you need any further clarifications, please reach out to the Internal Audit office."
     },
 
     // 4. Process
