@@ -7,7 +7,7 @@ logging.basicConfig(
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
 from services.ingestion import router as ingestion_router
 
 app = FastAPI(
@@ -34,6 +34,7 @@ app.include_router(enterprise.router)  # Enterprise lead → Bitrix24
 app.include_router(admin_dashboard.router)  # Admin dashboard panel
 app.include_router(feedback.router)  # Feedback (thumbs up/down)
 app.include_router(finance.router)  # External Finance KB retrieval (voice assistant)
+app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev local → prod vectors)
 app.include_router(ingestion_router)
 
 @app.get("/")

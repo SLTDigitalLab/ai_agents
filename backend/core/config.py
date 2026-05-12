@@ -38,6 +38,21 @@ class Settings(BaseSettings):
     # API key for external clients (e.g. voice assistant) hitting the Finance retrieval endpoint
     VOICE_ASSISTANT_API_KEY: Optional[str] = None
 
+    # API key for the generic /api/v1/kb/{agent_id}/retrieve endpoint used by
+    # local developer instances so they can query prod-embedded vectors instead
+    # of re-embedding files locally. Rotated independently of the voice key.
+    DEV_KB_API_KEY: Optional[str] = None
+
+    # Comma-separated agent_ids that are exposed via /api/v1/kb/{agent_id}/retrieve.
+    # Anything not in this list returns 404 even with a valid API key.
+    KB_RETRIEVAL_ALLOWLIST: str = ""
+
+    # When set, search_knowledge_base proxies retrieval to a remote Ask SLT
+    # instance (typically prod) instead of querying a local Qdrant. Devs use
+    # this to avoid running ingestion on every checkout.
+    KB_REMOTE_URL: Optional[str] = None
+    KB_REMOTE_API_KEY: Optional[str] = None
+
     # Bitrix24 CRM
     BITRIX24_WEBHOOK_URL: str = ""
 
