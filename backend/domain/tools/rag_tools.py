@@ -221,6 +221,7 @@ def _format_graph_rows(rows: list[dict]) -> str:
                 [
                     f"Product: {row.get('product') or 'Unknown'}",
                     f"Brand: {row.get('brand') or 'Unknown'}",
+                    f"Seller: {row.get('seller') or 'Unknown'}",
                     f"Category: {row.get('category') or 'Unknown'}",
                     f"Product Type: {row.get('product_type') or 'Unknown'}",
                     f"Price: {row.get('price') or 'Unknown'}",
@@ -239,8 +240,20 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
     """
     Structured graph search for LifeStore.
 
-    This is what fixes stock questions. The graph has product.stock_status
-    and Product -> Availability, so the LLM can answer availability directly.
+    Neo4j is the source of truth for structured facts:
+    - seller
+    - stock_status
+    - price
+    - brand
+    - category
+    - product_type
+    - URL
+
+    Qdrant is still useful for semantic/descriptive content, but this graph
+    search should answer exact product facts such as:
+    - Who is the seller of TeDi Aroma Diffuser?
+    - Is D-Link AC1200 Wi-Fi Range Extender in stock?
+    - List out of stock products.
     """
     neo4j_uri = _get_setting("NEO4J_URI")
     neo4j_username = _get_setting("NEO4J_USERNAME")
@@ -260,17 +273,29 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
         or "sold out" in query_lower
     )
 
-    wants_in_stock = (
+    wants_stock_info = (
         "in stock" in query_lower
         or "available" in query_lower
         or "availability" in query_lower
         or "stock" in query_lower
-    ) and not wants_out_of_stock
+        or wants_out_of_stock
+    )
+
+    wants_seller_info = (
+        "seller" in query_lower
+        or "sold by" in query_lower
+        or "who sells" in query_lower
+        or "who is selling" in query_lower
+    )
 
     try:
         driver = _get_neo4j_driver()
 
-        if wants_out_of_stock:
+        # ------------------------------------------------------------
+        # Case 1: User asks for all out-of-stock products
+        # Example: "List all out of stock products"
+        # ------------------------------------------------------------
+        if wants_out_of_stock and len(terms) == 0:
             cypher = """
             MATCH (p:Product)-[:HAS_AVAILABILITY]->(a:Availability)
             WHERE a.status = "out_of_stock"
@@ -278,6 +303,7 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
             OPTIONAL MATCH (p)-[:BELONGS_TO]->(c:Category)
             RETURN
                 p.name AS product,
+                p.seller AS seller,
                 b.name AS brand,
                 c.name AS category,
                 p.product_type AS product_type,
@@ -285,7 +311,8 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
                 p.stock_status AS stock_status,
                 p.url AS url,
                 p.tags AS tags,
-                p.specs_json AS specs_json
+                p.specs_json AS specs_json,
+                100 AS score
             ORDER BY p.name
             LIMIT $limit
             """
@@ -296,37 +323,58 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
                 database_=neo4j_database,
             )
 
+        # ------------------------------------------------------------
+        # Case 2: User asks for stock/seller/specific product facts
+        # Uses weighted scoring so exact product-name matches rank first.
+        # Example:
+        # "Who is the seller of TeDi Aroma Diffuser?"
+        # "Is D-Link AC1200 Wi-Fi Range Extender in stock?"
+        # ------------------------------------------------------------
         else:
             cypher = """
             MATCH (p:Product)
             OPTIONAL MATCH (p)-[:MADE_BY]->(b:Brand)
             OPTIONAL MATCH (p)-[:BELONGS_TO]->(c:Category)
             OPTIONAL MATCH (p)-[:HAS_AVAILABILITY]->(a:Availability)
+
             WITH p, b, c, a,
                  toLower(coalesce(p.name, "")) AS name_l,
                  toLower(coalesce(p.description, "")) AS desc_l,
                  toLower(coalesce(p.product_type, "")) AS type_l,
+                 toLower(coalesce(p.seller, "")) AS seller_l,
+                 toLower(coalesce(p.stock_status, "")) AS stock_l,
                  toLower(coalesce(b.name, "")) AS brand_l,
                  toLower(coalesce(c.name, "")) AS category_l,
                  [tag IN coalesce(p.tags, []) | toLower(tag)] AS tags_l
+
+            WITH p, b, c, a,
+                 reduce(score = 0, term IN $terms |
+                    score
+                    + CASE WHEN name_l = term THEN 20 ELSE 0 END
+                    + CASE WHEN name_l CONTAINS term THEN 8 ELSE 0 END
+                    + CASE WHEN brand_l CONTAINS term THEN 3 ELSE 0 END
+                    + CASE WHEN category_l CONTAINS term THEN 2 ELSE 0 END
+                    + CASE WHEN type_l CONTAINS term THEN 2 ELSE 0 END
+                    + CASE WHEN seller_l CONTAINS term THEN 2 ELSE 0 END
+                    + CASE WHEN desc_l CONTAINS term THEN 1 ELSE 0 END
+                    + CASE WHEN any(tag IN tags_l WHERE tag CONTAINS term) THEN 1 ELSE 0 END
+                 ) AS score
+
             WHERE
-                size($terms) = 0
-                OR all(term IN $terms WHERE
-                    name_l CONTAINS term
-                    OR desc_l CONTAINS term
-                    OR type_l CONTAINS term
-                    OR brand_l CONTAINS term
-                    OR category_l CONTAINS term
-                    OR any(tag IN tags_l WHERE tag CONTAINS term)
+                (
+                    size($terms) = 0
+                    OR score > 0
                 )
-                OR any(term IN $terms WHERE
-                    name_l CONTAINS term
-                    OR brand_l CONTAINS term
-                    OR category_l CONTAINS term
-                    OR type_l CONTAINS term
+                AND
+                (
+                    $filter_out_of_stock = false
+                    OR p.stock_status = "out_of_stock"
+                    OR a.status = "out_of_stock"
                 )
+
             RETURN
                 p.name AS product,
+                p.seller AS seller,
                 b.name AS brand,
                 c.name AS category,
                 p.product_type AS product_type,
@@ -334,14 +382,17 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
                 p.stock_status AS stock_status,
                 p.url AS url,
                 p.tags AS tags,
-                p.specs_json AS specs_json
-            ORDER BY p.name
+                p.specs_json AS specs_json,
+                score AS score
+
+            ORDER BY score DESC, p.name
             LIMIT $limit
             """
 
             records, _, _ = driver.execute_query(
                 cypher,
                 terms=terms,
+                filter_out_of_stock=wants_out_of_stock,
                 limit=limit,
                 database_=neo4j_database,
             )
@@ -349,9 +400,12 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
         rows = [record.data() for record in records]
 
         log.info(
-            "Neo4j graph search success query='%s' terms=%s results=%s",
+            "Neo4j graph search success query='%s' terms=%s wants_stock=%s wants_seller=%s wants_out_of_stock=%s results=%s",
             query,
             terms,
+            wants_stock_info,
+            wants_seller_info,
+            wants_out_of_stock,
             len(rows),
         )
 
