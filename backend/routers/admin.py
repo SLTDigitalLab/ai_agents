@@ -1,26 +1,57 @@
 from fastapi import APIRouter, UploadFile, File, Form, Body, HTTPException
 from pydantic import BaseModel
 import asyncio
+import json
 import requests
 import logging
 from services.ingestion import IngestionService
 from services import ingestion_status
 from domain.tools.api_tools import LEAVE_BALANCE_API_URL
+from core.config import settings
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 ingestion_service = IngestionService()
 
+
+try:
+    ADMIN_AGENT_MAP: dict[str, list[str]] = {
+        email.lower(): agents
+        for email, agents in json.loads(settings.ADMIN_AGENT_MAP or "{}").items()
+    }
+except json.JSONDecodeError as e:
+    logger.error(f"ADMIN_AGENT_MAP is not valid JSON: {e}")
+    ADMIN_AGENT_MAP = {}
+
+
+def require_agent_access(user_email: str | None, agent_name: str) -> None:
+    """Reject if the caller's email is not authorised for this agent.
+
+    A user with ["*"] is treated as super-admin (access to every agent).
+    """
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Missing user_email.")
+    allowed = ADMIN_AGENT_MAP.get(user_email.lower(), [])
+    if "*" in allowed or agent_name in allowed:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=f"User '{user_email}' is not authorised to ingest into agent '{agent_name}'.",
+    )
+
+
 class UrlIngestRequest(BaseModel):
     url: str
     agent_name: str
+    user_email: str | None = None
 
 class OneDriveIngestRequest(BaseModel):
     folder_id: str
     token: str
     agent_name: str
     force: bool = False
+    user_email: str | None = None
 
 class TestLeaveBalanceRequest(BaseModel):
     sid: str
@@ -44,6 +75,8 @@ async def ingest_url(request: UrlIngestRequest):
     Ingest content from a URL and store embeddings in Qdrant.
     Runs in the background; poll /ingestion-status for completion.
     """
+    require_agent_access(request.user_email, request.agent_name)
+
     current = ingestion_status.get_status()
     if current.get("active"):
         raise HTTPException(status_code=409, detail="Another ingestion job is already running.")
@@ -65,6 +98,8 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
     from a OneDrive folder using the Graph API.
     Runs in the background; poll /ingestion-status for completion.
     """
+    require_agent_access(request.user_email, request.agent_name)
+
     current = ingestion_status.get_status()
     if current.get("active"):
         raise HTTPException(status_code=409, detail="Another ingestion job is already running.")

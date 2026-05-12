@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # Bitrix24 CRM
     BITRIX24_WEBHOOK_URL: str = ""
 
+    # JSON mapping of admin email -> list of allowed agent_ids for ingestion.
+    # Use ["*"] to grant access to all agents. Example:
+    #   ADMIN_AGENT_MAP={"hr.admin@slt.com.lk":["hr"],"super@slt.com.lk":["*"]}
+    ADMIN_AGENT_MAP: str = "{}"
+
     # Email / SMTP (used by fastapi-mail)
     MAIL_USERNAME: Optional[str] = None
     MAIL_PASSWORD: Optional[str] = None

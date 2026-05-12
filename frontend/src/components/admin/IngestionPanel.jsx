@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useMsal } from '@azure/msal-react';
 import { AGENTS } from '../../config/agents';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -6,6 +7,19 @@ const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api
 
 const AGENT_TITLE = {};
 Object.values(AGENTS).forEach(cfg => { AGENT_TITLE[cfg.id] = cfg.title; });
+
+// Parse VITE_ADMIN_AGENT_MAP — JSON of { email: [agent_id, ...] }, ["*"] means all.
+let ADMIN_AGENT_MAP = {};
+try {
+    ADMIN_AGENT_MAP = JSON.parse(import.meta.env.VITE_ADMIN_AGENT_MAP || '{}');
+} catch (e) {
+    console.error('VITE_ADMIN_AGENT_MAP is not valid JSON', e);
+}
+
+const allowedAgentsFor = (email) => {
+    if (!email) return [];
+    return ADMIN_AGENT_MAP[email.toLowerCase()] || [];
+};
 
 const formatElapsed = (startedAt) => {
     if (!startedAt) return '';
@@ -15,7 +29,7 @@ const formatElapsed = (startedAt) => {
     return `${m}m ${s}s`;
 };
 
-const AGENT_LIST = Object.values(AGENTS).map(cfg => ({
+const ALL_AGENTS = Object.values(AGENTS).map(cfg => ({
     id: cfg.id,
     title: cfg.title,
 }));
@@ -69,6 +83,16 @@ const StatusToast = ({ status, onClose }) => {
 
 // ── Main Ingestion Panel ──────────────────────────────────────────────
 const IngestionPanel = () => {
+    const { accounts } = useMsal();
+    const userEmail = accounts[0]?.username || '';
+
+    // Filter agent list to only those this user is authorised for.
+    // ["*"] means super-admin → show every agent.
+    const allowed = allowedAgentsFor(userEmail);
+    const AGENT_LIST = allowed.includes('*')
+        ? ALL_AGENTS
+        : ALL_AGENTS.filter(a => allowed.includes(a.id));
+
     const [activeTab, setActiveTab] = useState('url');
     const [status, setStatus] = useState(null);
 
@@ -135,7 +159,7 @@ const IngestionPanel = () => {
             const res = await fetch(`${API_BASE}/ingest-url`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(urlForm),
+                body: JSON.stringify({ ...urlForm, user_email: userEmail }),
             });
             const data = await res.json();
 
@@ -176,7 +200,7 @@ const IngestionPanel = () => {
             const res = await fetch(`${API_BASE}/ingest-onedrive`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(odForm),
+                body: JSON.stringify({ ...odForm, user_email: userEmail }),
             });
             const data = await res.json();
 
