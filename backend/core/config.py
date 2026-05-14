@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     MAIL_STARTTLS: bool = True
     MAIL_SSL_TLS: bool = False
 
+    NEO4J_URI: str | None = None
+    NEO4J_USERNAME: str | None = None
+    NEO4J_PASSWORD: str | None = None
+    NEO4J_DATABASE: str = "neo4j"
+
+    LIFESTORE_QDRANT_COLLECTION: str = "lifestore_docs"
+
     class Config:
         env_file = ".env"
         extra = "ignore"
