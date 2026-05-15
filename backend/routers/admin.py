@@ -13,6 +13,7 @@ from urllib.parse import urljoin, urlparse, urldefrag
 from bs4 import BeautifulSoup
 
 from services.ingestion import IngestionService
+from services.ingestion_slm import slm_ingestion_service
 from services import ingestion_status
 from domain.tools.api_tools import LEAVE_BALANCE_API_URL
 from core.config import settings
@@ -440,14 +441,26 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
 
     ingestion_status.start(agent_name=request.agent_name, source="onedrive")
 
+    # Route askhrslm to the SLM ingestion service (Ollama embeddings, 768d
+    # collection). All other agents use the default OpenAI/Gemini pipeline.
+    if request.agent_name == "askhrslm":
+        coro = slm_ingestion_service.process_onedrive_ingestion(
+            folder_id=request.folder_id,
+            access_token=request.token,
+            agent_name=request.agent_name,
+            force=request.force,
+        )
+    else:
+        coro = ingestion_service.process_onedrive_ingestion(
+            folder_id=request.folder_id,
+            access_token=request.token,
+            agent_name=request.agent_name,
+            force=request.force,
+        )
+
     asyncio.create_task(
         _run_ingestion_task(
-            ingestion_service.process_onedrive_ingestion(
-                folder_id=request.folder_id,
-                access_token=request.token,
-                agent_name=request.agent_name,
-                force=request.force,
-            ),
+            coro,
             label=f"OneDrive agent='{request.agent_name}' folder='{request.folder_id}'",
         )
     )

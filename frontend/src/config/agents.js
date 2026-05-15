@@ -79,7 +79,17 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Enterprise Solutions team."
     },
 
-    // 6. Lifestore
+    // 6. Ask HR (Internal SLM demo — DeepSeek-R1 1.5B via Ollama)
+    askhrslm: {
+        id: "askhrslm",
+        title: "ASK HR",
+        subtitle: "HR support powered by SLTMobitel's internal small language model — fully on-prem inference, zero external API calls.",
+        color: "from-fuchsia-900 to-fuchsia-600",
+        buttonColor: "bg-fuchsia-600 hover:bg-fuchsia-700",
+        disclaimer: "This agent runs on an internal SLM (DeepSeek-R1). Responses may be slower or less polished than cloud LLM agents."
+    },
+
+    // 7. Lifestore
     asklifestore: {
         id: "lifestore",
         title: "ASK LIFESTORE",
