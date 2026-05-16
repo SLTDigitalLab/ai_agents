@@ -385,14 +385,14 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
 }
 
 GENERAL_HELP_PATTERNS: tuple[str, ...] = (
-    r"^\s*(hi|hello|hey|good morning|good afternoon|good evening)\b",
+    r"^\s*(hi|hello|hey|good morning|good afternoon|good evening)[!. ]*$",
     r"\b(thanks|thank you|bye|goodbye)\b",
     r"\bwhat can you do\b",
     r"\bhow can you help\b",
     r"\bwho are you\b",
-    r"\bwhat is ask slt\b",
+    r"\bwhat is workmate ai\b",
     r"\bhow does this work\b",
-    r"\bhow do i use (this|the platform|ask slt)\b",
+    r"\bhow do i use (this|the platform|workmate ai)\b",
     r"\bwhich agent should i use\b",
     r"\bwho handles\b",
     r"\bwhere should i ask\b",
