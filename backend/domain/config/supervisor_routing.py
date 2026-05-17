@@ -387,12 +387,20 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
 GENERAL_HELP_PATTERNS: tuple[str, ...] = (
     r"^\s*(hi|hello|hey|good morning|good afternoon|good evening)[!. ]*$",
     r"\b(thanks|thank you|bye|goodbye)\b",
-    r"\bwhat can you do\b",
-    r"\bhow can you help\b",
+    # "what / how can you do / help (me with)" family — covers most capability questions.
+    r"\bwhat (can|do) you (do|help|offer|provide|support|handle)\b",
+    r"\bwhat can you help (me )?(with|on|about)\b",
+    r"\bhow can you (help|assist)\b",
+    # Capability / scope phrasings
+    r"\bwhat are (your|the) (capabilities|services|features|abilities|skills|areas|topics)\b",
+    r"\bwhat (topics|areas|things|services|tasks) (can|do) you (help with|cover|support|handle|do)\b",
+    r"\bwhat (are you|can you be) (capable of|able to do|used for)\b",
+    # Identity / platform questions
     r"\bwho are you\b",
     r"\bwhat is workmate ai\b",
     r"\bhow does this work\b",
     r"\bhow do i use (this|the platform|workmate ai)\b",
+    # Routing-help phrasings
     r"\bwhich agent should i use\b",
     r"\bwho handles\b",
     r"\bwhere should i ask\b",
