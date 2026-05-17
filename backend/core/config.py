@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: Optional[str] = None
     EMBEDDING_BASE_URL: Optional[str] = None
 
+    # Routing-only embedding model — used ONLY by the supervisor to score query
+    # similarity against specialist profiles. Independent of the main embedding
+    # model so Qdrant collections stay valid. Defaults to a small/fast OpenAI
+    # model since routing only needs cosine similarity on short text.
+    ROUTING_EMBEDDING_PROVIDER: str = "openai"
+    ROUTING_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    ROUTING_EMBEDDING_API_KEY: Optional[str] = None
+
     # Guardrail Classifier (cheap/fast model for input safety)
     GUARDRAIL_PROVIDER: str = "openai"
     GUARDRAIL_MODEL: str = "gpt-4.1-nano"

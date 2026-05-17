@@ -158,7 +158,7 @@ async def chat(request: ChatRequest):
                     # We must also match on ``langgraph_checkpoint_ns`` (a
                     # namespace string like "multi_delegate:<hash>|agent:<hash>")
                     # to suppress nested events too.
-                    SUPPRESS_STREAM_NODES = {"multi_delegate"}
+                    SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
                     logged_metadata_sample = False
 
                     # ── DeepSeek-R1 <think> stripper ─────────────
