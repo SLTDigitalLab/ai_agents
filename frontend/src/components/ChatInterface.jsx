@@ -15,13 +15,6 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
-// Generic fallback suggestions when an agent doesn't define its own.
-const FALLBACK_SUGGESTIONS = [
-    "What can you help me with?",
-    "Show me an example",
-    "How do I get started?",
-];
-
 // Strip unmatched ** bold markers so stray asterisks don't render literally.
 const sanitizeMarkdownBold = (text) => {
   if (!text) return text;
@@ -302,47 +295,26 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
     );
 };
 
-// ── Clear Chat Button ──────────────────────────────────────
+// ── Clear Chat Button (icon-only, expands to text on hover) ───────────────
 const ClearChatButton = ({ onClick, disabled }) => (
     <motion.button
         onClick={onClick}
         disabled={disabled}
-        initial={{ opacity: 0, y: -4 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: -4 }}
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
         whileHover={{ scale: disabled ? 1 : 1.04 }}
         whileTap={{ scale: disabled ? 1 : 0.96 }}
         title="Clear conversation"
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white/80 hover:text-white hover:bg-white/20 hover:border-white/30 shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium"
+        className="group/clear flex items-center gap-1.5 pl-2 pr-2 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-gray-200/80 text-gray-400 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium overflow-hidden"
     >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0">
             <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.52.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clipRule="evenodd" />
         </svg>
-        Clear chat
+        <span className="max-w-0 group-hover/clear:max-w-[120px] whitespace-nowrap transition-all duration-300 ease-out">
+            <span className="pr-1">Clear chat</span>
+        </span>
     </motion.button>
-);
-
-// ── Suggested Prompts (chips shown under the greeting) ───────────────────
-const SuggestedPrompts = ({ prompts, onSelect, color }) => (
-    <motion.div
-        initial={{ opacity: 0, y: 6 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4, delay: 0.15 }}
-        className="flex flex-wrap gap-2 mt-3 max-w-[80%] sm:max-w-[75%]"
-    >
-        {prompts.map((prompt, i) => (
-            <motion.button
-                key={i}
-                type="button"
-                onClick={() => onSelect(prompt)}
-                whileHover={{ scale: 1.03, y: -1 }}
-                whileTap={{ scale: 0.97 }}
-                className={`text-left text-sm px-3.5 py-2 rounded-xl bg-white border border-gray-100 text-gray-600 hover:text-gray-900 hover:border-gray-200 hover:shadow-md shadow-sm transition-all`}
-            >
-                {prompt}
-            </motion.button>
-        ))}
-    </motion.div>
 );
 
 // ── Scroll-to-latest pill ──────────────────────────────────────────────
@@ -690,8 +662,6 @@ const ChatInterface = ({ agentConfig }) => {
         }
     };
 
-    const suggestions = agentConfig.suggestedPrompts || FALLBACK_SUGGESTIONS;
-    const showSuggestions = messages.length === 1 && messages[0].type === 'bot' && !isLoadingHistory && !isLoading;
     // Last RENDERED message index — filters out empty bot placeholders so the
     // scroll-to-latest observer and streaming cursor target a real DOM node.
     const lastRenderedIdx = (() => {
@@ -719,15 +689,6 @@ const ChatInterface = ({ agentConfig }) => {
                 <h1 className="text-5xl sm:text-6xl font-extrabold text-white tracking-tight drop-shadow-lg uppercase">{agentConfig.title}</h1>
                 <p className="text-white/70 text-sm sm:text-base mx-auto font-light whitespace-nowrap overflow-hidden text-ellipsis">{agentConfig.subtitle}</p>
             </motion.div>
-
-            {/* Clear Chat Button */}
-            <div className="flex justify-end mb-2 min-h-[2rem]">
-                <AnimatePresence>
-                    {messages.length > 1 && !isLoadingHistory && (
-                        <ClearChatButton onClick={handleClearChat} disabled={isLoading} />
-                    )}
-                </AnimatePresence>
-            </div>
 
             {/* ── Premium Chat Workspace ─────────────────────── */}
             <motion.div
@@ -866,11 +827,6 @@ const ChatInterface = ({ agentConfig }) => {
                                 );
                             })}
 
-                            {/* Suggested prompts under the greeting */}
-                            {showSuggestions && (
-                                <SuggestedPrompts prompts={suggestions} onSelect={sendMessage} color={agentConfig.color} />
-                            )}
-
                             {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
                                 <ThinkingIndicator />
                             )}
@@ -882,7 +838,19 @@ const ChatInterface = ({ agentConfig }) => {
                             <div ref={messagesEndRef} className="h-1 sm:h-2" />
                         </div>
 
-                        {/* Fog veil */}
+                        {/* Top fog veil — fades messages as they scroll up under the floating clear button */}
+                        <div className="absolute top-0 left-0 right-4 h-10 sm:h-12 bg-gradient-to-b from-[#fbfcff] via-[#fbfcff]/80 to-transparent pointer-events-none z-10" />
+
+                        {/* Floating Clear Chat button — sits on the top fog veil, top-right of card */}
+                        <div className="absolute top-3 right-3 sm:top-3.5 sm:right-4 z-20">
+                            <AnimatePresence>
+                                {messages.length > 1 && !isLoadingHistory && (
+                                    <ClearChatButton onClick={handleClearChat} disabled={isLoading} />
+                                )}
+                            </AnimatePresence>
+                        </div>
+
+                        {/* Bottom fog veil */}
                         <div className="absolute bottom-0 left-0 right-4 h-10 sm:h-14 bg-gradient-to-t from-[#fbfcff] via-[#fbfcff]/80 to-transparent pointer-events-none z-10" />
 
                         {/* Scroll-to-latest pill */}
