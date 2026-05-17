@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, useParams, useLocation, Navigate } from 'react-router-dom';
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
 import { PublicClientApplication, InteractionStatus } from "@azure/msal-browser";
@@ -60,6 +60,179 @@ const MicrosoftIcon = () => (
   </svg>
 );
 
+// ── Agent → RGB triplet for ambient radial glows ──────────────────────
+const COLOR_RGB = {
+  cyan:    '6, 182, 212',
+  purple:  '147, 51, 234',
+  blue:    '37, 99, 235',
+  gray:    '107, 114, 128',
+  sky:     '14, 165, 233',
+  rose:    '225, 29, 72',
+  emerald: '16, 185, 129',
+  indigo:  '79, 70, 229',
+  orange:  '234, 88, 12',
+  fuchsia: '192, 38, 211',
+};
+const getAgentRGB = (colorStr) => {
+  const m = colorStr?.match(/from-(\w+)-/);
+  return (m && COLOR_RGB[m[1]]) || '120, 120, 120';
+};
+
+// Premium two-stop radial ambient: soft warm glow from top-right, cool shadow
+// tint from bottom-left, layered over a near-white base. Avoids banding because
+// both gradients fade smoothly across the entire viewport.
+const buildAmbientBackground = (rgb) => `
+  radial-gradient(ellipse 90% 70% at 100% 0%, rgba(${rgb}, 0.16) 0%, rgba(${rgb}, 0) 55%),
+  radial-gradient(ellipse 80% 70% at 0% 100%, rgba(${rgb}, 0.10) 0%, rgba(${rgb}, 0) 60%),
+  radial-gradient(ellipse 60% 50% at 50% 50%, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 70%),
+  #fbfbfd
+`.replace(/\s+/g, ' ').trim();
+
+// Faint film-grain texture — adds tactile depth, masks gradient banding.
+const GRAIN_DATA_URL = "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
+
+// ── Avatar utilities ──────────────────────────────────────────────────
+const getInitials = (name) => {
+  if (!name) return '?';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+};
+
+// ── User Avatar + Popover Menu (sits at bottom of sidebar) ─────────────
+const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
+  const [open, setOpen] = useState(false);
+  const [theme, setTheme] = useState('light'); // TODO: wire dark-mode styles
+  const menuRef = useRef(null);
+  const initials = getInitials(user?.name);
+
+  // Click-outside to close
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setOpen(false);
+    };
+    const onEsc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, x: -8, scale: 0.96 }}
+            animate={{ opacity: 1, x: 0, scale: 1 }}
+            exit={{ opacity: 0, x: -8, scale: 0.96 }}
+            transition={{ duration: 0.18, ease: 'easeOut' }}
+            className="absolute bottom-0 left-full ml-3 w-64 bg-white rounded-2xl border border-gray-200 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.18)] overflow-hidden"
+          >
+            {/* Identity header */}
+            <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+              <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${agentColor} text-white text-sm font-semibold flex items-center justify-center shadow-sm shrink-0`}>
+                {initials}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
+                <p className="text-[0.7rem] text-gray-500 truncate">{user.username}</p>
+              </div>
+            </div>
+
+            {/* Theme toggle */}
+            <div className="px-4 py-3 border-b border-gray-100">
+              <p className="text-[0.7rem] uppercase tracking-wider font-semibold text-gray-400 mb-2">Theme</p>
+              <div className="grid grid-cols-2 gap-1 bg-gray-100 rounded-lg p-1">
+                {['light', 'dark'].map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setTheme(mode)}
+                    className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all ${
+                      theme === mode
+                        ? 'bg-white text-gray-900 shadow-sm'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    {mode === 'light' ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                        <path d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM10 7a3 3 0 100 6 3 3 0 000-6zM15.657 5.404a.75.75 0 10-1.06-1.06l-1.061 1.06a.75.75 0 001.06 1.06l1.06-1.06zM6.464 14.596a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 001.06 1.06l1.06-1.06zM18 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0118 10zM5 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015 10zM14.596 15.657a.75.75 0 001.06-1.06l-1.06-1.061a.75.75 0 10-1.06 1.06l1.06 1.061zM5.404 6.464a.75.75 0 001.06-1.06l-1.06-1.06a.75.75 0 10-1.06 1.06l1.06 1.06z" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                        <path fillRule="evenodd" d="M7.455 2.004a.75.75 0 01.26.77 7 7 0 009.958 7.967.75.75 0 011.067.853A8.5 8.5 0 116.647 1.921a.75.75 0 01.808.083z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                    {mode === 'light' ? 'Light' : 'Dark'}
+                  </button>
+                ))}
+              </div>
+              {theme === 'dark' && (
+                <p className="text-[0.65rem] text-gray-400 mt-1.5 italic">Dark mode coming soon</p>
+              )}
+            </div>
+
+            {/* Logout */}
+            <button
+              type="button"
+              onClick={onLogout}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500">
+                <path fillRule="evenodd" d="M3 4.25A2.25 2.25 0 015.25 2h5.5A2.25 2.25 0 0113 4.25v2a.75.75 0 01-1.5 0v-2a.75.75 0 00-.75-.75h-5.5a.75.75 0 00-.75.75v11.5c0 .414.336.75.75.75h5.5a.75.75 0 00.75-.75v-2a.75.75 0 011.5 0v2A2.25 2.25 0 0110.75 18h-5.5A2.25 2.25 0 013 15.75V4.25z" clipRule="evenodd" />
+                <path fillRule="evenodd" d="M19 10a.75.75 0 00-.22-.53l-2.75-2.75a.75.75 0 10-1.06 1.06l1.47 1.47H8.75a.75.75 0 000 1.5h7.69l-1.47 1.47a.75.75 0 101.06 1.06l2.75-2.75A.75.75 0 0019 10z" clipRule="evenodd" />
+              </svg>
+              Logout
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <motion.button
+        type="button"
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.4, delay: 0.4 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={() => setOpen(v => !v)}
+        title={user.name}
+        className={`w-10 h-10 rounded-full bg-gradient-to-br ${agentColor} text-white text-sm font-semibold flex items-center justify-center shadow-md hover:shadow-lg transition-shadow ring-2 ring-white`}
+      >
+        {initials}
+      </motion.button>
+    </div>
+  );
+};
+
+// ── Left Sidebar Rail ──────────────────────────────────────────────────
+const SidebarRail = ({ onNewChat, user, onLogout, agentColor }) => (
+  <aside className="w-16 sm:w-[68px] shrink-0 flex flex-col items-center py-4 border-r border-gray-200/70 z-30">
+    <motion.button
+      type="button"
+      onClick={onNewChat}
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.95 }}
+      title="New chat"
+      className="group/new flex items-center justify-center w-11 h-11 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-900 transition-colors"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+        <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
+        <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
+      </svg>
+    </motion.button>
+
+    <div className="flex-1" />
+
+    <UserAvatarMenu user={user} onLogout={onLogout} agentColor={agentColor} />
+  </aside>
+);
+
 const AgentWrapper = () => {
   const { agentType } = useParams();
   const { instance, accounts } = useMsal();
@@ -69,7 +242,7 @@ const AgentWrapper = () => {
 
   if (!agentConfig) {
     return (
-      <div className="h-screen bg-slate-900 text-white flex items-center justify-center text-2xl">
+      <div className="h-screen bg-[#fafafa] text-gray-700 flex items-center justify-center text-2xl">
         Agent Not Found
       </div>
     );
@@ -96,84 +269,50 @@ const AgentWrapper = () => {
     }).catch(e => console.error(e));
   };
 
+  const chatRef = useRef(null);
+  const ambientBg = buildAmbientBackground(getAgentRGB(agentConfig.color));
+
   return (
-    <div className="h-screen flex flex-col bg-[#0b0c14] relative overflow-hidden">
+    <div
+      className="h-screen flex flex-row relative overflow-hidden text-gray-900 transition-[background] duration-700"
+      style={{ background: ambientBg }}
+    >
+      {/* Premium film-grain overlay — adds subtle tactile depth */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none mix-blend-overlay opacity-[0.035] z-0"
+        style={{ backgroundImage: GRAIN_DATA_URL }}
+      />
 
-      {/* ── Premium static background mesh ────────────────────────── */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none z-0">
-
-        {/* Massive Ambient Center Wash (Fills the middle black gap seamlessly) */}
-        <div
-          className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[140vw] h-[140vh] rounded-[100%] bg-gradient-to-b ${agentConfig.color} opacity-50 blur-[150px] mix-blend-normal`}
+      {/* ── Left Sidebar (authenticated only) ─────────── */}
+      <AuthenticatedTemplate>
+        <SidebarRail
+          onNewChat={() => chatRef.current?.clearChat()}
+          user={user}
+          onLogout={handleLogout}
+          agentColor={agentConfig.color}
         />
+      </AuthenticatedTemplate>
 
-        {/* Vibrant Top-Left Orb */}
-        <div
-          className={`absolute -top-[10%] -left-[10%] w-[65vw] h-[65vw] rounded-full bg-gradient-to-br ${agentConfig.color} opacity-90 blur-[120px] mix-blend-normal`}
-        />
+      {/* ── Main Column ───────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-h-0 relative">
 
-        {/* Deep Bottom-Right Orb */}
-        <div
-          className={`absolute -bottom-[10%] -right-[10%] w-[55vw] h-[55vw] rounded-full bg-gradient-to-tl ${agentConfig.color} opacity-70 blur-[120px] mix-blend-normal`}
-        />
-
-        {/* Enhanced Anti-Banding Noise Texture (Dithering) */}
-        <div className="absolute inset-0 z-0 opacity-[0.05] pointer-events-none mix-blend-overlay" style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")` }}></div>
-      </div>
-
-      {/* ── Floating Frosted-Glass Navbar ────────────────── */}
-      <motion.nav
-        initial={{ opacity: 0, y: -20 }}
+      {/* ── Top Bar ────────────────────────────────────── */}
+      <motion.header
+        initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-        className="glass-nav relative mx-4 sm:mx-8 mt-4 px-6 sm:px-8 py-3 flex justify-between items-center z-20 rounded-2xl border border-white/10 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.3)]"
+        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+        className="relative z-20 flex justify-between items-center px-10 sm:px-14 py-4"
       >
-        {/* Subtle Liquid Glass Neon Underglow */}
-        <div className={`absolute inset-0 rounded-2xl bg-gradient-to-r ${agentConfig.color} opacity-20 blur-lg -z-10 transition-colors duration-700 pointer-events-none`} />
+        <h1 className="text-lg sm:text-xl font-semibold text-gray-900 tracking-tight">
+          {agentConfig.title.replace(/^ASK /i, 'Ask ')}
+        </h1>
+        <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-8 w-auto" />
+      </motion.header>
 
-        <div className="flex items-center gap-2 relative z-10">
-          <img src={sltLogo} alt="SLTMobitel" className="h-8 sm:h-10 w-auto" />
-        </div>
-
-        <div className="flex items-center gap-4">
-          <UnauthenticatedTemplate>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={handleLogin}
-              className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors border border-white/10"
-            >
-              Login
-            </motion.button>
-          </UnauthenticatedTemplate>
-
-          <AuthenticatedTemplate>
-            <div className="flex items-center gap-3 sm:gap-4">
-              <motion.span
-                initial={{ opacity: 0, x: 10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ duration: 0.5, delay: 0.3 }}
-                className="text-white/90 text-sm font-medium hidden sm:inline"
-              >
-                Hi, {user.name}{' '}
-                <span className="text-white/40 text-xs">({user.username})</span>
-              </motion.span>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={handleLogout}
-                className="border border-white/20 text-white/80 hover:bg-white/10 hover:border-white/40 hover:text-white px-4 py-2 rounded-xl text-sm font-medium transition-all duration-300"
-              >
-                Logout
-              </motion.button>
-            </div>
-          </AuthenticatedTemplate>
-        </div>
-      </motion.nav>
-
-      {/* ── Content Area with AnimatePresence ────────────── */}
+      {/* ── Content Area ───────────────────────────────── */}
       <AnimatePresence mode="wait">
-        {/* ── Unauthenticated Login View ─────────────────── */}
+        {/* ── Unauthenticated Login View (light mode) ─────────────── */}
         <UnauthenticatedTemplate key="unauth">
           <motion.div
             key="unauth-content"
@@ -181,71 +320,49 @@ const AgentWrapper = () => {
             animate="visible"
             exit={{ opacity: 0, y: -20 }}
             variants={containerVariants}
-            className="flex-1 flex flex-col items-center justify-center px-4 z-10 -mt-6"
+            className="flex-1 flex flex-col items-center justify-center px-4 z-10"
           >
-
-
-            {/* Title */}
             <motion.h1
               variants={itemVariants}
-              className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-white tracking-tight drop-shadow-lg uppercase text-center"
+              className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 tracking-tight text-center"
             >
-              {agentConfig.title}
+              {agentConfig.title.replace(/^ASK /i, 'Ask ')}
             </motion.h1>
 
-            {/* Subtitle */}
             <motion.p
               variants={itemVariants}
-              className="text-white/70 text-base sm:text-lg max-w-2xl mx-auto font-light text-center mt-3 mb-8"
+              className="text-gray-500 text-base sm:text-lg max-w-2xl mx-auto font-light text-center mt-3 mb-8"
             >
               {agentConfig.subtitle}
             </motion.p>
 
-            {/* ── LIQUID GLASS LOGIN CARD ── */}
             <motion.div
               variants={cardVariants}
-              className="relative w-full max-w-lg mt-4"
+              className="relative w-full max-w-md mt-4"
             >
-              {/* Surrounding Neon Aura (Liquid Glass ambient spread behind the frosted glass) */}
-              <div className={`absolute -inset-1 blur-2xl opacity-40 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 transition-colors duration-700`} />
-
-              {/* Main Thick Glass Body */}
-              <div className="relative glass-card-bright w-full rounded-[2rem] p-8 sm:p-10 flex flex-col items-center justify-center border border-white/20 shadow-[0_30px_60px_-15px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.3)] overflow-hidden">
-
-                {/* Internal Diagonal Glare (Simulates thick polished glass Edge) */}
-                <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/50 to-transparent" />
-
-                <div className="w-16 h-16 rounded-2xl bg-white/[0.04] border border-white/10 flex items-center justify-center mb-6 shadow-inner relative overflow-hidden group">
-                  <div className={`absolute inset-0 bg-gradient-to-b ${agentConfig.color} opacity-20 group-hover:opacity-40 transition-opacity`} />
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 text-white relative z-10 drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]">
+              <div className={`absolute -inset-1 blur-2xl opacity-20 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 pointer-events-none`} />
+              <div className="relative bg-white w-full rounded-3xl p-8 sm:p-10 flex flex-col items-center justify-center border border-gray-200/80 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.12)]">
+                <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${agentConfig.color} flex items-center justify-center mb-6 shadow-md`}>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-7 h-7 text-white">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
                   </svg>
                 </div>
 
-                <p className="text-white/70 text-[0.8rem] font-bold mb-2 tracking-[0.2em] uppercase">
+                <p className="text-gray-700 text-[0.8rem] font-bold mb-2 tracking-[0.2em] uppercase">
                   Secure Identity
                 </p>
-                <p className="text-white/40 text-sm mb-9 text-center font-light">
+                <p className="text-gray-500 text-sm mb-8 text-center font-light">
                   Authenticate securely through your corporate Microsoft tunnel
                 </p>
 
-                {/* LIQUID GLASS MICROSOFT BUTTON */}
                 <motion.button
-                  whileHover={{ scale: 1.04 }}
+                  whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={handleLogin}
-                  className="group relative flex items-center justify-center w-full px-8 py-4 rounded-full transition-all duration-300"
+                  className="relative flex items-center justify-center gap-3 w-full px-8 py-3.5 rounded-full bg-gray-900 hover:bg-gray-800 text-white font-medium shadow-md transition-colors"
                 >
-                  {/* Neon Glow Layer that brightens aggressively on hover */}
-                  <div className={`absolute inset-0 rounded-full bg-gradient-to-r ${agentConfig.color} blur-xl opacity-40 group-hover:opacity-100 transition-opacity duration-500`} />
-
-                  {/* The actual polished dark glass button surface */}
-                  <div className="absolute inset-0 rounded-full bg-[#0b0c14]/30 backdrop-blur-xl border border-white/20 shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)] group-hover:bg-white/[0.08] transition-all duration-300" />
-
-                  <span className="relative z-10 flex items-center gap-3 font-semibold text-white tracking-wide">
-                    <MicrosoftIcon />
-                    Login with Microsoft
-                  </span>
+                  <MicrosoftIcon />
+                  Login with Microsoft
                 </motion.button>
               </div>
             </motion.div>
@@ -259,13 +376,15 @@ const AgentWrapper = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.5 }}
+            transition={{ duration: 0.4 }}
             className="flex-1 flex flex-col min-h-0 z-10"
           >
-            <ChatInterface agentConfig={agentConfig} />
+            <ChatInterface ref={chatRef} agentConfig={agentConfig} />
           </motion.div>
         </AuthenticatedTemplate>
       </AnimatePresence>
+
+      </div>
     </div>
   );
 };
@@ -309,13 +428,13 @@ function App() {
 
   if (!isInitialized) {
     return (
-      <div className="h-screen bg-[#0f172a] flex flex-col items-center justify-center gap-4">
+      <div className="h-screen bg-[#fafafa] flex flex-col items-center justify-center gap-4">
         <div className="flex items-center gap-2 mb-2">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse [animation-delay:200ms]" />
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse [animation-delay:400ms]" />
+          <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+          <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse [animation-delay:200ms]" />
+          <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse [animation-delay:400ms]" />
         </div>
-        <span className="text-white/60 text-sm tracking-widest uppercase font-medium">
+        <span className="text-gray-500 text-sm tracking-widest uppercase font-medium">
           Initializing Secure Environment
         </span>
       </div>
@@ -330,13 +449,13 @@ function App() {
 
           {/* We swapped the redirect for a holding screen so it doesn't push you to Ask HR! */}
           <Route path="/auth/callback" element={
-            <div className="h-screen bg-[#0f172a] flex flex-col items-center justify-center gap-4">
+            <div className="h-screen bg-[#fafafa] flex flex-col items-center justify-center gap-4">
               <div className="flex items-center gap-2 mb-2">
-                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse [animation-delay:200ms]" />
-                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse [animation-delay:400ms]" />
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" />
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse [animation-delay:200ms]" />
+                <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse [animation-delay:400ms]" />
               </div>
-              <span className="text-white/60 text-sm tracking-widest uppercase font-medium">
+              <span className="text-gray-500 text-sm tracking-widest uppercase font-medium">
                 Verifying Identity
               </span>
             </div>

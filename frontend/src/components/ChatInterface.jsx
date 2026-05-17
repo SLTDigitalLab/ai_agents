@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useMsal } from "@azure/msal-react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
@@ -13,6 +13,32 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const FORM_TOKENS = {
     '[RENDER_LIFESTORE_FORM]': 'lifestore',
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
+};
+
+// Greeting pool for the idle landing screen.
+const TIME_GREETINGS = {
+    morning:   ["Good morning, {n}", "Rise and shine, {n}", "Morning, {n}"],
+    afternoon: ["Good afternoon, {n}", "Hi, {n}", "Hey, {n}"],
+    evening:   ["Good evening, {n}", "Evening, {n}", "Hi, {n}"],
+    night:     ["Burning the midnight oil, {n}?", "Still up, {n}?", "Late night, {n}?"],
+};
+const ANYTIME_GREETINGS = [
+    "Welcome back, {n}",
+    "Back at it, {n}",
+    "{n} returns",
+    "Ready when you are, {n}",
+    "Hello again, {n}",
+];
+const pickGreeting = (firstName) => {
+    const hour = new Date().getHours();
+    let bucket;
+    if (hour >= 5 && hour < 12) bucket = 'morning';
+    else if (hour >= 12 && hour < 17) bucket = 'afternoon';
+    else if (hour >= 17 && hour < 22) bucket = 'evening';
+    else bucket = 'night';
+    const pool = [...TIME_GREETINGS[bucket], ...ANYTIME_GREETINGS];
+    const picked = pool[Math.floor(Math.random() * pool.length)];
+    return picked.replace('{n}', firstName);
 };
 
 // Strip unmatched ** bold markers so stray asterisks don't render literally.
@@ -295,8 +321,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
     );
 };
 
-// ── Clear Chat Button (icon-only, expands to text on hover) ───────────────
-const ClearChatButton = ({ onClick, disabled }) => (
+// ── New Chat Button (Gemini-style pencil icon, expands to label on hover) ─
+const NewChatButton = ({ onClick, disabled }) => (
     <motion.button
         onClick={onClick}
         disabled={disabled}
@@ -305,14 +331,15 @@ const ClearChatButton = ({ onClick, disabled }) => (
         exit={{ opacity: 0, scale: 0.9 }}
         whileHover={{ scale: disabled ? 1 : 1.04 }}
         whileTap={{ scale: disabled ? 1 : 0.96 }}
-        title="Clear conversation"
-        className="group/clear flex items-center gap-1.5 pl-2 pr-2 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-gray-200/80 text-gray-400 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium overflow-hidden"
+        title="New chat"
+        className="group/new flex items-center gap-1.5 pl-2 pr-2 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-gray-200/80 text-gray-500 hover:text-gray-800 hover:border-gray-300 shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium overflow-hidden"
     >
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0">
-            <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.52.149.023a.75.75 0 00.23-1.482A41.03 41.03 0 0014 4.193V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4zM8.58 7.72a.75.75 0 00-1.5.06l.3 7.5a.75.75 0 101.5-.06l-.3-7.5zm4.34.06a.75.75 0 10-1.5-.06l-.3 7.5a.75.75 0 101.5.06l.3-7.5z" clipRule="evenodd" />
+            <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
+            <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
         </svg>
-        <span className="max-w-0 group-hover/clear:max-w-[120px] whitespace-nowrap transition-all duration-300 ease-out">
-            <span className="pr-1">Clear chat</span>
+        <span className="max-w-0 group-hover/new:max-w-[100px] overflow-hidden whitespace-nowrap transition-all duration-300 ease-out">
+            <span className="pr-1">New chat</span>
         </span>
     </motion.button>
 );
@@ -338,7 +365,7 @@ const ScrollToLatestPill = ({ onClick, color }) => (
     </motion.button>
 );
 
-const ChatInterface = ({ agentConfig }) => {
+const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const { accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
 
@@ -451,8 +478,13 @@ const ChatInterface = ({ agentConfig }) => {
     const abortControllerRef = useRef(null);
     const [containerHeight, setContainerHeight] = useState(0);
 
+    // True when no exchange has happened yet (only the seeded greeting message exists).
+    // Declared here so the observer effects below can react to mode changes.
+    const isIdleForEffects = messages.length <= 1 && !isLoadingHistory && !isLoading;
+
     // Track scroll container height — needed by the bottom spacer to guarantee
     // enough room for the latest user message to anchor at the viewport top.
+    // Re-binds when transitioning from idle to chat mode (scroll container only mounts then).
     useEffect(() => {
         const el = scrollContainerRef.current;
         if (!el) return;
@@ -461,7 +493,7 @@ const ChatInterface = ({ agentConfig }) => {
         const ro = new ResizeObserver(update);
         ro.observe(el);
         return () => ro.disconnect();
-    }, []);
+    }, [isIdleForEffects]);
 
     // Observe the last rendered message; pill appears when it scrolls out of view.
     // Re-binds when message count changes OR when the last item transitions from
@@ -479,14 +511,30 @@ const ChatInterface = ({ agentConfig }) => {
         return () => obs.disconnect();
     }, [messages.length, lastTextPresent]);
 
+    // Anchor the latest user message to the top of the scroll container.
+    // Instant scrollTop set — no smooth animation — to eliminate any chance
+    // of interruption. We can re-add smoothness later if this works.
     const anchorLatestUserToTop = () => {
         const el = latestUserMsgRef.current;
         const container = scrollContainerRef.current;
-        if (!el || !container) return;
+        if (!el || !container) {
+            console.log('[anchor] aborted: missing ref', { el: !!el, container: !!container });
+            return;
+        }
         const elRect = el.getBoundingClientRect();
         const containerRect = container.getBoundingClientRect();
-        const target = container.scrollTop + (elRect.top - containerRect.top) - 12;
-        container.scrollTo({ top: target, behavior: 'smooth' });
+        const targetScrollTop = Math.max(0, container.scrollTop + (elRect.top - containerRect.top) - 16);
+        const maxScroll = container.scrollHeight - container.clientHeight;
+        console.log('[anchor] scroll', {
+            currentScrollTop: container.scrollTop,
+            elTopInViewport: elRect.top,
+            containerTopInViewport: containerRect.top,
+            targetScrollTop,
+            maxScroll,
+            scrollHeight: container.scrollHeight,
+            clientHeight: container.clientHeight,
+        });
+        container.scrollTop = targetScrollTop;
     };
 
     const scrollToLatest = () => {
@@ -513,6 +561,30 @@ const ChatInterface = ({ agentConfig }) => {
         return -1;
     })();
 
+    // Flag set in sendMessage when the user just sent a message. Anchored via
+    // useLayoutEffect (runs synchronously after DOM commit, before paint) once
+    // chat mode is mounted and the scroll container is measured. Using a ref
+    // (not state) keeps the flag stable across re-renders between send → mode
+    // transition → container measurement.
+    const anchorPendingRef = useRef(false);
+    useLayoutEffect(() => {
+        console.log('[anchor-effect] running', {
+            pending: anchorPendingRef.current,
+            isIdle: isIdleForEffects,
+            containerHeight,
+            latestUserIdx,
+            hasUserRef: !!latestUserMsgRef.current,
+            hasContainerRef: !!scrollContainerRef.current,
+        });
+        if (!anchorPendingRef.current) return;
+        if (isIdleForEffects) return;          // wait for chat mode
+        if (containerHeight === 0) return;     // wait for measurement
+        if (!latestUserMsgRef.current) return; // wait for ref to attach
+        anchorPendingRef.current = false;
+        anchorLatestUserToTop();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [latestUserIdx, isIdleForEffects, containerHeight]);
+
     const handleClearChat = () => {
         if (!agentConfig?.id || isLoading || isLoadingHistory) return;
         const newThreadId = uuidv4();
@@ -527,6 +599,11 @@ const ChatInterface = ({ agentConfig }) => {
         setTimeout(() => inputRef.current?.focus(), 100);
     };
 
+    // Expose imperative actions to the parent (Sidebar uses this for "New chat")
+    useImperativeHandle(ref, () => ({
+        clearChat: handleClearChat,
+    }));
+
     const sendMessage = async (text) => {
         if (!text.trim() || !threadId || isLoadingHistory || isLoading) return;
 
@@ -534,11 +611,8 @@ const ChatInterface = ({ agentConfig }) => {
         setMessages(prev => [...prev, userMessage]);
         setIsLoading(true);
         setLastFailedMessage(null);
-
-        // Anchor the new user message at the top of the viewport.
-        requestAnimationFrame(() => {
-            requestAnimationFrame(anchorLatestUserToTop);
-        });
+        anchorPendingRef.current = true; // anchor effect will fire once chat mode is ready
+        console.log('[anchor-pending] set', { text: text.slice(0, 30) });
 
         const controller = new AbortController();
         abortControllerRef.current = controller;
@@ -672,249 +746,281 @@ const ChatInterface = ({ agentConfig }) => {
         return -1;
     })();
 
+    const firstName = (user.name || "User").split(" ")[0];
+    const isIdle = isIdleForEffects;
+
+    // Pick a fresh greeting whenever we (re-)enter idle, change agent, or start a new thread.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const idleGreeting = useMemo(() => pickGreeting(firstName), [isIdle, agentConfig.id, firstName, threadId]);
+
+    // ── Reusable Composer JSX ─────────────────────────────────────────────
+    const renderComposer = () => (
+        <form onSubmit={handleSend} className="relative flex items-end w-full pointer-events-auto">
+            <div className="relative flex items-end w-full bg-white rounded-3xl border border-gray-200 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] p-1.5 focus-within:border-gray-300 focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.12)] transition-shadow">
+                <textarea
+                    ref={inputRef}
+                    rows={1}
+                    value={input}
+                    onChange={handleInputChange}
+                    onKeyDown={handleKeyDown}
+                    placeholder="Ask anything..."
+                    className="flex-1 bg-transparent text-gray-800 placeholder:text-gray-400 text-[0.9375rem] pl-3 pr-2 py-2 outline-none resize-none leading-relaxed max-h-[150px] overflow-y-auto chat-scrollbar"
+                />
+                <button
+                    type={isLoading ? "button" : "submit"}
+                    onClick={isLoading ? handleStop : undefined}
+                    disabled={!isLoading && (!input.trim() || !threadId || isLoadingHistory)}
+                    title={isLoading ? "Stop generating" : "Send"}
+                    className={`relative p-2 rounded-full transition-all duration-300 flex items-center justify-center shrink-0 ml-1.5
+                        ${isLoading
+                            ? 'bg-gray-900 text-white hover:bg-gray-800 shadow-md'
+                            : input.trim()
+                                ? `bg-gradient-to-tr ${agentConfig.color} text-white shadow-md hover:shadow-lg hover:scale-105`
+                                : 'bg-gray-100 text-gray-400 hover:text-gray-600 hover:bg-gray-200'
+                        } disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none`}
+                >
+                    {isLoading ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-[1.125rem] h-[1.125rem] sm:w-5 sm:h-5">
+                            <rect x="6" y="6" width="12" height="12" rx="2" />
+                        </svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-[1.125rem] h-[1.125rem] sm:w-5 sm:h-5">
+                            <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
+                        </svg>
+                    )}
+                </button>
+            </div>
+        </form>
+    );
+
+    const disclaimerText = (
+        <p className="text-center text-[0.65rem] text-gray-400 mt-2 font-light px-2">
+            {agentConfig.disclaimer}
+        </p>
+    );
+
     return (
         <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
-            className="flex-1 flex flex-col w-full max-w-[1250px] mx-auto px-4 z-10 pt-6 pb-0 min-h-0 overflow-hidden"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            className="flex-1 flex flex-col min-h-0 w-full overflow-hidden z-10"
         >
-            {/* Title Section */}
-            <motion.div
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.2 }}
-                className="text-center mb-4 space-y-2"
-            >
-                <h1 className="text-5xl sm:text-6xl font-extrabold text-white tracking-tight drop-shadow-lg uppercase">{agentConfig.title}</h1>
-                <p className="text-white/70 text-sm sm:text-base mx-auto font-light whitespace-nowrap overflow-hidden text-ellipsis">{agentConfig.subtitle}</p>
-            </motion.div>
-
-            {/* ── Premium Chat Workspace ─────────────────────── */}
-            <motion.div
-                initial={{ opacity: 0, y: 25, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.3 }}
-                className="relative flex-1 mb-4 sm:mb-8 min-h-0 rounded-2xl sm:rounded-3xl z-10"
-            >
-                <div className={`absolute -inset-2 blur-[30px] opacity-30 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 transition-colors duration-700 pointer-events-none`} />
-
-                <div className="relative bg-[#fbfcff] w-full h-full rounded-2xl sm:rounded-3xl border border-white/80 shadow-[0_20px_50px_-10px_rgba(0,0,0,0.2),inset_0_1px_1px_rgba(255,255,255,1)] flex flex-col overflow-hidden">
-
-                    <div className="flex-1 flex flex-col relative z-0 pt-3 sm:pt-5 min-h-0">
-                        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-6 sm:px-8 space-y-5 chat-scrollbar min-h-0 relative transform-gpu will-change-transform">
+            <AnimatePresence mode="wait">
+                {isIdle ? (
+                    // ── IDLE LANDING SCREEN ─────────────────────────────────
+                    <motion.div
+                        key="idle"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        transition={{ duration: 0.35, ease: 'easeOut' }}
+                        className="flex-1 flex flex-col items-center justify-center px-4 pb-24"
+                    >
+                        <motion.h2
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.45, delay: 0.05 }}
+                            className="text-3xl sm:text-4xl md:text-5xl font-semibold text-gray-900 tracking-tight text-center"
+                        >
+                            {idleGreeting}
+                        </motion.h2>
+                        <motion.p
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.45, delay: 0.12 }}
+                            className="text-xl sm:text-2xl text-gray-500 mt-2 font-light text-center"
+                        >
+                            How can I help you today?
+                        </motion.p>
+                        <motion.div
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.5, delay: 0.2 }}
+                            className="w-full max-w-[720px] mt-10"
+                        >
+                            {renderComposer()}
+                            {disclaimerText}
+                        </motion.div>
+                    </motion.div>
+                ) : (
+                    // ── CHAT MODE ───────────────────────────────────────────
+                    <motion.div
+                        key="chat"
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.3 }}
+                        className="flex-1 flex flex-col min-h-0 w-full"
+                    >
+                        {/* Messages area — scroll spans full width (scrollbar at page right edge) */}
+                        <div className="relative flex-1 w-full min-h-0 flex flex-col">
                             {isLoadingHistory && (
-                                <div className="absolute inset-0 bg-white/50 backdrop-blur-sm z-10 flex items-center justify-center">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                                <div className="absolute inset-0 bg-[#fafafa]/70 backdrop-blur-sm z-30 flex items-center justify-center">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700"></div>
                                 </div>
                             )}
-                            {messages.map((msg, index) => {
-                                if (!(msg.type === 'user' || msg.text || msg.formType)) return null;
-                                const isLastMsg = index === lastRenderedIdx;
-                                const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
-                                const isErrorMsg = msg.error && isLastMsg;
+                            <div
+                                ref={scrollContainerRef}
+                                style={{ overflowAnchor: 'none' }}
+                                className="flex-1 overflow-y-auto chat-scrollbar min-h-0"
+                            >
+                                <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
+                                    {messages.map((msg, index) => {
+                                        if (!(msg.type === 'user' || msg.text || msg.formType)) return null;
+                                        const isLastMsg = index === lastRenderedIdx;
+                                        const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
+                                        const isErrorMsg = msg.error && isLastMsg;
 
-                                // Compose refs: anchor for latest user, last-message observer target
-                                const setRefs = (el) => {
-                                    if (index === latestUserIdx) latestUserMsgRef.current = el;
-                                    if (isLastMsg) lastMessageRef.current = el;
-                                };
+                                        const setRefs = (el) => {
+                                            if (index === latestUserIdx) latestUserMsgRef.current = el;
+                                            if (isLastMsg) lastMessageRef.current = el;
+                                        };
 
-                                return (
-                                    <motion.div
-                                        key={index}
-                                        ref={setRefs}
-                                        initial={{ opacity: 0, y: 10 }}
-                                        animate={{ opacity: 1, y: 0 }}
-                                        transition={{ duration: 0.35, ease: 'easeOut' }}
-                                        className={`group/msg flex flex-col ${msg.type === 'user' ? 'items-end' : 'items-start'}`}
-                                    >
-                                        <div className={`max-w-[80%] sm:max-w-[75%] rounded-2xl px-5 sm:px-6 py-3.5 sm:py-4 text-[0.9375rem] leading-relaxed shadow-sm ${msg.type === 'user'
-                                            ? `bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`
-                                            : 'bg-white/95 border border-gray-100/60 text-gray-700 rounded-tl-md'
-                                            }`}>
-                                            <div className="prose prose-sm max-w-none text-inherit">
-                                                {(() => {
-                                                    const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
-                                                    const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
-                                                    const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
-                                                    const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
-                                                    const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
+                                        const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
+                                        const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
+                                        const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
+                                        const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
+                                        const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
 
-                                                    return (
-                                                        <>
-                                                            <ReactMarkdown
-                                                                remarkPlugins={[remarkGfm]}
-                                                                components={{
-                                                                    p: ({ node, ...props }) => <p className="mb-2 last:mb-0" {...props} />,
-                                                                    a: ({ node, ...props }) => <a className="text-blue-500 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                                                                    ul: ({ node, ...props }) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
-                                                                    ol: ({ node, ...prefix }) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...prefix} />,
-                                                                    li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-                                                                    table: ({ node, ...props }) => (
-                                                                        <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
-                                                                            <table className="w-full text-sm text-left border-collapse" {...props} />
-                                                                        </div>
-                                                                    ),
-                                                                    th: ({ node, ...props }) => <th className="bg-gray-50 px-4 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />,
-                                                                    td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />,
-                                                                    tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 hover:bg-gray-50 transition-colors" {...props} />,
-                                                                    code: ({ node, inline, className, children, ...props }) => {
-                                                                        if (inline) {
-                                                                            return (
-                                                                                <code className="bg-white border border-gray-100 shadow-sm px-1.5 py-0.5 rounded text-sm font-mono text-pink-600" {...props}>
-                                                                                    {children}
-                                                                                </code>
-                                                                            );
-                                                                        }
-                                                                        return <CodeBlock {...props}>{children}</CodeBlock>;
-                                                                    }
-                                                                }}
-                                                            >
-                                                                {sanitizeMarkdownBold(mainText)}
-                                                            </ReactMarkdown>
-                                                            {isStreamingThisMsg && (
-                                                                <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 ml-0.5 rounded-sm animate-pulse" />
-                                                            )}
-                                                            {msg.type === 'bot' && (
-                                                                <SourcesSection sources={sources} color={agentConfig.color} />
-                                                            )}
-                                                        </>
-                                                    );
-                                                })()}
-                                            </div>
-
-                                            {msg.formType === 'lifestore' && <LifestoreForm />}
-                                            {msg.formType === 'enterprise' && <EnterpriseForm />}
-
-                                            {/* Action row: feedback, copy, retry */}
-                                            {msg.type === 'bot' && index > 0 && msg.text && !isStreamingThisMsg && (
-                                                <div className="flex items-center gap-2 mt-2 -mb-1">
-                                                    {!msg.error && (
-                                                        <FeedbackButtons
-                                                            messageIndex={index}
-                                                            agentId={agentConfig.id}
-                                                            threadId={threadId}
-                                                            userId={user.username || "anonymous"}
-                                                            existingRating={feedbackMap[index] || null}
-                                                            onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
-                                                        />
-                                                    )}
-                                                    {!msg.error && <CopyMessageButton text={msg.text} />}
-                                                    {isErrorMsg && lastFailedMessage && (
-                                                        <button
-                                                            type="button"
-                                                            onClick={handleRetry}
-                                                            className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md text-white bg-gradient-to-br ${agentConfig.color} hover:opacity-90 shadow-sm`}
-                                                        >
-                                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                                                <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z" clipRule="evenodd" />
-                                                            </svg>
-                                                            Retry
-                                                        </button>
-                                                    )}
+                                        const markdownComponents = {
+                                            p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
+                                            a: ({ node, ...props }) => <a className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1.5 marker:text-gray-400" {...props} />,
+                                            ol: ({ node, ...prefix }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5 marker:text-gray-400" {...prefix} />,
+                                            li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                            h1: ({ node, ...props }) => <h1 className="text-xl font-semibold mt-4 mb-2" {...props} />,
+                                            h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mt-4 mb-2" {...props} />,
+                                            h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-3 mb-2" {...props} />,
+                                            strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
+                                            table: ({ node, ...props }) => (
+                                                <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
+                                                    <table className="w-full text-sm text-left border-collapse" {...props} />
                                                 </div>
-                                            )}
-                                        </div>
+                                            ),
+                                            th: ({ node, ...props }) => <th className="bg-gray-50 px-4 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />,
+                                            td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />,
+                                            tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 hover:bg-gray-50 transition-colors" {...props} />,
+                                            code: ({ node, inline, className, children, ...props }) => {
+                                                if (inline) {
+                                                    return (
+                                                        <code className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[0.85em] font-mono text-pink-600" {...props}>
+                                                            {children}
+                                                        </code>
+                                                    );
+                                                }
+                                                return <CodeBlock {...props}>{children}</CodeBlock>;
+                                            }
+                                        };
 
-                                        {/* Hover timestamp (only for messages with a timestamp from this session) */}
-                                        {msg.timestamp && (
-                                            <span className={`text-[0.65rem] text-gray-400 mt-1 px-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200`}>
-                                                {formatTime(msg.timestamp)}
-                                            </span>
-                                        )}
-                                    </motion.div>
-                                );
-                            })}
+                                        return (
+                                            <motion.div
+                                                key={index}
+                                                ref={setRefs}
+                                                initial={{ opacity: 0, y: 10 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                transition={{ duration: 0.35, ease: 'easeOut' }}
+                                                style={msg.type === 'user' ? { scrollMarginTop: '16px' } : undefined}
+                                                className={`group/msg flex flex-col ${msg.type === 'user' ? 'items-end' : 'items-start'}`}
+                                            >
+                                                {msg.type === 'user' ? (
+                                                    // User: keep the pill with agent gradient
+                                                    <div className={`max-w-[85%] sm:max-w-[80%] rounded-2xl px-5 py-3 text-[0.9375rem] leading-relaxed shadow-sm bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`}>
+                                                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                                            {sanitizeMarkdownBold(mainText)}
+                                                        </ReactMarkdown>
+                                                    </div>
+                                                ) : (
+                                                    // Bot: no card — text flows directly on the page background.
+                                                    <div className="w-full text-[15px] sm:text-[16px] leading-[1.75] text-gray-800">
+                                                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                                            {sanitizeMarkdownBold(mainText)}
+                                                        </ReactMarkdown>
+                                                        {isStreamingThisMsg && (
+                                                            <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 ml-0.5 rounded-sm animate-pulse" />
+                                                        )}
+                                                        <SourcesSection sources={sources} color={agentConfig.color} />
+                                                        {msg.formType === 'lifestore' && <LifestoreForm />}
+                                                        {msg.formType === 'enterprise' && <EnterpriseForm />}
+                                                    </div>
+                                                )}
 
-                            {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
-                                <ThinkingIndicator />
-                            )}
+                                                {/* Action row (bot only) — below text on the page bg */}
+                                                {msg.type === 'bot' && index > 0 && msg.text && !isStreamingThisMsg && (
+                                                    <div className="flex items-center gap-1 mt-1 -ml-1.5">
+                                                        {!msg.error && (
+                                                            <FeedbackButtons
+                                                                messageIndex={index}
+                                                                agentId={agentConfig.id}
+                                                                threadId={threadId}
+                                                                userId={user.username || "anonymous"}
+                                                                existingRating={feedbackMap[index] || null}
+                                                                onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
+                                                            />
+                                                        )}
+                                                        {!msg.error && <CopyMessageButton text={msg.text} />}
+                                                        {isErrorMsg && lastFailedMessage && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={handleRetry}
+                                                                className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md text-white bg-gradient-to-br ${agentConfig.color} hover:opacity-90 shadow-sm ml-1.5`}
+                                                            >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                                                                    <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z" clipRule="evenodd" />
+                                                                </svg>
+                                                                Retry
+                                                            </button>
+                                                        )}
+                                                    </div>
+                                                )}
 
-                            {/* Bottom spacer — keeps the latest user message anchorable at the viewport top. */}
-                            {messages.length > 1 && containerHeight > 0 && (
-                                <div style={{ height: `${Math.max(containerHeight - 140, 0)}px` }} aria-hidden="true" />
-                            )}
-                            <div ref={messagesEndRef} className="h-1 sm:h-2" />
-                        </div>
+                                                {msg.timestamp && (
+                                                    <span className={`text-[0.65rem] text-gray-400 mt-1 px-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200`}>
+                                                        {formatTime(msg.timestamp)}
+                                                    </span>
+                                                )}
+                                            </motion.div>
+                                        );
+                                    })}
 
-                        {/* Top fog veil — fades messages as they scroll up under the floating clear button */}
-                        <div className="absolute top-0 left-0 right-4 h-10 sm:h-12 bg-gradient-to-b from-[#fbfcff] via-[#fbfcff]/80 to-transparent pointer-events-none z-10" />
-
-                        {/* Floating Clear Chat button — sits on the top fog veil, top-right of card */}
-                        <div className="absolute top-3 right-3 sm:top-3.5 sm:right-4 z-20">
-                            <AnimatePresence>
-                                {messages.length > 1 && !isLoadingHistory && (
-                                    <ClearChatButton onClick={handleClearChat} disabled={isLoading} />
-                                )}
-                            </AnimatePresence>
-                        </div>
-
-                        {/* Bottom fog veil */}
-                        <div className="absolute bottom-0 left-0 right-4 h-10 sm:h-14 bg-gradient-to-t from-[#fbfcff] via-[#fbfcff]/80 to-transparent pointer-events-none z-10" />
-
-                        {/* Scroll-to-latest pill */}
-                        <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none z-20">
-                            <AnimatePresence>
-                                {!latestVisible && messages.length > 1 && !isLoading && (
-                                    <div className="pointer-events-auto">
-                                        <ScrollToLatestPill onClick={scrollToLatest} color={agentConfig.color} />
-                                    </div>
-                                )}
-                            </AnimatePresence>
-                        </div>
-                    </div>
-
-                    {/* ── DOCKED INPUT AREA ── */}
-                    <div className="w-full px-2 sm:px-6 pb-1.5 pt-0.5 bg-[#fbfcff] z-20 flex flex-col justify-end border-t border-gray-50/50">
-                        <form onSubmit={handleSend} className="relative flex items-end w-full pointer-events-auto group">
-
-                            <div className="relative flex items-end w-full bg-[#fbfcff]/95 backdrop-blur-3xl rounded-3xl border border-gray-200/80 shadow-[0_12px_40px_-10px_rgba(0,0,0,0.1),inset_0_2px_4px_rgba(255,255,255,1)] p-1.5 focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.15)] focus-within:ring-2 focus-within:ring-gray-200/50 transition-shadow">
-
-                                <textarea
-                                    ref={inputRef}
-                                    rows={1}
-                                    value={input}
-                                    onChange={handleInputChange}
-                                    onKeyDown={handleKeyDown}
-                                    placeholder={`${agentConfig.title} anything...`}
-                                    className="flex-1 bg-transparent text-gray-800 placeholder:text-gray-400 text-[0.9375rem] pl-3 pr-2 py-1.5 outline-none resize-none leading-relaxed max-h-[150px] overflow-y-auto chat-scrollbar"
-                                />
-
-                                <button
-                                    type={isLoading ? "button" : "submit"}
-                                    onClick={isLoading ? handleStop : undefined}
-                                    disabled={!isLoading && (!input.trim() || !threadId || isLoadingHistory)}
-                                    title={isLoading ? "Stop generating" : "Send"}
-                                    className={`relative p-1.5 rounded-full transition-all duration-300 flex items-center justify-center shrink-0 ml-1.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.4)]
-                                        ${isLoading
-                                            ? 'bg-gray-800 text-white hover:bg-gray-900 shadow-md'
-                                            : input.trim()
-                                                ? `bg-gradient-to-tr ${agentConfig.color} text-white shadow-md hover:shadow-lg hover:scale-105`
-                                                : 'bg-black/5 text-gray-400 hover:text-gray-600 hover:bg-black/10'
-                                        } disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none`}
-                                >
-                                    {isLoading ? (
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-[1.125rem] h-[1.125rem] sm:w-5 sm:h-5">
-                                            <rect x="6" y="6" width="12" height="12" rx="2" />
-                                        </svg>
-                                    ) : (
-                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-[1.125rem] h-[1.125rem] sm:w-5 sm:h-5">
-                                            <path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" />
-                                        </svg>
+                                    {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
+                                        <ThinkingIndicator />
                                     )}
-                                </button>
-                            </div>
-                        </form>
 
-                        <p className="text-center text-[0.65rem] text-gray-400/80 mt-1 font-light pointer-events-auto">
-                            {agentConfig.disclaimer}
-                        </p>
-                    </div>
-                </div>
-            </motion.div>
+                                    {messages.length > 1 && containerHeight > 0 && (
+                                        <div style={{ height: `${Math.max(containerHeight - 60, 0)}px` }} aria-hidden="true" />
+                                    )}
+                                    <div ref={messagesEndRef} className="h-2" />
+                                </div>
+                            </div>
+
+
+                            {/* Scroll-to-latest pill */}
+                            <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none z-20">
+                                <AnimatePresence>
+                                    {!latestVisible && messages.length > 1 && !isLoading && (
+                                        <div className="pointer-events-auto">
+                                            <ScrollToLatestPill onClick={scrollToLatest} color={agentConfig.color} />
+                                        </div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        </div>
+
+                        {/* Docked composer — centered, content constrained */}
+                        <div className="w-full flex flex-col items-center px-4 sm:px-6 pb-3 pt-1 z-20 shrink-0">
+                            <div className="w-full max-w-[820px]">
+                                {renderComposer()}
+                                {disclaimerText}
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </motion.div>
     );
-};
+});
+
+ChatInterface.displayName = 'ChatInterface';
 
 export default ChatInterface;
