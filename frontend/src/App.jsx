@@ -12,6 +12,8 @@ import FeedbackPanel from './components/admin/FeedbackPanel';
 import AdminRoute from './components/admin/AdminRoute';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
+import MultiAgentChatWorkspace from './components/MultiAgentChatWorkspace';
+
 
 // Initialize MSAL outside the components
 const msalInstance = new PublicClientApplication(msalConfig);
@@ -20,6 +22,22 @@ const RootRedirect = () => {
   const { inProgress } = useMsal();
   if (inProgress !== InteractionStatus.None) return null;
   return <Navigate to="/workmateai" replace />;
+};
+
+const MultiAgentWrapper = () => {
+  const { agentType } = useParams();
+
+  const agentConfig = AGENTS[agentType];
+
+  if (!agentConfig) {
+    return (
+      <div className="h-screen bg-slate-900 text-white flex items-center justify-center text-2xl">
+        Agent Not Found
+      </div>
+    );
+  }
+
+  return <MultiAgentChatWorkspace agentConfig={agentConfig} />;
 };
 
 // ── Stagger animation variants ──────────────────────────
@@ -348,6 +366,7 @@ function App() {
             <Route path="/admin/ingestion" element={<IngestionPanel />} />
             <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
+          <Route path="/:agentType/chat" element={<MultiAgentWrapper />} />
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
       </BrowserRouter>
