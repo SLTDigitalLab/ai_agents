@@ -123,3 +123,28 @@ body {
 .chat-scrollbar::-webkit-scrollbar-thumb:hover {
     background: rgba(0, 0, 0, 0.25); /* Darker on hover */
 }
+
+/* Dark mode scrollbar */
+.dark .chat-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.dark .chat-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.dark .chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:decrement {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(255,255,255,0.25)'><path d='M4 1 L1 7 L7 7 Z'/></svg>");
+}
+
+.dark .chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:increment {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(255,255,255,0.25)'><path d='M4 7 L1 1 L7 1 Z'/></svg>");
+}
+
+.dark .chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:decrement:hover {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(255,255,255,0.45)'><path d='M4 1 L1 7 L7 7 Z'/></svg>");
+}
+
+.dark .chat-scrollbar::-webkit-scrollbar-button:single-button:vertical:increment:hover {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8' fill='rgba(255,255,255,0.45)'><path d='M4 7 L1 1 L7 1 Z'/></svg>");
+}

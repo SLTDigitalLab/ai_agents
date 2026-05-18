@@ -12,6 +12,7 @@ import FeedbackPanel from './components/admin/FeedbackPanel';
 import AdminRoute from './components/admin/AdminRoute';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
+import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 
 // Initialize MSAL outside the components
 const msalInstance = new PublicClientApplication(msalConfig);
@@ -81,12 +82,10 @@ const getAgentRGB = (colorStr) => {
 // Premium two-stop radial ambient: soft warm glow from top-right, cool shadow
 // tint from bottom-left, layered over a near-white base. Avoids banding because
 // both gradients fade smoothly across the entire viewport.
-const buildAmbientBackground = (rgb) => `
-  radial-gradient(ellipse 90% 70% at 100% 0%, rgba(${rgb}, 0.16) 0%, rgba(${rgb}, 0) 55%),
-  radial-gradient(ellipse 80% 70% at 0% 100%, rgba(${rgb}, 0.10) 0%, rgba(${rgb}, 0) 60%),
-  radial-gradient(ellipse 60% 50% at 50% 50%, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0) 70%),
-  #fbfbfd
-`.replace(/\s+/g, ' ').trim();
+const buildAmbientBackground = (rgb, theme = 'light') => {
+  // Flat base color, no agent-color tinting on either side.
+  return theme === 'dark' ? '#1c1f24' : '#f1f3f6';
+};
 
 // Faint film-grain texture — adds tactile depth, masks gradient banding.
 const GRAIN_DATA_URL = "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -103,7 +102,7 @@ const getInitials = (name) => {
 // ── User Avatar + Popover Menu (sits at bottom of sidebar) ─────────────
 const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
   const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useState('light'); // TODO: wire dark-mode styles
+  const { theme, setTheme } = useTheme();
   const menuRef = useRef(null);
   const initials = getInitials(user?.name);
 
@@ -131,23 +130,23 @@ const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
             animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, x: -8, scale: 0.96 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="absolute bottom-0 left-full ml-3 w-64 bg-white rounded-2xl border border-gray-200 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.18)] overflow-hidden"
+            className="absolute bottom-0 left-full ml-3 w-64 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.18)] dark:shadow-[0_20px_50px_-15px_rgba(0,0,0,0.6)] overflow-hidden"
           >
             {/* Identity header */}
-            <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-3">
+            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-3">
               <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${agentColor} text-white text-sm font-semibold flex items-center justify-center shadow-sm shrink-0`}>
                 {initials}
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
-                <p className="text-[0.7rem] text-gray-500 truncate">{user.username}</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{user.name}</p>
+                <p className="text-[0.7rem] text-gray-500 dark:text-gray-400 truncate">{user.username}</p>
               </div>
             </div>
 
             {/* Theme toggle */}
-            <div className="px-4 py-3 border-b border-gray-100">
-              <p className="text-[0.7rem] uppercase tracking-wider font-semibold text-gray-400 mb-2">Theme</p>
-              <div className="grid grid-cols-2 gap-1 bg-gray-100 rounded-lg p-1">
+            <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
+              <p className="text-[0.7rem] uppercase tracking-wider font-semibold text-gray-400 dark:text-gray-500 mb-2">Theme</p>
+              <div className="grid grid-cols-2 gap-1 bg-gray-100 dark:bg-gray-800 rounded-lg p-1">
                 {['light', 'dark'].map((mode) => (
                   <button
                     key={mode}
@@ -155,8 +154,8 @@ const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
                     onClick={() => setTheme(mode)}
                     className={`flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-medium transition-all ${
                       theme === mode
-                        ? 'bg-white text-gray-900 shadow-sm'
-                        : 'text-gray-500 hover:text-gray-700'
+                        ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 shadow-sm'
+                        : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
                     }`}
                   >
                     {mode === 'light' ? (
@@ -172,18 +171,15 @@ const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
                   </button>
                 ))}
               </div>
-              {theme === 'dark' && (
-                <p className="text-[0.65rem] text-gray-400 mt-1.5 italic">Dark mode coming soon</p>
-              )}
             </div>
 
             {/* Logout */}
             <button
               type="button"
               onClick={onLogout}
-              className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500 dark:text-gray-400">
                 <path fillRule="evenodd" d="M3 4.25A2.25 2.25 0 015.25 2h5.5A2.25 2.25 0 0113 4.25v2a.75.75 0 01-1.5 0v-2a.75.75 0 00-.75-.75h-5.5a.75.75 0 00-.75.75v11.5c0 .414.336.75.75.75h5.5a.75.75 0 00.75-.75v-2a.75.75 0 011.5 0v2A2.25 2.25 0 0110.75 18h-5.5A2.25 2.25 0 013 15.75V4.25z" clipRule="evenodd" />
                 <path fillRule="evenodd" d="M19 10a.75.75 0 00-.22-.53l-2.75-2.75a.75.75 0 10-1.06 1.06l1.47 1.47H8.75a.75.75 0 000 1.5h7.69l-1.47 1.47a.75.75 0 101.06 1.06l2.75-2.75A.75.75 0 0019 10z" clipRule="evenodd" />
               </svg>
@@ -202,7 +198,7 @@ const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
         whileTap={{ scale: 0.95 }}
         onClick={() => setOpen(v => !v)}
         title={user.name}
-        className={`w-10 h-10 rounded-full bg-gradient-to-br ${agentColor} text-white text-sm font-semibold flex items-center justify-center shadow-md hover:shadow-lg transition-shadow ring-2 ring-white`}
+        className={`w-10 h-10 rounded-full bg-gradient-to-br ${agentColor} text-white text-sm font-semibold flex items-center justify-center shadow-md hover:shadow-lg transition-shadow ring-2 ring-white dark:ring-gray-900`}
       >
         {initials}
       </motion.button>
@@ -212,14 +208,14 @@ const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
 
 // ── Left Sidebar Rail ──────────────────────────────────────────────────
 const SidebarRail = ({ onNewChat, user, onLogout, agentColor }) => (
-  <aside className="w-16 sm:w-[68px] shrink-0 flex flex-col items-center py-4 border-r border-gray-200/70 z-30">
+  <aside className="w-16 sm:w-[68px] shrink-0 flex flex-col items-center py-4 bg-white dark:bg-[#23272e] border-r border-gray-200/70 dark:border-[#33373f] z-30">
     <motion.button
       type="button"
       onClick={onNewChat}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
       title="New chat"
-      className="group/new flex items-center justify-center w-11 h-11 rounded-full hover:bg-gray-100 text-gray-500 hover:text-gray-900 transition-colors"
+      className="group/new flex items-center justify-center w-11 h-11 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
     >
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
         <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
@@ -239,6 +235,10 @@ const AgentWrapper = () => {
   const location = useLocation();
   const user = accounts[0] || {};
   const agentConfig = AGENTS[agentType];
+  const { theme } = useTheme();
+  const isAuthed = accounts.length > 0;
+  // Dark mode only applies in the authenticated chat surface; login stays light.
+  const effectiveTheme = isAuthed && theme === 'dark' ? 'dark' : 'light';
 
   if (!agentConfig) {
     return (
@@ -253,6 +253,16 @@ const AgentWrapper = () => {
     document.title = `${agentConfig.title}`;
     return () => { document.title = 'SLTMobitel AI Agent'; };
   }, [agentConfig.title]);
+
+  // Toggle the `dark` class on <html> so Tailwind's class strategy applies
+  // reliably across the entire tree (including portals/fixed elements).
+  // Removed on unmount so login screen, admin pages, and logout never get stuck dark.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (effectiveTheme === 'dark') root.classList.add('dark');
+    else root.classList.remove('dark');
+    return () => { root.classList.remove('dark'); };
+  }, [effectiveTheme]);
 
   const handleLogin = () => {
     // 1. Set flags so the app knows this is a legitimate user action, not a back-button loop
@@ -270,11 +280,11 @@ const AgentWrapper = () => {
   };
 
   const chatRef = useRef(null);
-  const ambientBg = buildAmbientBackground(getAgentRGB(agentConfig.color));
+  const ambientBg = buildAmbientBackground(getAgentRGB(agentConfig.color), effectiveTheme);
 
   return (
     <div
-      className="h-screen flex flex-row relative overflow-hidden text-gray-900 transition-[background] duration-700"
+      className="h-screen flex flex-row relative overflow-hidden text-gray-900 dark:text-gray-100"
       style={{ background: ambientBg }}
     >
       {/* Premium film-grain overlay — adds subtle tactile depth */}
@@ -304,7 +314,7 @@ const AgentWrapper = () => {
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
         className="relative z-20 flex justify-between items-center px-10 sm:px-14 py-4"
       >
-        <h1 className="text-lg sm:text-xl font-semibold text-gray-900 tracking-tight">
+        <h1 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
           {agentConfig.title.replace(/^ASK /i, 'Ask ')}
         </h1>
         <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-8 w-auto" />
@@ -443,6 +453,7 @@ function App() {
 
   return (
     <MsalProvider instance={msalInstance}>
+      <ThemeProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<RootRedirect />} />
@@ -470,6 +481,7 @@ function App() {
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
       </BrowserRouter>
+      </ThemeProvider>
     </MsalProvider>
   );
 }

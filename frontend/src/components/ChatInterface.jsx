@@ -90,11 +90,11 @@ const ThinkingIndicator = () => {
 
     return (
         <div className="flex justify-start">
-            <div className="bg-gray-50/80 backdrop-blur-md border border-gray-100/60 rounded-2xl rounded-tl-md px-6 py-4 shadow-sm flex gap-3 items-center">
+            <div className="bg-gray-50/80 dark:bg-gray-800/60 backdrop-blur-md border border-gray-100/60 dark:border-gray-700/60 rounded-2xl rounded-tl-md px-6 py-4 shadow-sm flex gap-3 items-center">
                 <div className="flex gap-1.5 items-center">
-                    <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce" />
-                    <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce [animation-delay:150ms]" />
-                    <div className="w-2 h-2 rounded-full bg-gray-300 animate-bounce [animation-delay:300ms]" />
+                    <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600 animate-bounce" />
+                    <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600 animate-bounce [animation-delay:150ms]" />
+                    <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600 animate-bounce [animation-delay:300ms]" />
                 </div>
                 <AnimatePresence mode="wait">
                     <motion.span
@@ -103,7 +103,7 @@ const ThinkingIndicator = () => {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -4 }}
                         transition={{ duration: 0.2, ease: 'easeOut' }}
-                        className="text-sm text-gray-500 font-light"
+                        className="text-sm text-gray-500 dark:text-gray-400 font-light"
                     >
                         {THINKING_PHRASES[phraseIdx]}
                     </motion.span>
@@ -122,17 +122,17 @@ const SourceBadge = ({ name, url, color }) => (
         rel="noopener noreferrer"
         whileHover={{ scale: 1.05, y: -2 }}
         whileTap={{ scale: 0.95 }}
-        className={`flex items-center gap-2 px-3 py-1.5 rounded-full bg-white border border-gray-100 shadow-sm transition-all hover:shadow-md hover:border-gray-200 group`}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-full bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 shadow-sm transition-all hover:shadow-md hover:border-gray-200 dark:hover:border-gray-600 group`}
     >
         <div className={`p-1 rounded-full bg-gradient-to-br ${color} text-white`}>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
                 <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
             </svg>
         </div>
-        <span className="text-xs font-medium text-gray-600 group-hover:text-gray-900 truncate max-w-[150px]">
+        <span className="text-xs font-medium text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100 truncate max-w-[150px]">
             {name}
         </span>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-gray-300 group-hover:text-gray-500">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400">
             <path fillRule="evenodd" d="M5.22 14.78a.75.75 0 001.06 0l7.22-7.22v5.69a.75.75 0 001.5 0v-7.5a.75.75 0 00-.75-.75h-7.5a.75.75 0 000 1.5h5.69l-7.22 7.22a.75.75 0 000 1.06z" clipRule="evenodd" />
         </svg>
     </motion.a>
@@ -145,11 +145,11 @@ const SourcesSection = ({ sources, color }) => {
         <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mt-4 pt-3 border-t border-gray-100/60"
+            className="mt-4 pt-3 border-t border-gray-100/60 dark:border-gray-800/60"
         >
             <div className="flex items-center gap-2 mb-2.5">
                 <div className={`w-1 h-3.5 rounded-full bg-gradient-to-b ${color}`} />
-                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400">Sources</span>
+                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400 dark:text-gray-500">Sources</span>
             </div>
             <div className="flex flex-wrap gap-2">
                 {sources.map((src, i) => (
@@ -188,7 +188,9 @@ const CopyMessageButton = ({ text }) => {
             disabled={copied}
             title={copied ? "Copied" : "Copy message"}
             className={`p-1.5 rounded-md transition-all duration-200 ${
-                copied ? 'text-emerald-500 bg-emerald-50' : 'text-gray-300 hover:text-gray-600 hover:bg-gray-100/60'
+                copied
+                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                    : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
             }`}
         >
             {copied ? (
@@ -216,12 +218,14 @@ const CodeBlock = ({ children, ...props }) => {
                 onClick={() => copy(text)}
                 title={copied ? "Copied" : "Copy code"}
                 className={`absolute top-2 right-2 px-2 py-1 rounded-md text-[0.7rem] font-medium transition-all duration-200 opacity-0 group-hover/code:opacity-100 ${
-                    copied ? 'bg-emerald-500 text-white' : 'bg-white border border-gray-200 text-gray-500 hover:text-gray-800 hover:border-gray-300 shadow-sm'
+                    copied
+                        ? 'bg-emerald-500 text-white'
+                        : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
                 }`}
             >
                 {copied ? 'Copied' : 'Copy'}
             </button>
-            <code className="block bg-gray-50 p-3 pr-16 rounded-xl text-sm font-mono overflow-x-auto border border-gray-100 shadow-inner text-gray-700" {...props}>
+            <code className="block bg-gray-50 dark:bg-gray-900 p-3 pr-16 rounded-xl text-sm font-mono overflow-x-auto border border-gray-100 dark:border-gray-800 shadow-inner text-gray-700 dark:text-gray-200" {...props}>
                 {children}
             </code>
         </div>
@@ -294,8 +298,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${
                     rating === 'up'
-                        ? 'text-emerald-500 bg-emerald-50'
-                        : 'text-gray-300 hover:text-emerald-400 hover:bg-emerald-50/50'
+                        ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                        : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
                 }`}
                 title="Helpful"
             >
@@ -308,8 +312,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${
                     rating === 'down'
-                        ? 'text-red-400 bg-red-50'
-                        : 'text-gray-300 hover:text-red-400 hover:bg-red-50/50'
+                        ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
+                        : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
                 }`}
                 title="Not helpful"
             >
@@ -477,6 +481,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const inputRef = useRef(null);
     const abortControllerRef = useRef(null);
     const [containerHeight, setContainerHeight] = useState(0);
+    // Spacer below the latest exchange — sized to allow the latest user message
+    // to anchor at the viewport top while NOT permitting scroll past the bot reply.
+    const [bottomSpacer, setBottomSpacer] = useState(0);
 
     // True when no exchange has happened yet (only the seeded greeting message exists).
     // Declared here so the observer effects below can react to mode changes.
@@ -510,6 +517,31 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         obs.observe(target);
         return () => obs.disconnect();
     }, [messages.length, lastTextPresent]);
+
+    // Re-measure the bottom spacer whenever the latest exchange grows.
+    // Formula: containerHeight - (top of latest user msg → bottom of last msg) - 32px buffer.
+    // If the exchange fully fills the viewport, spacer is 0 — no scroll past the bot reply.
+    useEffect(() => {
+        const userEl = latestUserMsgRef.current;
+        const lastEl = lastMessageRef.current;
+        if (!userEl || !lastEl || containerHeight === 0) {
+            setBottomSpacer(0);
+            return;
+        }
+        const compute = () => {
+            const userRect = userEl.getBoundingClientRect();
+            const lastRect = lastEl.getBoundingClientRect();
+            const exchangeHeight = lastRect.bottom - userRect.top;
+            const next = Math.max(0, containerHeight - exchangeHeight - 32);
+            setBottomSpacer(next);
+        };
+        compute();
+        const ro = new ResizeObserver(compute);
+        ro.observe(userEl);
+        ro.observe(lastEl);
+        return () => ro.disconnect();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [containerHeight, messages.length, lastTextPresent]);
 
     // Anchor the latest user message to the top of the scroll container.
     // Instant scrollTop set — no smooth animation — to eliminate any chance
@@ -756,7 +788,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     // ── Reusable Composer JSX ─────────────────────────────────────────────
     const renderComposer = () => (
         <form onSubmit={handleSend} className="relative flex items-end w-full pointer-events-auto">
-            <div className="relative flex items-end w-full bg-white rounded-3xl border border-gray-200 shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] p-1.5 focus-within:border-gray-300 focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.12)] transition-shadow">
+            <div className="relative flex items-end w-full bg-white dark:bg-[#2a2e36] rounded-3xl border border-gray-200 dark:border-[#3a3f48] shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.5)] p-1.5 focus-within:border-gray-300 dark:focus-within:border-[#4a505a] focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.12)] dark:focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.7)] transition-shadow">
                 <textarea
                     ref={inputRef}
                     rows={1}
@@ -764,7 +796,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
                     placeholder="Ask anything..."
-                    className="flex-1 bg-transparent text-gray-800 placeholder:text-gray-400 text-[0.9375rem] pl-3 pr-2 py-2 outline-none resize-none leading-relaxed max-h-[150px] overflow-y-auto chat-scrollbar"
+                    className="flex-1 bg-transparent text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-[0.9375rem] pl-3 pr-2 py-2 outline-none resize-none leading-relaxed max-h-[150px] overflow-y-auto chat-scrollbar"
                 />
                 <button
                     type={isLoading ? "button" : "submit"}
@@ -773,10 +805,10 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     title={isLoading ? "Stop generating" : "Send"}
                     className={`relative p-2 rounded-full transition-all duration-300 flex items-center justify-center shrink-0 ml-1.5
                         ${isLoading
-                            ? 'bg-gray-900 text-white hover:bg-gray-800 shadow-md'
+                            ? 'bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-white shadow-md'
                             : input.trim()
                                 ? `bg-gradient-to-tr ${agentConfig.color} text-white shadow-md hover:shadow-lg hover:scale-105`
-                                : 'bg-gray-100 text-gray-400 hover:text-gray-600 hover:bg-gray-200'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                         } disabled:opacity-40 disabled:hover:scale-100 disabled:shadow-none`}
                 >
                     {isLoading ? (
@@ -794,7 +826,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     );
 
     const disclaimerText = (
-        <p className="text-center text-[0.65rem] text-gray-400 mt-2 font-light px-2">
+        <p className="text-center text-[0.65rem] text-gray-400 dark:text-gray-500 mt-2 font-light px-2">
             {agentConfig.disclaimer}
         </p>
     );
@@ -806,8 +838,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
             className="flex-1 flex flex-col min-h-0 w-full overflow-hidden z-10"
         >
-            <AnimatePresence mode="wait">
-                {isIdle ? (
+            {isIdle ? (
                     // ── IDLE LANDING SCREEN ─────────────────────────────────
                     <motion.div
                         key="idle"
@@ -821,7 +852,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.45, delay: 0.05 }}
-                            className="text-3xl sm:text-4xl md:text-5xl font-semibold text-gray-900 tracking-tight text-center"
+                            className="text-3xl sm:text-4xl md:text-5xl font-semibold text-gray-900 dark:text-gray-100 tracking-tight text-center"
                         >
                             {idleGreeting}
                         </motion.h2>
@@ -829,7 +860,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.45, delay: 0.12 }}
-                            className="text-xl sm:text-2xl text-gray-500 mt-2 font-light text-center"
+                            className="text-xl sm:text-2xl text-gray-500 dark:text-gray-400 mt-2 font-light text-center"
                         >
                             How can I help you today?
                         </motion.p>
@@ -856,8 +887,8 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         {/* Messages area — scroll spans full width (scrollbar at page right edge) */}
                         <div className="relative flex-1 w-full min-h-0 flex flex-col">
                             {isLoadingHistory && (
-                                <div className="absolute inset-0 bg-[#fafafa]/70 backdrop-blur-sm z-30 flex items-center justify-center">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700"></div>
+                                <div className="absolute inset-0 bg-[#fafafa]/70 dark:bg-[#1c1f24]/70 backdrop-blur-sm z-30 flex items-center justify-center">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700 dark:border-gray-300"></div>
                                 </div>
                             )}
                             <div
@@ -885,26 +916,26 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
                                         const markdownComponents = {
                                             p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
-                                            a: ({ node, ...props }) => <a className="text-blue-600 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                                            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1.5 marker:text-gray-400" {...props} />,
-                                            ol: ({ node, ...prefix }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5 marker:text-gray-400" {...prefix} />,
+                                            a: ({ node, ...props }) => <a className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500" {...props} />,
+                                            ol: ({ node, ...prefix }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500" {...prefix} />,
                                             li: ({ node, ...props }) => <li className="pl-1" {...props} />,
                                             h1: ({ node, ...props }) => <h1 className="text-xl font-semibold mt-4 mb-2" {...props} />,
                                             h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mt-4 mb-2" {...props} />,
                                             h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-3 mb-2" {...props} />,
-                                            strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900" {...props} />,
+                                            strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900 dark:text-gray-100" {...props} />,
                                             table: ({ node, ...props }) => (
-                                                <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 bg-white">
+                                                <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
                                                     <table className="w-full text-sm text-left border-collapse" {...props} />
                                                 </div>
                                             ),
-                                            th: ({ node, ...props }) => <th className="bg-gray-50 px-4 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />,
-                                            td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />,
-                                            tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 hover:bg-gray-50 transition-colors" {...props} />,
+                                            th: ({ node, ...props }) => <th className="bg-gray-50 dark:bg-gray-800 px-4 py-2 font-semibold border-b border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 border-r dark:border-r-gray-700 last:border-r-0" {...props} />,
+                                            td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 border-r border-gray-100 dark:border-r-gray-800 last:border-r-0 text-gray-600 dark:text-gray-300" {...props} />,
+                                            tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 dark:even:bg-gray-800/40 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors" {...props} />,
                                             code: ({ node, inline, className, children, ...props }) => {
                                                 if (inline) {
                                                     return (
-                                                        <code className="bg-gray-100 border border-gray-200 px-1.5 py-0.5 rounded text-[0.85em] font-mono text-pink-600" {...props}>
+                                                        <code className="bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-1.5 py-0.5 rounded text-[0.85em] font-mono text-pink-600 dark:text-pink-400" {...props}>
                                                             {children}
                                                         </code>
                                                     );
@@ -932,12 +963,12 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                     </div>
                                                 ) : (
                                                     // Bot: no card — text flows directly on the page background.
-                                                    <div className="w-full text-[15px] sm:text-[16px] leading-[1.75] text-gray-800">
+                                                    <div className="w-full text-[15px] sm:text-[16px] leading-[1.75] text-gray-800 dark:text-gray-200">
                                                         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                                                             {sanitizeMarkdownBold(mainText)}
                                                         </ReactMarkdown>
                                                         {isStreamingThisMsg && (
-                                                            <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 ml-0.5 rounded-sm animate-pulse" />
+                                                            <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 dark:bg-gray-300/70 ml-0.5 rounded-sm animate-pulse" />
                                                         )}
                                                         <SourcesSection sources={sources} color={agentConfig.color} />
                                                         {msg.formType === 'lifestore' && <LifestoreForm />}
@@ -975,7 +1006,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                 )}
 
                                                 {msg.timestamp && (
-                                                    <span className={`text-[0.65rem] text-gray-400 mt-1 px-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200`}>
+                                                    <span className={`text-[0.65rem] text-gray-400 dark:text-gray-500 mt-1 px-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200`}>
                                                         {formatTime(msg.timestamp)}
                                                     </span>
                                                 )}
@@ -987,8 +1018,8 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                         <ThinkingIndicator />
                                     )}
 
-                                    {messages.length > 1 && containerHeight > 0 && (
-                                        <div style={{ height: `${Math.max(containerHeight - 60, 0)}px` }} aria-hidden="true" />
+                                    {messages.length > 1 && bottomSpacer > 0 && (
+                                        <div style={{ height: `${bottomSpacer}px` }} aria-hidden="true" />
                                     )}
                                     <div ref={messagesEndRef} className="h-2" />
                                 </div>
@@ -1016,7 +1047,6 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         </div>
                     </motion.div>
                 )}
-            </AnimatePresence>
         </motion.div>
     );
 });
