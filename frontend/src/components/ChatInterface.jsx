@@ -17,16 +17,18 @@ const FORM_TOKENS = {
 
 // Greeting pool for the idle landing screen.
 const TIME_GREETINGS = {
-    morning:   ["Good morning, {n}", "Rise and shine, {n}", "Morning, {n}"],
+    morning: ["Good morning, {n}", "Rise and shine, {n}", "Morning, {n}"],
     afternoon: ["Good afternoon, {n}", "Hi, {n}", "Hey, {n}"],
-    evening:   ["Good evening, {n}", "Evening, {n}", "Hi, {n}"],
-    night:     ["Burning the midnight oil, {n}?", "Still up, {n}?", "Late night, {n}?"],
+    evening: ["Good evening, {n}", "Evening, {n}", "Hi, {n}"],
+    night: ["Burning the midnight oil, {n}?", "Still up, {n}?", "Late night, {n}?"],
 };
 const ANYTIME_GREETINGS = [
     "Welcome back, {n}",
     "Back at it, {n}",
     "{n} returns",
     "Ready when you are, {n}",
+    "Hello, {n}",
+    "Hi, {n}",
     "Hello again, {n}",
 ];
 const pickGreeting = (firstName) => {
@@ -43,19 +45,19 @@ const pickGreeting = (firstName) => {
 
 // Strip unmatched ** bold markers so stray asterisks don't render literally.
 const sanitizeMarkdownBold = (text) => {
-  if (!text) return text;
-  const positions = [];
-  const regex = /\*\*/g;
-  let m;
-  while ((m = regex.exec(text)) !== null) positions.push(m.index);
-  if (positions.length % 2 === 0) return text;
-  const last = positions[positions.length - 1];
-  return text.slice(0, last) + text.slice(last + 2);
+    if (!text) return text;
+    const positions = [];
+    const regex = /\*\*/g;
+    let m;
+    while ((m = regex.exec(text)) !== null) positions.push(m.index);
+    if (positions.length % 2 === 0) return text;
+    const last = positions[positions.length - 1];
+    return text.slice(0, last) + text.slice(last + 2);
 };
 
 // Utility function to append incoming text chunks to the current message text
 const appendChunkSmartly = (current, incoming) => {
-  return (current || "") + (incoming || "");
+    return (current || "") + (incoming || "");
 };
 
 const formatTime = (ts) => {
@@ -187,11 +189,10 @@ const CopyMessageButton = ({ text }) => {
             onClick={() => copy(text)}
             disabled={copied}
             title={copied ? "Copied" : "Copy message"}
-            className={`p-1.5 rounded-md transition-all duration-200 ${
-                copied
+            className={`p-1.5 rounded-md transition-all duration-200 ${copied
                     ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
                     : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
-            }`}
+                }`}
         >
             {copied ? (
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
@@ -217,11 +218,10 @@ const CodeBlock = ({ children, ...props }) => {
                 type="button"
                 onClick={() => copy(text)}
                 title={copied ? "Copied" : "Copy code"}
-                className={`absolute top-2 right-2 px-2 py-1 rounded-md text-[0.7rem] font-medium transition-all duration-200 opacity-0 group-hover/code:opacity-100 ${
-                    copied
+                className={`absolute top-2 right-2 px-2 py-1 rounded-md text-[0.7rem] font-medium transition-all duration-200 opacity-0 group-hover/code:opacity-100 ${copied
                         ? 'bg-emerald-500 text-white'
                         : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
-                }`}
+                    }`}
             >
                 {copied ? 'Copied' : 'Copy'}
             </button>
@@ -296,11 +296,10 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
             <button
                 onClick={() => handleFeedback('up')}
                 disabled={submitting}
-                className={`p-1.5 rounded-md transition-all duration-200 ${
-                    rating === 'up'
+                className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'up'
                         ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
                         : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
-                }`}
+                    }`}
                 title="Helpful"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
@@ -310,11 +309,10 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
             <button
                 onClick={() => handleFeedback('down')}
                 disabled={submitting}
-                className={`p-1.5 rounded-md transition-all duration-200 ${
-                    rating === 'down'
+                className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'down'
                         ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
                         : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
-                }`}
+                    }`}
                 title="Not helpful"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
@@ -445,23 +443,17 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                             console.error("Error fetching feedback:", fbErr);
                         }
                     } else {
-                        setMessages([{
-                            type: 'bot',
-                            text: `Hello ${user.name.split(" ")[0]}! I am your ${agentConfig.title} assistant. How can I help you today?`
-                        }]);
+                        // Empty history — fall through to the idle landing screen.
+                        setMessages([]);
                     }
                 } catch (error) {
                     console.error("Error fetching history:", error);
-                    setMessages([{
-                        type: 'bot',
-                        text: `Welcome back! I had trouble retrieving our last conversation, but I'm ready to help.`
-                    }]);
+                    // On fetch error, still show the idle screen rather than a canned greeting.
+                    setMessages([]);
                 }
             } else {
-                setMessages([{
-                    type: 'bot',
-                    text: `Hello ${user.name.split(" ")[0]}! I am your ${agentConfig.title} assistant. How can I help you today?`
-                }]);
+                // Fresh session — show the idle landing screen.
+                setMessages([]);
             }
 
             setIsLoadingHistory(false);
@@ -624,10 +616,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         setThreadId(newThreadId);
         setFeedbackMap({});
         setLastFailedMessage(null);
-        setMessages([{
-            type: 'bot',
-            text: `Hello ${user.name.split(" ")[0]}! I am your ${agentConfig.title} assistant. How can I help you today?`
-        }]);
+        setMessages([]);
         setTimeout(() => inputRef.current?.focus(), 100);
     };
 
@@ -839,214 +828,214 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             className="flex-1 flex flex-col min-h-0 w-full overflow-hidden z-10"
         >
             {isIdle ? (
-                    // ── IDLE LANDING SCREEN ─────────────────────────────────
-                    <motion.div
-                        key="idle"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0, y: -8 }}
-                        transition={{ duration: 0.35, ease: 'easeOut' }}
-                        className="flex-1 flex flex-col items-center justify-center px-4 pb-24"
+                // ── IDLE LANDING SCREEN ─────────────────────────────────
+                <motion.div
+                    key="idle"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.35, ease: 'easeOut' }}
+                    className="flex-1 flex flex-col items-center justify-center px-4 pb-24"
+                >
+                    <motion.h2
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.45, delay: 0.05 }}
+                        className="text-3xl sm:text-4xl md:text-5xl font-semibold text-gray-900 dark:text-gray-100 tracking-tight text-center"
                     >
-                        <motion.h2
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.45, delay: 0.05 }}
-                            className="text-3xl sm:text-4xl md:text-5xl font-semibold text-gray-900 dark:text-gray-100 tracking-tight text-center"
+                        {idleGreeting}
+                    </motion.h2>
+                    <motion.p
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.45, delay: 0.12 }}
+                        className="text-xl sm:text-2xl text-gray-500 dark:text-gray-400 mt-2 font-light text-center"
+                    >
+                        How can I help you today?
+                    </motion.p>
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.5, delay: 0.2 }}
+                        className="w-full max-w-[720px] mt-10"
+                    >
+                        {renderComposer()}
+                        {disclaimerText}
+                    </motion.div>
+                </motion.div>
+            ) : (
+                // ── CHAT MODE ───────────────────────────────────────────
+                <motion.div
+                    key="chat"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="flex-1 flex flex-col min-h-0 w-full"
+                >
+                    {/* Messages area — scroll spans full width (scrollbar at page right edge) */}
+                    <div className="relative flex-1 w-full min-h-0 flex flex-col">
+                        {isLoadingHistory && (
+                            <div className="absolute inset-0 bg-[#fafafa]/70 dark:bg-[#1c1f24]/70 backdrop-blur-sm z-30 flex items-center justify-center">
+                                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700 dark:border-gray-300"></div>
+                            </div>
+                        )}
+                        <div
+                            ref={scrollContainerRef}
+                            style={{ overflowAnchor: 'none' }}
+                            className="flex-1 overflow-y-auto chat-scrollbar min-h-0"
                         >
-                            {idleGreeting}
-                        </motion.h2>
-                        <motion.p
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.45, delay: 0.12 }}
-                            className="text-xl sm:text-2xl text-gray-500 dark:text-gray-400 mt-2 font-light text-center"
-                        >
-                            How can I help you today?
-                        </motion.p>
-                        <motion.div
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ duration: 0.5, delay: 0.2 }}
-                            className="w-full max-w-[720px] mt-10"
-                        >
+                            <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
+                                {messages.map((msg, index) => {
+                                    if (!(msg.type === 'user' || msg.text || msg.formType)) return null;
+                                    const isLastMsg = index === lastRenderedIdx;
+                                    const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
+                                    const isErrorMsg = msg.error && isLastMsg;
+
+                                    const setRefs = (el) => {
+                                        if (index === latestUserIdx) latestUserMsgRef.current = el;
+                                        if (isLastMsg) lastMessageRef.current = el;
+                                    };
+
+                                    const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
+                                    const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
+                                    const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
+                                    const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
+                                    const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
+
+                                    const markdownComponents = {
+                                        p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
+                                        a: ({ node, ...props }) => <a className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                        ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500" {...props} />,
+                                        ol: ({ node, ...prefix }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500" {...prefix} />,
+                                        li: ({ node, ...props }) => <li className="pl-1" {...props} />,
+                                        h1: ({ node, ...props }) => <h1 className="text-xl font-semibold mt-4 mb-2" {...props} />,
+                                        h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mt-4 mb-2" {...props} />,
+                                        h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-3 mb-2" {...props} />,
+                                        strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900 dark:text-gray-100" {...props} />,
+                                        table: ({ node, ...props }) => (
+                                            <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+                                                <table className="w-full text-sm text-left border-collapse" {...props} />
+                                            </div>
+                                        ),
+                                        th: ({ node, ...props }) => <th className="bg-gray-50 dark:bg-gray-800 px-4 py-2 font-semibold border-b border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 border-r dark:border-r-gray-700 last:border-r-0" {...props} />,
+                                        td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 border-r border-gray-100 dark:border-r-gray-800 last:border-r-0 text-gray-600 dark:text-gray-300" {...props} />,
+                                        tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 dark:even:bg-gray-800/40 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors" {...props} />,
+                                        code: ({ node, inline, className, children, ...props }) => {
+                                            if (inline) {
+                                                return (
+                                                    <code className="bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-1.5 py-0.5 rounded text-[0.85em] font-mono text-pink-600 dark:text-pink-400" {...props}>
+                                                        {children}
+                                                    </code>
+                                                );
+                                            }
+                                            return <CodeBlock {...props}>{children}</CodeBlock>;
+                                        }
+                                    };
+
+                                    return (
+                                        <motion.div
+                                            key={index}
+                                            ref={setRefs}
+                                            initial={{ opacity: 0, y: 10 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ duration: 0.35, ease: 'easeOut' }}
+                                            style={msg.type === 'user' ? { scrollMarginTop: '16px' } : undefined}
+                                            className={`group/msg flex flex-col ${msg.type === 'user' ? 'items-end' : 'items-start'}`}
+                                        >
+                                            {msg.type === 'user' ? (
+                                                // User: keep the pill with agent gradient
+                                                <div className={`max-w-[85%] sm:max-w-[80%] rounded-2xl px-5 py-3 text-[0.9375rem] leading-relaxed shadow-sm bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`}>
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                                        {sanitizeMarkdownBold(mainText)}
+                                                    </ReactMarkdown>
+                                                </div>
+                                            ) : (
+                                                // Bot: no card — text flows directly on the page background.
+                                                <div className="w-full text-[15px] sm:text-[16px] leading-[1.75] text-gray-800 dark:text-gray-200">
+                                                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                                                        {sanitizeMarkdownBold(mainText)}
+                                                    </ReactMarkdown>
+                                                    {isStreamingThisMsg && (
+                                                        <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 dark:bg-gray-300/70 ml-0.5 rounded-sm animate-pulse" />
+                                                    )}
+                                                    <SourcesSection sources={sources} color={agentConfig.color} />
+                                                    {msg.formType === 'lifestore' && <LifestoreForm />}
+                                                    {msg.formType === 'enterprise' && <EnterpriseForm />}
+                                                </div>
+                                            )}
+
+                                            {/* Action row (bot only) — below text on the page bg */}
+                                            {msg.type === 'bot' && index > 0 && msg.text && !isStreamingThisMsg && (
+                                                <div className="flex items-center gap-1 mt-1 -ml-1.5">
+                                                    {!msg.error && (
+                                                        <FeedbackButtons
+                                                            messageIndex={index}
+                                                            agentId={agentConfig.id}
+                                                            threadId={threadId}
+                                                            userId={user.username || "anonymous"}
+                                                            existingRating={feedbackMap[index] || null}
+                                                            onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
+                                                        />
+                                                    )}
+                                                    {!msg.error && <CopyMessageButton text={msg.text} />}
+                                                    {isErrorMsg && lastFailedMessage && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={handleRetry}
+                                                            className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md text-white bg-gradient-to-br ${agentConfig.color} hover:opacity-90 shadow-sm ml-1.5`}
+                                                        >
+                                                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
+                                                                <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z" clipRule="evenodd" />
+                                                            </svg>
+                                                            Retry
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {msg.timestamp && (
+                                                <span className={`text-[0.65rem] text-gray-400 dark:text-gray-500 mt-1 px-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200`}>
+                                                    {formatTime(msg.timestamp)}
+                                                </span>
+                                            )}
+                                        </motion.div>
+                                    );
+                                })}
+
+                                {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
+                                    <ThinkingIndicator />
+                                )}
+
+                                {messages.length > 1 && bottomSpacer > 0 && (
+                                    <div style={{ height: `${bottomSpacer}px` }} aria-hidden="true" />
+                                )}
+                                <div ref={messagesEndRef} className="h-2" />
+                            </div>
+                        </div>
+
+
+                        {/* Scroll-to-latest pill */}
+                        <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none z-20">
+                            <AnimatePresence>
+                                {!latestVisible && messages.length > 1 && !isLoading && (
+                                    <div className="pointer-events-auto">
+                                        <ScrollToLatestPill onClick={scrollToLatest} color={agentConfig.color} />
+                                    </div>
+                                )}
+                            </AnimatePresence>
+                        </div>
+                    </div>
+
+                    {/* Docked composer — centered, content constrained */}
+                    <div className="w-full flex flex-col items-center px-4 sm:px-6 pb-3 pt-1 z-20 shrink-0">
+                        <div className="w-full max-w-[820px]">
                             {renderComposer()}
                             {disclaimerText}
-                        </motion.div>
-                    </motion.div>
-                ) : (
-                    // ── CHAT MODE ───────────────────────────────────────────
-                    <motion.div
-                        key="chat"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.3 }}
-                        className="flex-1 flex flex-col min-h-0 w-full"
-                    >
-                        {/* Messages area — scroll spans full width (scrollbar at page right edge) */}
-                        <div className="relative flex-1 w-full min-h-0 flex flex-col">
-                            {isLoadingHistory && (
-                                <div className="absolute inset-0 bg-[#fafafa]/70 dark:bg-[#1c1f24]/70 backdrop-blur-sm z-30 flex items-center justify-center">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-700 dark:border-gray-300"></div>
-                                </div>
-                            )}
-                            <div
-                                ref={scrollContainerRef}
-                                style={{ overflowAnchor: 'none' }}
-                                className="flex-1 overflow-y-auto chat-scrollbar min-h-0"
-                            >
-                                <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
-                                    {messages.map((msg, index) => {
-                                        if (!(msg.type === 'user' || msg.text || msg.formType)) return null;
-                                        const isLastMsg = index === lastRenderedIdx;
-                                        const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
-                                        const isErrorMsg = msg.error && isLastMsg;
-
-                                        const setRefs = (el) => {
-                                            if (index === latestUserIdx) latestUserMsgRef.current = el;
-                                            if (isLastMsg) lastMessageRef.current = el;
-                                        };
-
-                                        const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
-                                        const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
-                                        const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
-                                        const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
-                                        const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
-
-                                        const markdownComponents = {
-                                            p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
-                                            a: ({ node, ...props }) => <a className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
-                                            ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500" {...props} />,
-                                            ol: ({ node, ...prefix }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500" {...prefix} />,
-                                            li: ({ node, ...props }) => <li className="pl-1" {...props} />,
-                                            h1: ({ node, ...props }) => <h1 className="text-xl font-semibold mt-4 mb-2" {...props} />,
-                                            h2: ({ node, ...props }) => <h2 className="text-lg font-semibold mt-4 mb-2" {...props} />,
-                                            h3: ({ node, ...props }) => <h3 className="text-base font-semibold mt-3 mb-2" {...props} />,
-                                            strong: ({ node, ...props }) => <strong className="font-semibold text-gray-900 dark:text-gray-100" {...props} />,
-                                            table: ({ node, ...props }) => (
-                                                <div className="overflow-x-auto my-4 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-                                                    <table className="w-full text-sm text-left border-collapse" {...props} />
-                                                </div>
-                                            ),
-                                            th: ({ node, ...props }) => <th className="bg-gray-50 dark:bg-gray-800 px-4 py-2 font-semibold border-b border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 border-r dark:border-r-gray-700 last:border-r-0" {...props} />,
-                                            td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 border-r border-gray-100 dark:border-r-gray-800 last:border-r-0 text-gray-600 dark:text-gray-300" {...props} />,
-                                            tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 dark:even:bg-gray-800/40 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors" {...props} />,
-                                            code: ({ node, inline, className, children, ...props }) => {
-                                                if (inline) {
-                                                    return (
-                                                        <code className="bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-1.5 py-0.5 rounded text-[0.85em] font-mono text-pink-600 dark:text-pink-400" {...props}>
-                                                            {children}
-                                                        </code>
-                                                    );
-                                                }
-                                                return <CodeBlock {...props}>{children}</CodeBlock>;
-                                            }
-                                        };
-
-                                        return (
-                                            <motion.div
-                                                key={index}
-                                                ref={setRefs}
-                                                initial={{ opacity: 0, y: 10 }}
-                                                animate={{ opacity: 1, y: 0 }}
-                                                transition={{ duration: 0.35, ease: 'easeOut' }}
-                                                style={msg.type === 'user' ? { scrollMarginTop: '16px' } : undefined}
-                                                className={`group/msg flex flex-col ${msg.type === 'user' ? 'items-end' : 'items-start'}`}
-                                            >
-                                                {msg.type === 'user' ? (
-                                                    // User: keep the pill with agent gradient
-                                                    <div className={`max-w-[85%] sm:max-w-[80%] rounded-2xl px-5 py-3 text-[0.9375rem] leading-relaxed shadow-sm bg-gradient-to-br ${agentConfig.color} text-white rounded-tr-md`}>
-                                                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                                                            {sanitizeMarkdownBold(mainText)}
-                                                        </ReactMarkdown>
-                                                    </div>
-                                                ) : (
-                                                    // Bot: no card — text flows directly on the page background.
-                                                    <div className="w-full text-[15px] sm:text-[16px] leading-[1.75] text-gray-800 dark:text-gray-200">
-                                                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                                                            {sanitizeMarkdownBold(mainText)}
-                                                        </ReactMarkdown>
-                                                        {isStreamingThisMsg && (
-                                                            <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 dark:bg-gray-300/70 ml-0.5 rounded-sm animate-pulse" />
-                                                        )}
-                                                        <SourcesSection sources={sources} color={agentConfig.color} />
-                                                        {msg.formType === 'lifestore' && <LifestoreForm />}
-                                                        {msg.formType === 'enterprise' && <EnterpriseForm />}
-                                                    </div>
-                                                )}
-
-                                                {/* Action row (bot only) — below text on the page bg */}
-                                                {msg.type === 'bot' && index > 0 && msg.text && !isStreamingThisMsg && (
-                                                    <div className="flex items-center gap-1 mt-1 -ml-1.5">
-                                                        {!msg.error && (
-                                                            <FeedbackButtons
-                                                                messageIndex={index}
-                                                                agentId={agentConfig.id}
-                                                                threadId={threadId}
-                                                                userId={user.username || "anonymous"}
-                                                                existingRating={feedbackMap[index] || null}
-                                                                onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
-                                                            />
-                                                        )}
-                                                        {!msg.error && <CopyMessageButton text={msg.text} />}
-                                                        {isErrorMsg && lastFailedMessage && (
-                                                            <button
-                                                                type="button"
-                                                                onClick={handleRetry}
-                                                                className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-md text-white bg-gradient-to-br ${agentConfig.color} hover:opacity-90 shadow-sm ml-1.5`}
-                                                            >
-                                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-                                                                    <path fillRule="evenodd" d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z" clipRule="evenodd" />
-                                                                </svg>
-                                                                Retry
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                )}
-
-                                                {msg.timestamp && (
-                                                    <span className={`text-[0.65rem] text-gray-400 dark:text-gray-500 mt-1 px-1 opacity-0 group-hover/msg:opacity-100 transition-opacity duration-200`}>
-                                                        {formatTime(msg.timestamp)}
-                                                    </span>
-                                                )}
-                                            </motion.div>
-                                        );
-                                    })}
-
-                                    {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
-                                        <ThinkingIndicator />
-                                    )}
-
-                                    {messages.length > 1 && bottomSpacer > 0 && (
-                                        <div style={{ height: `${bottomSpacer}px` }} aria-hidden="true" />
-                                    )}
-                                    <div ref={messagesEndRef} className="h-2" />
-                                </div>
-                            </div>
-
-
-                            {/* Scroll-to-latest pill */}
-                            <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none z-20">
-                                <AnimatePresence>
-                                    {!latestVisible && messages.length > 1 && !isLoading && (
-                                        <div className="pointer-events-auto">
-                                            <ScrollToLatestPill onClick={scrollToLatest} color={agentConfig.color} />
-                                        </div>
-                                    )}
-                                </AnimatePresence>
-                            </div>
                         </div>
-
-                        {/* Docked composer — centered, content constrained */}
-                        <div className="w-full flex flex-col items-center px-4 sm:px-6 pb-3 pt-1 z-20 shrink-0">
-                            <div className="w-full max-w-[820px]">
-                                {renderComposer()}
-                                {disclaimerText}
-                            </div>
-                        </div>
-                    </motion.div>
-                )}
+                    </div>
+                </motion.div>
+            )}
         </motion.div>
     );
 });
