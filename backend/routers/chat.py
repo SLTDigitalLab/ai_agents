@@ -158,8 +158,17 @@ async def chat(request: ChatRequest):
                     # We must also match on ``langgraph_checkpoint_ns`` (a
                     # namespace string like "multi_delegate:<hash>|agent:<hash>")
                     # to suppress nested events too.
-                    SUPPRESS_STREAM_NODES = {"multi_delegate"}
+                    SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
                     logged_metadata_sample = False
+
+                    # ── DeepSeek-R1 <think> stripper ─────────────
+                    # The internal SLM (deepseek-r1) prefixes its output
+                    # with <think>...</think> reasoning tokens. We hide
+                    # those from the user but let the final answer stream.
+                    strip_think = request.agent_id == "askhrslm"
+                    think_buffer = ""
+                    in_think_block = False
+                    think_done = False
 
                     async for event in graph.astream_events(state, config, version="v2"):
                         # ── Extract tokens from stream events ────────
@@ -191,6 +200,28 @@ async def chat(request: ChatRequest):
 
                             content = event["data"]["chunk"].content
                             text = _message_content_to_text(content, strip=False)
+
+                            if text and strip_think and not think_done:
+                                think_buffer += text
+                                if not in_think_block and "<think>" in think_buffer:
+                                    in_think_block = True
+                                    think_buffer = think_buffer.split("<think>", 1)[1]
+                                    text = ""
+                                if in_think_block:
+                                    if "</think>" in think_buffer:
+                                        # Drop everything up to and including </think>;
+                                        # whatever follows is the real answer.
+                                        text = think_buffer.split("</think>", 1)[1].lstrip()
+                                        in_think_block = False
+                                        think_done = True
+                                        think_buffer = ""
+                                    else:
+                                        text = ""  # still inside think block
+                                elif "<think>" not in think_buffer:
+                                    # No think tag at all — flush buffer as normal output.
+                                    text = think_buffer
+                                    think_buffer = ""
+                                    think_done = True
 
                             if text:
                                 streamed_any_text = True

@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import asyncio
+import json
 import logging
 import requests
 
@@ -12,14 +13,42 @@ from urllib.parse import urljoin, urlparse, urldefrag
 from bs4 import BeautifulSoup
 
 from services.ingestion import IngestionService
+from services.ingestion_slm import slm_ingestion_service
 from services import ingestion_status
 from domain.tools.api_tools import LEAVE_BALANCE_API_URL
+from core.config import settings
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
 ingestion_service = IngestionService()
+
+
+try:
+    ADMIN_AGENT_MAP: dict[str, list[str]] = {
+        email.lower(): agents
+        for email, agents in json.loads(settings.ADMIN_AGENT_MAP or "{}").items()
+    }
+except json.JSONDecodeError as e:
+    logger.error(f"ADMIN_AGENT_MAP is not valid JSON: {e}")
+    ADMIN_AGENT_MAP = {}
+
+
+def require_agent_access(user_email: str | None, agent_name: str) -> None:
+    """Reject if the caller's email is not authorised for this agent.
+
+    A user with ["*"] is treated as super-admin (access to every agent).
+    """
+    if not user_email:
+        raise HTTPException(status_code=401, detail="Missing user_email.")
+    allowed = ADMIN_AGENT_MAP.get(user_email.lower(), [])
+    if "*" in allowed or agent_name in allowed:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail=f"User '{user_email}' is not authorised to ingest into agent '{agent_name}'.",
+    )
 
 
 class UrlIngestRequest(BaseModel):
@@ -36,12 +65,14 @@ class UrlIngestRequest(BaseModel):
     max_pages: int = 200
     max_depth: int = 3
 
+    user_email: str | None = None
 
 class OneDriveIngestRequest(BaseModel):
     folder_id: str
     token: str
     agent_name: str
     force: bool = False
+    user_email: str | None = None
 
 
 class TestLeaveBalanceRequest(BaseModel):
@@ -333,6 +364,8 @@ async def ingest_url(request: UrlIngestRequest):
       "max_depth": 3
     }
     """
+    require_agent_access(request.user_email, request.agent_name)
+
     current = ingestion_status.get_status()
 
     if current.get("active"):
@@ -396,6 +429,8 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
     Ingest PDFs, Word docs, PowerPoint and Excel files from a OneDrive folder
     using the Graph API. Runs in the background; poll /ingestion-status for completion.
     """
+    require_agent_access(request.user_email, request.agent_name)
+
     current = ingestion_status.get_status()
 
     if current.get("active"):
@@ -406,14 +441,26 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
 
     ingestion_status.start(agent_name=request.agent_name, source="onedrive")
 
+    # Route askhrslm to the SLM ingestion service (Ollama embeddings, 768d
+    # collection). All other agents use the default OpenAI/Gemini pipeline.
+    if request.agent_name == "askhrslm":
+        coro = slm_ingestion_service.process_onedrive_ingestion(
+            folder_id=request.folder_id,
+            access_token=request.token,
+            agent_name=request.agent_name,
+            force=request.force,
+        )
+    else:
+        coro = ingestion_service.process_onedrive_ingestion(
+            folder_id=request.folder_id,
+            access_token=request.token,
+            agent_name=request.agent_name,
+            force=request.force,
+        )
+
     asyncio.create_task(
         _run_ingestion_task(
-            ingestion_service.process_onedrive_ingestion(
-                folder_id=request.folder_id,
-                access_token=request.token,
-                agent_name=request.agent_name,
-                force=request.force,
-            ),
+            coro,
             label=f"OneDrive agent='{request.agent_name}' folder='{request.folder_id}'",
         )
     )
