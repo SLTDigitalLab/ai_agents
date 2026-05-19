@@ -10,6 +10,7 @@ import AdminDashboard from './components/admin/AdminDashboard';
 import IngestionPanel from './components/admin/IngestionPanel';
 import FeedbackPanel from './components/admin/FeedbackPanel';
 import AdminRoute from './components/admin/AdminRoute';
+import IframeChatPage from './components/admin/IframeChatPage';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 
@@ -184,7 +185,6 @@ const AgentWrapper = () => {
             className="flex-1 flex flex-col items-center justify-center px-4 z-10 -mt-6"
           >
 
-
             {/* Title */}
             <motion.h1
               variants={itemVariants}
@@ -342,12 +342,16 @@ function App() {
             </div>
           } />
 
+          {/* Public iframe routes for embedding Ask LifeStore and Ask Enterprise */}
+          <Route path="/:agentKey/iframe" element={<IframeChatPage />} />
+
           <Route element={<AdminRoute />}>
             <Route path="/admin" element={<AdminDashboard />} />
             <Route path="/admin/chats" element={<ChatBrowser />} />
             <Route path="/admin/ingestion" element={<IngestionPanel />} />
             <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
+
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
       </BrowserRouter>
