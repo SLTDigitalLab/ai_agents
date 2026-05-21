@@ -99,8 +99,11 @@ const getInitials = (name) => {
   return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
 };
 
-// ── User Avatar + Popover Menu (sits at bottom of sidebar) ─────────────
-const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
+// ── User Avatar + Popover Menu ─────────────────────────────────────────
+// `placement` controls where the popover opens relative to the avatar.
+//   "upRight"   → opens above-right (sidebar/desktop default).
+//   "downLeft"  → opens below-left (mobile top-right header).
+const UserAvatarMenu = ({ user, onLogout, agentColor, placement = 'upRight' }) => {
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const menuRef = useRef(null);
@@ -121,16 +124,22 @@ const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
     };
   }, [open]);
 
+  const popoverPositionClass = placement === 'downLeft'
+    ? 'top-full right-0 mt-2'
+    : 'bottom-0 left-full ml-3';
+  const popoverInitialX = placement === 'downLeft' ? 0 : -8;
+  const popoverInitialY = placement === 'downLeft' ? -8 : 0;
+
   return (
     <div ref={menuRef} className="relative">
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, x: -8, scale: 0.96 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: -8, scale: 0.96 }}
+            initial={{ opacity: 0, x: popoverInitialX, y: popoverInitialY, scale: 0.96 }}
+            animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+            exit={{ opacity: 0, x: popoverInitialX, y: popoverInitialY, scale: 0.96 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="absolute bottom-0 left-full ml-3 w-64 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.18)] dark:shadow-[0_20px_50px_-15px_rgba(0,0,0,0.6)] overflow-hidden"
+            className={`absolute ${popoverPositionClass} w-64 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.18)] dark:shadow-[0_20px_50px_-15px_rgba(0,0,0,0.6)] overflow-hidden z-40`}
           >
             {/* Identity header */}
             <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center gap-3">
@@ -206,9 +215,9 @@ const UserAvatarMenu = ({ user, onLogout, agentColor }) => {
   );
 };
 
-// ── Left Sidebar Rail ──────────────────────────────────────────────────
+// ── Left Sidebar Rail (hidden on mobile) ──────────────────────────────
 const SidebarRail = ({ onNewChat, user, onLogout, agentColor }) => (
-  <aside className="w-16 sm:w-[68px] shrink-0 flex flex-col items-center py-4 bg-white dark:bg-[#23272e] border-r border-gray-200/70 dark:border-[#33373f] z-30">
+  <aside className="hidden sm:flex w-16 sm:w-[68px] shrink-0 flex-col items-center py-4 bg-white dark:bg-[#23272e] border-r border-gray-200/70 dark:border-[#33373f] z-30">
     <motion.button
       type="button"
       onClick={onNewChat}
@@ -305,19 +314,56 @@ const AgentWrapper = () => {
       </AuthenticatedTemplate>
 
       {/* ── Main Column ───────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-h-0 relative">
+      <div className="flex-1 flex flex-col min-h-0 min-w-0 relative">
 
       {/* ── Top Bar ────────────────────────────────────── */}
       <motion.header
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-20 flex justify-between items-center px-10 sm:px-14 py-4"
+        className="relative z-20 flex items-center gap-2 sm:gap-4 px-3 sm:px-14 py-3 sm:py-4"
       >
-        <h1 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100 tracking-tight">
-          {agentConfig.title.replace(/^ASK /i, 'Ask ')}
-        </h1>
-        <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-8 w-auto" />
+        {/* Mobile-only: new chat button (sidebar is hidden below sm) */}
+        <AuthenticatedTemplate>
+          <motion.button
+            type="button"
+            onClick={() => chatRef.current?.clearChat()}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            title="New chat"
+            className="sm:hidden flex items-center justify-center w-9 h-9 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 shrink-0"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+              <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
+              <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
+            </svg>
+          </motion.button>
+        </AuthenticatedTemplate>
+
+        {/* Title + subtitle */}
+        <div className="min-w-0 flex-1 flex flex-col">
+          <h1 className="text-lg sm:text-xl font-bold text-gray-950 dark:text-gray-100 tracking-tight leading-tight truncate">
+            {agentConfig.title.replace(/^ASK /i, 'Ask ')}
+          </h1>
+          <AuthenticatedTemplate>
+            <p
+              className="text-[11px] sm:text-[13px] text-gray-500 font-light truncate max-w-full sm:max-w-[640px] leading-snug mt-0.5"
+              title={agentConfig.subtitle}
+            >
+              {agentConfig.subtitle}
+            </p>
+          </AuthenticatedTemplate>
+        </div>
+
+        {/* Right cluster: SLT logo + mobile avatar */}
+        <div className="flex items-center gap-2 sm:gap-0 shrink-0">
+          <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-10 w-auto drop-shadow-sm" />
+          <AuthenticatedTemplate>
+            <div className="sm:hidden">
+              <UserAvatarMenu user={user} onLogout={handleLogout} agentColor={agentConfig.color} placement="downLeft" />
+            </div>
+          </AuthenticatedTemplate>
+        </div>
       </motion.header>
 
       {/* ── Content Area ───────────────────────────────── */}
@@ -339,16 +385,9 @@ const AgentWrapper = () => {
               {agentConfig.title.replace(/^ASK /i, 'Ask ')}
             </motion.h1>
 
-            <motion.p
-              variants={itemVariants}
-              className="text-gray-500 text-base sm:text-lg max-w-2xl mx-auto font-light text-center mt-3 mb-8"
-            >
-              {agentConfig.subtitle}
-            </motion.p>
-
             <motion.div
               variants={cardVariants}
-              className="relative w-full max-w-md mt-4"
+              className="relative w-full max-w-md mt-8"
             >
               <div className={`absolute -inset-1 blur-2xl opacity-20 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 pointer-events-none`} />
               <div className="relative bg-white w-full rounded-3xl p-8 sm:p-10 flex flex-col items-center justify-center border border-gray-200/80 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.12)]">
