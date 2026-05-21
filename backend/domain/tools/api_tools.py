@@ -27,23 +27,12 @@ def _extract_sid_from_email(email: str) -> str | None:
     return match.group(1) if match else None
 
 
-@tool
-def get_employee_leave_balance(
-    user_id: Annotated[str, InjectedState("user_id")],
-) -> str:
-    """Look up the authenticated employee's remaining leave balance.
+def fetch_leave_balance_for_user(user_id: str) -> str:
+    """Plain-function leave balance lookup, callable without LangChain tooling.
 
-    This tool is automatically called when an employee asks about their
-    personal leave data (annual leave, casual leave, sick leave, etc.).
-
-    Args:
-        user_id: Injected from the agent state — hidden from the LLM schema.
-                 Expected to be the employee's email address.
-
-    Returns:
-        A human-readable summary of the employee's leave balance.
+    Used by both the @tool wrapper (for tool-calling agents) and the SLM
+    agent (which routes by intent classification instead of tool-calling).
     """
-    # Extract the numeric SID from the email / user_id
     sid = _extract_sid_from_email(user_id)
     if not sid:
         return (
@@ -65,7 +54,6 @@ def get_employee_leave_balance(
 
         data = response.json()
 
-        # Parse the nested response: data[0].data[]
         data_list = data.get("data", [])
         if not data_list:
             return f"No leave records found for Service ID {sid}. Please contact HR."
@@ -74,14 +62,13 @@ def get_employee_leave_balance(
         if not leave_entries:
             return f"No leave records found for Service ID {sid}. Please contact HR."
 
-        # Build a readable summary from the leave entries
-        lines = [f"Leave balance for Employee {sid}:\n"]
+        lines = [f"**Leave balance for Employee {sid}:**", ""]
         for entry in leave_entries:
-            plan = entry.get("Leave_Plan", "Unknown")
+            plan = str(entry.get("Leave_Plan", "Unknown")).title()
             entitlement = entry.get("Entitlement", 0)
             balance = entry.get("Current_Balance", 0)
             lines.append(
-                f"• {plan}: {balance} days remaining (out of {entitlement} entitled)"
+                f"- **{plan}** — {balance} days remaining (out of {entitlement} entitled)"
             )
 
         return "\n".join(lines)
@@ -95,3 +82,22 @@ def get_employee_leave_balance(
     except Exception as exc:
         logger.error(f"Error fetching leave balance: {exc}")
         return "An error occurred while fetching your leave balance. Please try again later."
+
+
+@tool
+def get_employee_leave_balance(
+    user_id: Annotated[str, InjectedState("user_id")],
+) -> str:
+    """Look up the authenticated employee's remaining leave balance.
+
+    This tool is automatically called when an employee asks about their
+    personal leave data (annual leave, casual leave, sick leave, etc.).
+
+    Args:
+        user_id: Injected from the agent state — hidden from the LLM schema.
+                 Expected to be the employee's email address.
+
+    Returns:
+        A human-readable summary of the employee's leave balance.
+    """
+    return fetch_leave_balance_for_user(user_id)

@@ -1,13 +1,13 @@
-# Ask SLT - SLTMobitel AI Assistants
+# Workmate AI — SLTMobitel AI Assistants
 
-**Ask SLT** is a suite of AI-powered enterprise assistants designed for SLTMobitel employees. It provides 6 specialized AI agents for different departments, each capable of knowledge-base search, live API calls, or generative UI forms depending on its archetype.
+**Workmate AI** is a suite of AI-powered enterprise assistants designed for SLTMobitel employees. The platform is centered around a unified **Workmate AI** supervisor that intelligently routes queries to 8 specialist agents covering HR, Finance, Admin, IT, CIA, Process, Enterprise, and Lifestore — each with its own knowledge base, tools, and archetype.
 
 ## Architecture
 
-The project is a full-stack application orchestrated with Docker Compose.
+Full-stack application orchestrated with Docker Compose.
 
-| Service | Tech | Port |
-|---------|------|------|
+| Service | Tech | Port (dev) |
+|---------|------|-----------|
 | **Frontend** | React 19, Vite, TailwindCSS, Framer Motion | 3000 |
 | **Backend** | FastAPI, LangChain, LangGraph | 8000 |
 | **PostgreSQL** | pgvector (ankane/pgvector) | 5433 |
@@ -18,45 +18,61 @@ The project is a full-stack application orchestrated with Docker Compose.
 ```
 User Message (React)
   -> POST /api/v1/chat (FastAPI)
-  -> Guardrail classification (sequential, gpt-4.1-nano)
-  -> LangGraph agent graph (archetype-specific)
-  -> Tools: Qdrant RAG / SQL API / Form state
+  -> Guardrail classification (intent + sentiment, gpt-4.1-nano)
+  -> LangGraph agent graph (supervisor or archetype-specific)
+     -> Supervisor: vector-similarity routing to specialist
+     -> Specialist: Qdrant RAG / SQL API / Form state / SLM
   -> StreamingResponse (token-by-token)
   -> Frontend renders with source citations & feedback buttons
 ```
 
 ### Agents
 
-| Agent | ID | Archetype | Capabilities |
-|-------|----|-----------|--------------|
-| Ask HR | `hr` | KB + API | RAG search + live ERP API (e.g., leave balance) |
-| Ask Finance | `finance` | KB Only | RAG search over finance documents |
-| Ask Admin | `admin` | KB Only | RAG search over admin documents |
-| Ask Process | `process` | KB Only | RAG search over process documents |
+| Agent | Route Key | Archetype | Capabilities |
+|-------|-----------|-----------|--------------|
+| **Workmate AI** | `supervisor` | Supervisor | Routes queries to any specialist; answers general/platform questions directly |
+| Ask HR | `hr` | KB + API | RAG over HR docs + live ERP API (leave balance) |
+| Ask Finance | `finance` | KB Only | RAG over finance documents |
+| Ask Admin | `admin` | KB Only | RAG over admin documents |
+| Ask IT | `it` | KB Only | RAG over IT support documents |
+| Ask CIA | `cia` | KB Only | RAG over internal audit / compliance documents |
+| Ask Process | `process` | KB Only | RAG over SOP / process documents |
 | Ask Enterprise | `enterprise` | KB + Form | RAG + generative UI lead capture form (Bitrix24 CRM) |
 | Ask Lifestore | `lifestore` | KB + Form | RAG + generative UI order form (email notification) |
+| Ask HR SLM *(demo)* | `askhrslm` | KB + SLM | On-prem inference via Ollama (DeepSeek-R1 1.5B) |
 
-### Three Agent Archetypes (`backend/domain/archetypes/`)
+### Five Agent Archetypes (`backend/domain/archetypes/`)
 
-1. **KB Only** (`kb_agent.py`) - LLM decides to search the knowledge base or answer directly
-2. **KB + API** (`kb_api_agent.py`) - LLM supervisor chooses between RAG and live API calls
-3. **KB + Form** (`kb_form_agent.py`) - LLM triggers frontend forms via special tokens (`[RENDER_*_FORM]`)
+1. **Supervisor** (`supervisor_agent.py`) — Vector-similarity routing with keyword boosts, follow-up stickiness, and multi-agent delegation. Answers general/help questions directly.
+2. **KB Only** (`kb_agent.py`) — LLM decides to search the knowledge base or answer directly.
+3. **KB + API** (`kb_api_agent.py`) — LLM supervisor chooses between RAG and live API calls.
+4. **KB + Form** (`kb_form_agent.py`) — LLM triggers frontend forms via special tokens (`[RENDER_*_FORM]`).
+5. **KB + SLM** (`kb_slm_agent.py`) — KB-only agent powered by an internal on-premises Ollama model.
+
+Routing profiles and thresholds for the supervisor live in `backend/domain/config/supervisor_routing.py`.
+
+---
 
 ## Features
 
-- **Multi-Agent Architecture** - 6 dedicated agents with domain-specific knowledge bases and tools
-- **Streaming Responses** - Token-by-token streaming from LangGraph to the frontend
-- **RAG Pipeline** - Document ingestion (PDF, DOCX, PPTX, XLSX, URLs, OneDrive) into per-agent Qdrant collections
-- **Guardrails** - Sequential intent/sentiment classification using a lightweight model to filter off-topic or sensitive queries
-- **Generative UI Forms** - Enterprise and Lifestore agents emit tokens that render interactive forms in the frontend
-- **Feedback System** - Thumbs-up/down ratings on bot responses, stored in PostgreSQL
-- **Admin Dashboard** - Session analytics, conversation browser, feedback panel, and document ingestion UI
-- **Source Citations** - Bot responses display source document references as clickable badges
-- **Persistent Chat History** - Per-agent PostgreSQL schemas via LangGraph checkpointing; users can resume conversations
-- **Authentication** - Azure AD / Microsoft Entra ID via MSAL
-- **CRM Integration** - Enterprise leads pushed to Bitrix24 via webhook
-- **Order Notifications** - Lifestore orders sent via Gmail SMTP (FastAPI-Mail)
-- **Observability** - Optional LangSmith tracing integration
+- **Workmate AI Supervisor** — Single entry point that routes any workplace question to the right specialist using embedding-based similarity and keyword matching
+- **Multi-Agent Architecture** — 8 specialist agents with domain-specific knowledge bases and tools
+- **Streaming Responses** — Token-by-token streaming from LangGraph to the frontend
+- **RAG Pipeline** — Document ingestion (PDF, DOCX, PPTX, XLSX, URLs, OneDrive) into per-agent Qdrant collections
+- **Guardrails** — Intent + sentiment classification using a lightweight model to filter off-topic or sensitive queries
+- **Generative UI Forms** — Enterprise and Lifestore agents emit tokens that render interactive forms in the frontend
+- **Feedback System** — Thumbs-up/down ratings on bot responses, stored in PostgreSQL
+- **Admin Dashboard** — Session analytics, conversation browser, feedback panel, and document ingestion UI
+- **Source Citations** — Bot responses display source document references as clickable badges
+- **Persistent Chat History** — Per-agent PostgreSQL schemas via LangGraph checkpointing; users can resume conversations
+- **Authentication** — Azure AD / Microsoft Entra ID via MSAL
+- **CRM Integration** — Enterprise leads pushed to Bitrix24 via webhook
+- **Order Notifications** — Lifestore orders sent via Gmail SMTP (FastAPI-Mail)
+- **On-Prem SLM** — Optional Ollama-backed agent (DeepSeek-R1 1.5B) for zero-external-API inference
+- **Iframe Embed** — Lifestore and Enterprise agents can be embedded as iframes in external pages
+- **Observability** — Optional LangSmith tracing integration
+
+---
 
 ## API Routes
 
@@ -69,14 +85,17 @@ User Message (React)
 | `/api/v1/feedback/{agent_id}/{thread_id}` | GET | Get feedback for a conversation |
 | `/api/v1/admin/dashboard/stats` | GET | Session statistics |
 | `/api/v1/admin/dashboard/sessions` | GET | Paginated session list with search |
-| `/api/v1/admin/dashboard/sessions/{agent}/{session_id}` | GET | Conversation detail for a session |
+| `/api/v1/admin/dashboard/sessions/{agent}/{session_id}` | GET | Full conversation for a session |
 | `/api/v1/admin/dashboard/feedback` | GET | Feedback analytics |
 | `/api/v1/admin/ingest-url` | POST | Ingest a website URL into an agent's knowledge base |
 | `/api/v1/admin/ingest-onedrive` | POST | Ingest files from a OneDrive folder |
+| `/api/v1/admin/ingestion-status` | GET | Poll the status of a running ingestion job |
 | `/api/v1/admin/test-leave-balance` | POST | Test the HR leave balance API |
 | `/api/v1/enterprise/lead` | POST | Submit an enterprise lead to Bitrix24 CRM |
 | `/api/v1/enterprise/test-webhook` | POST | Test the Bitrix24 webhook connection |
 | `/api/v1/orders/submit` | POST | Submit a Lifestore order (sends email) |
+| `/api/v1/finance/retrieve` | POST | External Finance KB retrieval (voice assistant, API key required) |
+| `/api/v1/kb/{agent_id}/retrieve` | POST | Generic per-agent KB retrieval (dev use, API key required) |
 
 ---
 
@@ -99,42 +118,75 @@ cd ai_agents
 Create a `.env` file in the root directory. Docker Compose mounts it to both frontend and backend containers.
 
 ```env
-# LLM
-LLM_PROVIDER=openai          # or gemini
+# ── LLM ──────────────────────────────────────────────────────────────────
+LLM_PROVIDER=openai           # openai | gemini
 LLM_MODEL=gpt-4o
 OPENAI_API_KEY=your_key
 GOOGLE_API_KEY=your_key       # if using Gemini
 
-# Embeddings
+# ── Embeddings ────────────────────────────────────────────────────────────
 EMBEDDING_PROVIDER=openai
 EMBEDDING_MODEL=text-embedding-3-large
 EMBEDDING_DIMENSIONS=3072
 
-# Guardrails
+# ── Supervisor Routing Embeddings (cosine similarity over short text) ─────
+ROUTING_EMBEDDING_PROVIDER=openai
+ROUTING_EMBEDDING_MODEL=text-embedding-3-small
+ROUTING_EMBEDDING_API_KEY=your_key   # falls back to OPENAI_API_KEY
+
+# ── Guardrails ────────────────────────────────────────────────────────────
 GUARDRAIL_PROVIDER=openai
 GUARDRAIL_MODEL=gpt-4.1-nano
+GUARDRAIL_API_KEY=your_key           # falls back to provider key
 
-# Databases
+# ── Databases ─────────────────────────────────────────────────────────────
 POSTGRES_URL=postgresql://slt:slt123@db_postgres:5432/slt_db
 QDRANT_URL=http://db_qdrant:6333
 
-# Frontend
+# ── Frontend ──────────────────────────────────────────────────────────────
 VITE_API_URL=http://localhost:8000
 VITE_MSAL_CLIENT_ID=your_azure_client_id
 VITE_MSAL_AUTHORITY=https://login.microsoftonline.com/your_tenant_id
 VITE_ADMIN_EMAILS=admin1@slt.com.lk,admin2@slt.com.lk
 
-# Microsoft Graph (OneDrive ingestion)
+# ── Microsoft Graph (OneDrive ingestion) ──────────────────────────────────
 MS_CLIENT_ID=your_client_id
 MS_CLIENT_SECRET=your_client_secret
 MS_TENANT_ID=your_tenant_id
 
-# Integrations
+# ── Integrations ──────────────────────────────────────────────────────────
 BITRIX24_WEBHOOK_URL=your_bitrix_webhook
 MAIL_USERNAME=your_gmail
 MAIL_PASSWORD=your_app_password
+MAIL_FROM=your_gmail
 
-# Observability (optional)
+# ── Admin access control ──────────────────────────────────────────────────
+# JSON map: email -> list of agent_ids they may ingest into (["*"] = all agents)
+ADMIN_AGENT_MAP={"hr.admin@slt.com.lk":["hr"],"super@slt.com.lk":["*"]}
+
+# ── On-prem SLM (Ollama — optional, for Ask HR SLM demo only) ─────────────
+SLM_BASE_URL=http://localhost:11434
+SLM_EMBEDDING_BASE_URL=http://localhost:11434
+SLM_MODEL=deepseek-r1:1.5b
+SLM_EMBEDDING_MODEL=nomic-embed-text
+SLM_EMBEDDING_DIMENSIONS=768
+
+# ── External KB retrieval API keys (optional) ─────────────────────────────
+VOICE_ASSISTANT_API_KEY=your_key      # Finance /retrieve endpoint
+DEV_KB_API_KEY=your_key               # Generic /kb/{agent_id}/retrieve endpoint
+KB_RETRIEVAL_ALLOWLIST=finance,hr     # Comma-separated agent_ids to expose
+
+# Remote KB proxy (dev only — query prod vectors without local ingestion)
+KB_REMOTE_URL=https://aiagents.sltdigitallab.lk
+KB_REMOTE_API_KEY=your_key
+
+# ── Graph DB (optional) ───────────────────────────────────────────────────
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your_password
+NEO4J_DATABASE=neo4j
+
+# ── Observability (optional) ──────────────────────────────────────────────
 LANGCHAIN_TRACING_V2=true
 LANGCHAIN_API_KEY=your_langsmith_key
 ```
@@ -150,7 +202,7 @@ docker-compose up --build -d
 | Service | URL |
 |---------|-----|
 | Frontend | [http://localhost:3000](http://localhost:3000) |
-| API Docs (Swagger) | [http://localhost:8000/docs](http://localhost:8000/docs) |
+| API Docs (Swagger) | [http://localhost:8000/api/docs](http://localhost:8000/api/docs) |
 | Qdrant Dashboard | [http://localhost:6333/dashboard](http://localhost:6333/dashboard) |
 
 ### 5. Stopping the Application
@@ -160,9 +212,24 @@ docker-compose down          # Keep database data
 docker-compose down -v       # Wipe database volumes
 ```
 
+---
+
+## Production Deployment
+
+Use `docker-compose.prod.yml` for production. Key differences from the dev compose:
+- Database ports are **not** exposed to the host — only reachable within the Docker network.
+- Backend binds to `127.0.0.1:8100` and frontend to `127.0.0.1:3100`; Nginx proxies both.
+- Named Docker volumes (`pgdata`, `qdrantdata`) replace bind-mounted `./data/` folders.
+
+```bash
+docker-compose -f docker-compose.prod.yml up --build -d
+```
+
+---
+
 ## Development (without Docker)
 
-You still need the databases running:
+Start only the databases:
 
 ```bash
 docker-compose up -d db_postgres db_qdrant
@@ -184,32 +251,60 @@ npm install
 npm run dev
 ```
 
+---
+
 ## Project Structure
 
 ```
 ├── backend/
-│   ├── core/               # Config, LLM factory, checkpointer
+│   ├── core/
+│   │   ├── config.py           # Pydantic settings (env vars)
+│   │   ├── llm.py              # LLM / embedding factory (cloud)
+│   │   ├── llm_slm.py          # LLM / embedding factory (Ollama SLM)
+│   │   └── checkpointer.py     # LangGraph PostgresSaver setup
 │   ├── domain/
-│   │   ├── archetypes/     # KB-only, KB+API, KB+Form agent builders
-│   │   ├── registry.py     # Agent ID -> archetype mapping
-│   │   ├── guardrails.py   # Intent & sentiment classification
-│   │   └── state.py        # LangGraph AgentState TypedDict
-│   ├── routers/            # FastAPI route handlers
-│   ├── schemas/            # Pydantic models
-│   ├── services/           # Ingestion, tools, external integrations
-│   └── main.py             # App entrypoint
+│   │   ├── archetypes/
+│   │   │   ├── supervisor_agent.py   # Workmate AI — routes to specialists
+│   │   │   ├── kb_agent.py           # Archetype 1: KB Only
+│   │   │   ├── kb_api_agent.py       # Archetype 2: KB + API
+│   │   │   ├── kb_form_agent.py      # Archetype 3: KB + Form
+│   │   │   └── kb_slm_agent.py       # Archetype 4: KB + On-prem SLM
+│   │   ├── config/
+│   │   │   └── supervisor_routing.py # Routing profiles, thresholds, keywords
+│   │   ├── tools/
+│   │   │   ├── rag_tools.py          # Qdrant search (cloud embeddings)
+│   │   │   ├── rag_tools_slm.py      # Qdrant search (Ollama embeddings)
+│   │   │   ├── api_tools.py          # SQL / external API calls (HR ERP)
+│   │   │   └── neo4j_tools.py        # Graph DB queries (optional)
+│   │   ├── registry.py         # agent_id → archetype builder mapping
+│   │   ├── guardrails.py       # Intent & sentiment classification
+│   │   └── state.py            # LangGraph AgentState TypedDict
+│   ├── routers/                # FastAPI route handlers
+│   ├── schemas/                # Pydantic models
+│   ├── services/               # Ingestion, ingestion status, external integrations
+│   └── main.py                 # App entrypoint
 ├── frontend/
 │   └── src/
 │       ├── components/
 │       │   ├── ChatInterface.jsx
-│       │   ├── admin/      # Dashboard, ChatBrowser, FeedbackPanel, IngestionPanel
-│       │   └── forms/      # LifestoreForm, EnterpriseForm
-│       ├── config/agents.js
-│       └── authConfig.js
-├── docker-compose.yml
+│       │   ├── admin/
+│       │   │   ├── AdminDashboard.jsx
+│       │   │   ├── AdminRoute.jsx
+│       │   │   ├── ChatBrowser.jsx
+│       │   │   ├── FeedbackPanel.jsx
+│       │   │   ├── IngestionPanel.jsx
+│       │   │   └── IframeChatPage.jsx  # Embeddable iframe view
+│       │   └── forms/
+│       │       ├── LifestoreForm.jsx
+│       │       └── EnterpriseForm.jsx
+│       ├── config/agents.js    # Agent metadata (title, colors, disclaimers)
+│       └── authConfig.js       # MSAL / Azure AD config
+├── nginx/                      # Nginx reverse-proxy config (prod)
+├── docker-compose.yml          # Development compose
+├── docker-compose.prod.yml     # Production compose
 └── .env
 ```
 
 ---
 
-*Developed by SLT Digital Lab*
+*Developed by SLT Digital Lab — production deployment at [aiagents.sltdigitallab.lk](https://aiagents.sltdigitallab.lk)*
