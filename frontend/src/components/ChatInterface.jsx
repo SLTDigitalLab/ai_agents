@@ -15,6 +15,109 @@ const FORM_TOKENS = {
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
 };
 
+const EVIDENCE_OPEN = '[[EVIDENCE_JSON]]';
+const EVIDENCE_CLOSE = '[[/EVIDENCE_JSON]]';
+
+const maskPII = (text = '') => {
+    return text
+        // Email addresses
+        .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[EMAIL]')
+
+        // Sri Lankan mobile numbers: +947XXXXXXXX / 947XXXXXXXX / 07XXXXXXXX
+        .replace(/\b(?:\+?94|0)?7\d{8}\b/g, '[PHONE]')
+
+        // Sri Lankan NIC: old 123456789V / new 12 digits
+        .replace(/\b(?:\d{9}[VXvx]|\d{12})\b/g, '[NIC]')
+
+        // Credit/debit-card-like long numbers
+        .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[CARD_NUMBER]')
+
+        // Common API keys / JWT / bearer-token-like secrets
+        .replace(
+            /\b(?:bearer\s+)?(eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,})\b/gi,
+            '[SECRET]'
+        );
+};
+
+const parseEvidencePayload = (text = '') => {
+    const openIndex = text.indexOf(EVIDENCE_OPEN);
+
+    if (openIndex === -1) {
+        return { text, evidence: null };
+    }
+
+    const closeIndex = text.indexOf(EVIDENCE_CLOSE, openIndex + EVIDENCE_OPEN.length);
+
+    // If evidence JSON is still streaming, hide the partial block from UI
+    if (closeIndex === -1) {
+        return {
+            text: text.slice(0, openIndex).trimEnd(),
+            evidence: null,
+        };
+    }
+
+    const before = text.slice(0, openIndex);
+    const jsonText = text.slice(openIndex + EVIDENCE_OPEN.length, closeIndex);
+    const after = text.slice(closeIndex + EVIDENCE_CLOSE.length);
+
+    try {
+        const payload = JSON.parse(jsonText);
+        const evidence = Array.isArray(payload?.items) ? payload.items : [];
+
+        return {
+            text: `${before}${after}`.trimEnd(),
+            evidence,
+        };
+    } catch (error) {
+        console.error('Failed to parse evidence payload:', error);
+        return {
+            text: `${before}${after}`.trimEnd(),
+            evidence: null,
+        };
+    }
+};
+
+const resolveEvidenceUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+
+    const normalizedPath = url.startsWith('/') ? url : `/${url}`;
+    return `${API_URL}${normalizedPath}`;
+};
+
+const ImagePreviewModal = ({ image, onClose }) => {
+    if (!image) return null;
+
+    return (
+        <div
+            className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={onClose}
+        >
+            <button
+                type="button"
+                onClick={onClose}
+                className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 text-gray-700 text-2xl leading-none shadow-lg hover:bg-white"
+                aria-label="Close image preview"
+            >
+                ×
+            </button>
+
+            <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="max-w-[95vw] max-h-[92vh]"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <img
+                    src={image.url}
+                    alt={image.alt || 'Evidence preview'}
+                    className="max-w-[95vw] max-h-[92vh] object-contain rounded-2xl bg-white shadow-2xl"
+                />
+            </motion.div>
+        </div>
+    );
+};
+
 // Strip unmatched ** bold markers so stray asterisks don't render literally.
 const sanitizeMarkdownBold = (text) => {
   if (!text) return text;
@@ -73,6 +176,147 @@ const SourcesSection = ({ sources, color }) => {
             <div className="flex flex-wrap gap-2">
                 {sources.map((src, i) => (
                     <SourceBadge key={i} name={src.name} url={src.url} color={color} />
+                ))}
+            </div>
+        </motion.div>
+    );
+};
+
+const EvidenceImageCard = ({ item, onImageClick }) => {
+    const imageUrl = resolveEvidenceUrl(item.url);
+    const imageAlt = item.title || item.source || 'Evidence image';
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
+        >
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
+                <p className="text-xs font-bold text-gray-700">
+                    {item.title || 'Image reference'}
+                </p>
+                <p className="text-[0.68rem] text-gray-400 mt-0.5">
+                    {item.source}
+                    {item.page ? ` — Page ${item.page}` : ''}
+                </p>
+            </div>
+
+            <div className="p-3 bg-white">
+                <button
+                    type="button"
+                    onClick={() => onImageClick?.({ url: imageUrl, alt: imageAlt })}
+                    className="block w-full cursor-zoom-in"
+                    title="Click to preview image"
+                >
+                    <img
+                        src={imageUrl}
+                        alt={imageAlt}
+                        className="w-full max-h-[420px] object-contain rounded-xl border border-gray-100 bg-gray-50"
+                        loading="lazy"
+                    />
+                </button>
+            </div>
+
+            {item.link && item.link !== '#' && (
+                <div className="px-4 pb-3">
+                    <a
+                        href={item.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-semibold text-blue-500 hover:underline"
+                    >
+                        Open original source
+                    </a>
+                </div>
+            )}
+        </motion.div>
+    );
+};
+
+const EvidenceTableCard = ({ item }) => (
+    <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
+    >
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
+            <p className="text-xs font-bold text-gray-700">
+                {item.title || 'Table reference'}
+            </p>
+            <p className="text-[0.68rem] text-gray-400 mt-0.5">
+                {item.source}
+                {item.page ? ` — Page ${item.page}` : ''}
+            </p>
+        </div>
+
+        <div className="p-3 max-h-[420px] overflow-auto">
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                    table: ({ node, ...props }) => (
+                        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                            <table className="w-full text-xs text-left border-collapse" {...props} />
+                        </div>
+                    ),
+                    th: ({ node, ...props }) => (
+                        <th className="bg-gray-50 px-3 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />
+                    ),
+                    td: ({ node, ...props }) => (
+                        <td className="px-3 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />
+                    ),
+                    tr: ({ node, ...props }) => (
+                        <tr className="even:bg-gray-50/50" {...props} />
+                    ),
+                    p: ({ node, ...props }) => (
+                        <p className="whitespace-pre-wrap text-xs text-gray-600 mb-0" {...props} />
+                    ),
+                }}
+            >
+                {item.content || ''}
+            </ReactMarkdown>
+        </div>
+
+        {item.link && item.link !== '#' && (
+            <div className="px-4 pb-3">
+                <a
+                    href={item.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-blue-500 hover:underline"
+                >
+                    Open original source
+                </a>
+            </div>
+        )}
+    </motion.div>
+);
+
+const EvidenceSection = ({ evidence, color, onImageClick }) => {
+    const items = Array.isArray(evidence)
+        ? evidence.filter(item => item?.type === 'image' || item?.type === 'table')
+        : [];
+
+    if (items.length === 0) return null;
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 pt-3 border-t border-gray-100/60"
+        >
+            <div className="flex items-center gap-2 mb-2.5">
+                <div className={`w-1 h-3.5 rounded-full bg-gradient-to-b ${color}`} />
+                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400">
+                    Relevant Evidence
+                </span>
+            </div>
+
+            <div className="space-y-3">
+                {items.map((item, i) => (
+                    item.type === 'image'
+                        ? <EvidenceImageCard key={i} item={item} onImageClick={onImageClick} />
+                        : <EvidenceTableCard key={i} item={item} />
                 ))}
             </div>
         </motion.div>
@@ -175,6 +419,7 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
 const ChatInterface = ({ agentConfig }) => {
     const { accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
+    const [previewImage, setPreviewImage] = useState(null);
 
     // State for thread ID and messages
     const [threadId, setThreadId] = useState('');
@@ -234,6 +479,7 @@ const ChatInterface = ({ agentConfig }) => {
                                 type: msg.type === 'human' ? 'user' : 'bot',
                                 text,
                                 formType,
+                                evidence: [],
                             };
                         });
                         setMessages(mappedMessages);
@@ -300,8 +546,12 @@ const ChatInterface = ({ agentConfig }) => {
         e.preventDefault();
         if (!input.trim() || !threadId || isLoadingHistory) return;
 
-        // 1. Add User Message to UI
-        const userMessage = { type: 'user', text: input };
+        // 1. Add masked User Message to UI
+        const originalInput = input.trim();
+        const maskedInput = maskPII(originalInput);
+
+        const userMessage = { type: 'user', text: maskedInput };
+
         setMessages(prev => [...prev, userMessage]);
         setInput("");
         setIsLoading(true);
@@ -328,9 +578,10 @@ const ChatInterface = ({ agentConfig }) => {
             const decoder = new TextDecoder();
             let accumulatedText = "";
             let formType = null;
+            let evidenceItems = [];
 
             // Add an initial empty bot message
-            setMessages(prev => [...prev, { type: 'bot', text: "", formType: null }]);
+            setMessages(prev => [...prev, { type: 'bot', text: "", formType: null, evidence: [] }]);
             // setIsLoading(false); // REMOVED: Keep loading dots until we have content
 
             while (true) {
@@ -340,9 +591,16 @@ const ChatInterface = ({ agentConfig }) => {
                 const chunk = decoder.decode(value, { stream: true }).replace(/\r/g, '');
                 accumulatedText = appendChunkSmartly(accumulatedText, chunk);
 
+                // Detect and strip evidence metadata first
+                const parsedEvidence = parseEvidencePayload(accumulatedText);
+                let cleanText = parsedEvidence.text;
+
+                if (parsedEvidence.evidence) {
+                    evidenceItems = parsedEvidence.evidence;
+                }
+
                 // Detect and strip Generative UI trigger tokens
                 let currentFormType = null;
-                let cleanText = accumulatedText;
                 for (const [token, type] of Object.entries(FORM_TOKENS)) {
                     if (cleanText.includes(token)) {
                         currentFormType = type;
@@ -358,7 +616,8 @@ const ChatInterface = ({ agentConfig }) => {
                     newMessages[lastIdx] = {
                         ...newMessages[lastIdx],
                         text: cleanText,
-                        formType: currentFormType || newMessages[lastIdx].formType
+                        formType: currentFormType || newMessages[lastIdx].formType,
+                        evidence: evidenceItems.length > 0 ? evidenceItems : newMessages[lastIdx].evidence,
                     };
                     return newMessages;
                 });
@@ -413,7 +672,7 @@ const ChatInterface = ({ agentConfig }) => {
                                 </div>
                             )}
                             {messages.map((msg, index) => (
-                                (msg.type === 'user' || msg.text || msg.formType) && (
+                                (msg.type === 'user' || msg.text || msg.formType || (msg.evidence && msg.evidence.length > 0)) && (
                                     <motion.div
                                         key={index}
                                         initial={{ opacity: 0, y: 10 }}
@@ -428,11 +687,17 @@ const ChatInterface = ({ agentConfig }) => {
                                             }`}>
                                             <div className="prose prose-sm max-w-none text-inherit">
                                                 {(() => {
-                                                    // Logic to separate text from sources
-                                                    const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
+                                                    // Logic to separate hidden evidence metadata, answer text, and sources
+                                                    const parsedEvidence = parseEvidencePayload(msg.text || "");
+                                                    const visibleText = parsedEvidence.text || "";
+                                                    const evidence = msg.evidence?.length > 0
+                                                        ? msg.evidence
+                                                        : (parsedEvidence.evidence || []);
+
+                                                    const parts = visibleText.split(/\*{0,2}Sources:\*{0,2}/);
                                                     const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
                                                     const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
-                                                    
+
                                                     // Parse sources list: "[Name](URL), [Name](URL)"
                                                     const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
                                                     const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
@@ -471,7 +736,14 @@ const ChatInterface = ({ agentConfig }) => {
                                                                 {sanitizeMarkdownBold(mainText)}
                                                             </ReactMarkdown>
                                                             {msg.type === 'bot' && (
-                                                                <SourcesSection sources={sources} color={agentConfig.color} />
+                                                                <>
+                                                                    <EvidenceSection
+                                                                        evidence={evidence}
+                                                                        color={agentConfig.color}
+                                                                        onImageClick={setPreviewImage}
+                                                                    />
+                                                                    <SourcesSection sources={sources} color={agentConfig.color} />
+                                                                </>
                                                             )}
                                                         </>
                                                     );
@@ -523,6 +795,7 @@ const ChatInterface = ({ agentConfig }) => {
                                     type="text"
                                     value={input}
                                     onChange={(e) => setInput(e.target.value)}
+                                    maxLength={1500}
                                     placeholder={`${agentConfig.title} anything...`}
                                     className="flex-1 bg-transparent text-gray-800 placeholder:text-gray-400 text-[0.9375rem] pl-4 py-1.5 sm:py-[0.375rem] outline-none"
                                 />
@@ -549,6 +822,10 @@ const ChatInterface = ({ agentConfig }) => {
                     </div>
                 </div>
             </motion.div>
+            <ImagePreviewModal
+                image={previewImage}
+                onClose={() => setPreviewImage(null)}
+            />
         </motion.div>
     );
 };

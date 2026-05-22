@@ -2,6 +2,8 @@ import os
 import shutil
 import tempfile
 import logging
+import hashlib
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile
@@ -175,6 +177,759 @@ class IngestionService:
             languages=["eng", "sin"],
         )
         return loader.load()
+    
+    def _evidence_storage_dir(self) -> Path:
+        """Return the local directory used to store generated evidence previews."""
+        evidence_dir = Path(settings.EVIDENCE_STORAGE_DIR)
+        if not evidence_dir.is_absolute():
+            evidence_dir = Path(__file__).resolve().parent.parent / evidence_dir
+
+        evidence_dir.mkdir(parents=True, exist_ok=True)
+        return evidence_dir
+
+    def _safe_slug(self, value: str, max_len: int = 80) -> str:
+        """Create a filesystem-safe slug from a filename/title."""
+        slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-").lower()
+        return slug[:max_len] or "evidence"
+
+    def _metadata_page_number(self, metadata: dict) -> int | None:
+        """Extract page number from Unstructured metadata if available."""
+        for key in ("page_number", "page"):
+            value = metadata.get(key)
+            if value is None:
+                continue
+            try:
+                page = int(value)
+                return page if page > 0 else None
+            except Exception:
+                continue
+        return None
+    
+    def _expand_pdf_rect(self, rect, page_rect, margin: float = 8):
+        """Expand a PyMuPDF rectangle safely inside page bounds."""
+        import fitz
+
+        return fitz.Rect(
+            max(page_rect.x0, rect.x0 - margin),
+            max(page_rect.y0, rect.y0 - margin),
+            min(page_rect.x1, rect.x1 + margin),
+            min(page_rect.y1, rect.y1 + margin),
+        )
+
+    def _rect_overlap_ratio(self, a, b) -> float:
+        """Return overlap ratio against the smaller rectangle area."""
+        x0 = max(a.x0, b.x0)
+        y0 = max(a.y0, b.y0)
+        x1 = min(a.x1, b.x1)
+        y1 = min(a.y1, b.y1)
+
+        if x1 <= x0 or y1 <= y0:
+            return 0.0
+
+        intersection_area = (x1 - x0) * (y1 - y0)
+        smaller_area = min(a.width * a.height, b.width * b.height)
+
+        if smaller_area <= 0:
+            return 0.0
+
+        return intersection_area / smaller_area
+
+    def _is_reasonable_visual_rect(self, rect, page_rect) -> bool:
+        """Check whether a rectangle is likely to be a real visual/table area."""
+        page_area = page_rect.width * page_rect.height
+        rect_area = rect.width * rect.height
+
+        if rect_area <= 0:
+            return False
+
+        # Avoid tiny icons/lines.
+        if rect.width < page_rect.width * 0.12:
+            return False
+
+        if rect.height < page_rect.height * 0.045:
+            return False
+
+        # Avoid full-page crops.
+        if rect_area > page_area * 0.75:
+            return False
+
+        # Avoid document header/footer zones.
+        if rect.y0 < page_rect.height * 0.09:
+            return False
+
+        if rect.y1 > page_rect.height * 0.95:
+            return False
+
+        return True
+
+    def _cluster_pdf_rects(self, rects, page_rect, gap: float = 12):
+        """Cluster nearby drawing rectangles into larger visual/table regions."""
+        import fitz
+
+        if not rects:
+            return []
+
+        clusters = [fitz.Rect(rect) for rect in rects]
+        changed = True
+
+        while changed:
+            changed = False
+            merged_clusters = []
+            used = [False] * len(clusters)
+
+            for i, base in enumerate(clusters):
+                if used[i]:
+                    continue
+
+                current = fitz.Rect(base)
+                used[i] = True
+
+                for j in range(i + 1, len(clusters)):
+                    if used[j]:
+                        continue
+
+                    expanded_current = self._expand_pdf_rect(current, page_rect, margin=gap)
+                    expanded_other = self._expand_pdf_rect(clusters[j], page_rect, margin=gap)
+
+                    if expanded_current.intersects(expanded_other):
+                        current |= clusters[j]
+                        used[j] = True
+                        changed = True
+
+                merged_clusters.append(current)
+
+            clusters = merged_clusters
+
+        return clusters
+
+    def _dedupe_pdf_rects(self, rects, page_rect):
+        """Remove duplicate/overlapping crop candidates."""
+        cleaned = []
+
+        for rect in sorted(rects, key=lambda r: (r.y0, r.x0, -(r.width * r.height))):
+            if not self._is_reasonable_visual_rect(rect, page_rect):
+                continue
+
+            duplicate = False
+
+            for existing in cleaned:
+                if self._rect_overlap_ratio(rect, existing) >= 0.75:
+                    duplicate = True
+                    break
+
+            if not duplicate:
+                cleaned.append(rect)
+
+        return cleaned
+
+    def _caption_search_terms(self, source_doc: Document | None) -> list[str]:
+        """Build likely caption/search terms from the chunk text."""
+        text = source_doc.page_content if source_doc else ""
+        terms: list[str] = []
+
+        patterns = [
+            r"\bIllustration\s+\d+",
+            r"\bFigure\s+\d+",
+            r"\bTable\s+\d+(?:\.\d+)?",
+            r"\bTable\s+[IVXLCDM]+",
+            r"\bAnnexure\s+\d+",
+        ]
+
+        for pattern in patterns:
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                value = match.group(0).strip()
+                if value and value not in terms:
+                    terms.append(value)
+
+        for term in ["Illustration", "Figure", "Table", "Flowchart", "Diagram"]:
+            if term.lower() in text.lower() and term not in terms:
+                terms.append(term)
+
+        return terms
+
+    def _find_caption_rects(self, page, source_doc: Document | None):
+        """Find caption/title locations on the PDF page."""
+        matches = []
+
+        for term in self._caption_search_terms(source_doc):
+            try:
+                found = page.search_for(term)
+            except Exception:
+                found = []
+
+            matches.extend(found)
+
+        return sorted(matches, key=lambda r: (r.y0, r.x0))
+    
+    def _find_caption_based_table_rects(self, page, source_doc: Document | None, max_crops: int = 6):
+        """Find table crops using table captions and nearby text blocks.
+
+        This helps with borderless/text-style tables where PyMuPDF cannot
+        detect table lines or drawing rectangles.
+        """
+        import fitz
+
+        page_rect = page.rect
+        table_terms = [
+            term for term in self._caption_search_terms(source_doc)
+            if term.lower().startswith("table")
+        ]
+
+        if not table_terms:
+            return []
+
+        caption_rects = []
+        for term in table_terms:
+            try:
+                found = page.search_for(term)
+            except Exception:
+                found = []
+            caption_rects.extend(found)
+
+        caption_rects = sorted(caption_rects, key=lambda r: (r.y0, r.x0))
+        if not caption_rects:
+            return []
+
+        try:
+            raw_blocks = page.get_text("blocks")
+        except Exception:
+            raw_blocks = []
+
+        text_blocks = []
+        for block in raw_blocks:
+            if len(block) < 5:
+                continue
+
+            x0, y0, x1, y1, block_text = block[:5]
+            block_text = str(block_text or "").strip()
+            if not block_text:
+                continue
+
+            rect = fitz.Rect(x0, y0, x1, y1)
+
+            if rect.y0 < page_rect.height * 0.09:
+                continue
+            if rect.y1 > page_rect.height * 0.95:
+                continue
+
+            text_blocks.append((rect, block_text))
+
+        crops = []
+
+        for caption_rect in caption_rects:
+            related_rects = [caption_rect]
+            max_bottom = min(page_rect.y1 * 0.93, caption_rect.y1 + 190)
+
+            for block_rect, block_text in text_blocks:
+                if block_rect.y0 < caption_rect.y0 - 4:
+                    continue
+                if block_rect.y0 > max_bottom:
+                    continue
+
+                if (
+                    block_rect.y0 > caption_rect.y1 + 8
+                    and re.match(
+                        r"^\s*table\s+(\d+(\.\d+)?|[ivxlcdm]+)",
+                        block_text.lower(),
+                        flags=re.IGNORECASE,
+                    )
+                ):
+                    break
+
+                related_rects.append(block_rect)
+
+            crop_rect = fitz.Rect(related_rects[0])
+            for rect in related_rects[1:]:
+                crop_rect |= rect
+
+            crop_rect = self._expand_pdf_rect(crop_rect, page_rect, margin=10)
+
+            crop_area = crop_rect.width * crop_rect.height
+            page_area = page_rect.width * page_rect.height
+
+            if crop_area <= 0:
+                continue
+            if crop_rect.width < page_rect.width * 0.25:
+                continue
+            if crop_rect.height < page_rect.height * 0.035:
+                continue
+            if crop_area > page_area * 0.70:
+                continue
+
+            crops.append(crop_rect)
+
+        return self._dedupe_pdf_rects(crops, page_rect)[:max_crops]
+    
+    def _pdf_rect_text(self, page, rect) -> str:
+        """Extract text inside a PDF crop rectangle."""
+        try:
+            text = page.get_text("text", clip=rect) or ""
+        except Exception:
+            return ""
+
+        return text.strip()
+
+    def _is_useful_evidence_crop(self, page, rect, source_doc: Document | None = None) -> bool:
+        """Reject low-value crops such as text paragraphs, TOC/revision tables, and empty control tables."""
+        raw_text = self._pdf_rect_text(page, rect)
+        text = re.sub(r"\s+", " ", raw_text).strip().lower()
+
+        # If it has no text, it may still be a useful chart/image.
+        if not text:
+            return True
+
+        low_value_phrases = (
+            "table of content",
+            "table of contents",
+            "reference table of changes",
+            "changes made in the document",
+            "old version of the document",
+            "date changes made to document",
+            "paragraph no. where changes made",
+            "detailed description of the changes made",
+            "document preparation",
+            "controlled circulation",
+            "issue no",
+            "revision no",
+            "date of issue",
+            "date of revision",
+            "internal use only",
+            "unauthorized reproduction",
+            "page intentionally left blank",
+        )
+
+        if any(phrase in text for phrase in low_value_phrases):
+            return False
+
+        words = re.findall(r"[a-zA-Z]{2,}", text)
+        word_count = len(words)
+
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        long_lines = sum(1 for line in lines if len(line) > 90)
+
+        has_table_caption = bool(
+            re.search(r"\btable\s+(\d+(\.\d+)?|[ivxlcdm]+)\b", text, flags=re.IGNORECASE)
+        )
+        has_visual_keyword = any(
+            word in text
+            for word in (
+                "illustration",
+                "figure",
+                "diagram",
+                "chart",
+                "graph",
+                "flowchart",
+                "process flow",
+            )
+        )
+
+        # Reject paragraph-heavy crops. Real table/chart crops should be compact.
+        if word_count > 180:
+            return False
+
+        if word_count > 130 and long_lines >= 3 and not has_visual_keyword:
+            return False
+
+        # Reject normal policy section paragraphs like 3.8.4 / 3.8.5 etc.
+        section_heading_hits = len(
+            re.findall(r"\b\d+(?:\.\d+){1,}\s+[A-Za-z]", raw_text)
+        )
+        if section_heading_hits >= 2 and word_count > 80 and not has_table_caption and not has_visual_keyword:
+            return False
+
+        return True
+
+    def _find_visual_crop_rects(self, page, source_doc: Document | None, max_crops: int = 6):
+        """Find multiple likely image/chart/table crop regions on the page."""
+        import fitz
+
+        page_rect = page.rect
+        candidates = []
+
+        # 1. Embedded image blocks.
+        try:
+            page_dict = page.get_text("dict")
+            for block in page_dict.get("blocks", []):
+                if block.get("type") == 1:  # image block
+                    rect = fitz.Rect(block.get("bbox"))
+                    if self._is_reasonable_visual_rect(rect, page_rect):
+                        candidates.append(rect)
+        except Exception as e:
+            log.debug(f"Image block detection failed: {e}")
+
+                # 2. Native table detection.
+        # This catches many real PDF tables more tightly than drawing clustering.
+        try:
+            table_finder = page.find_tables()
+            tables = getattr(table_finder, "tables", table_finder)
+
+            for table in tables:
+                bbox = getattr(table, "bbox", None)
+                if not bbox:
+                    continue
+
+                rect = fitz.Rect(bbox)
+
+                if self._is_reasonable_visual_rect(rect, page_rect):
+                    candidates.append(rect)
+
+        except Exception as e:
+            log.debug(f"Native table detection failed: {e}")
+
+        # 2b. Vector drawings/flowchart shapes.
+        drawing_rects = []
+        try:
+            for drawing in page.get_drawings():
+                raw_rect = drawing.get("rect")
+                if not raw_rect:
+                    continue
+
+                rect = fitz.Rect(raw_rect)
+
+                # Exclude header/footer decoration lines.
+                if rect.y0 < page_rect.height * 0.09:
+                    continue
+                if rect.y1 > page_rect.height * 0.95:
+                    continue
+
+                # Ignore extremely tiny drawing fragments.
+                if rect.width < 2 and rect.height < 2:
+                    continue
+
+                drawing_rects.append(rect)
+        except Exception as e:
+            log.debug(f"Drawing detection failed: {e}")
+
+        if drawing_rects:
+            clusters = self._cluster_pdf_rects(drawing_rects, page_rect, gap=14)
+            for rect in clusters:
+                if self._is_reasonable_visual_rect(rect, page_rect):
+                    candidates.append(rect)
+
+        # 2c. Form XObjects — catches some charts/diagrams embedded as vector groups.
+        try:
+            doc_ref = page.parent
+
+            for xobj in page.get_xobjects():
+                xref = xobj[0] if len(xobj) > 0 else None
+                bbox = xobj[3] if len(xobj) > 3 else None
+
+                if not xref or not bbox:
+                    continue
+
+                subtype = doc_ref.xref_get_key(xref, "Subtype")[1]
+
+                if subtype == "/Form":
+                    rect = fitz.Rect(bbox)
+
+                    if self._is_reasonable_visual_rect(rect, page_rect):
+                        candidates.append(rect)
+
+        except Exception as e:
+            log.debug(f"Form XObject detection failed: {e}")
+
+        # 3. Caption-based table crops for borderless/text-style tables.
+        caption_table_rects = self._find_caption_based_table_rects(
+            page=page,
+            source_doc=source_doc,
+            max_crops=max_crops,
+        )
+        candidates.extend(caption_table_rects)
+
+        candidates = self._dedupe_pdf_rects(candidates, page_rect)
+
+        if not candidates:
+            return []
+
+        caption_rects = self._find_caption_rects(page, source_doc)
+
+        # Prefer crops near captions first, but still keep other valid crops.
+        caption_ranked = []
+        remaining = list(candidates)
+
+        for caption_rect in caption_rects:
+            near = [
+                rect for rect in remaining
+                if rect.y0 >= caption_rect.y0 - 12
+            ]
+
+            if not near:
+                continue
+
+            best = sorted(
+                near,
+                key=lambda r: (
+                    abs(r.y0 - caption_rect.y1),
+                    -(r.width * r.height),
+                ),
+            )[0]
+
+            caption_ranked.append(best)
+            remaining.remove(best)
+
+        # Then add remaining crops in reading order.
+        ordered = caption_ranked + sorted(remaining, key=lambda r: (r.y0, r.x0))
+
+        # Expand safely.
+        expanded = [
+            self._expand_pdf_rect(rect, page_rect, margin=10)
+            for rect in ordered
+        ]
+
+        # Final quality filter: remove text-heavy / low-value crops.
+        useful = [
+            rect for rect in expanded
+            if self._is_useful_evidence_crop(page, rect, source_doc)
+        ]
+
+        return useful[:max_crops]
+
+    def _render_pdf_evidence_previews(
+        self,
+        file_path: Path,
+        page_number: int,
+        source_doc: Document | None = None,
+        max_crops: int = 6,
+    ) -> list[dict]:
+        """Render cropped PDF image/table evidence previews.
+
+        If multiple images/tables exist on one page, this creates multiple
+        cropped PNGs. If no valid crop is detected, it returns no visual
+        evidence instead of saving a full PDF page.
+        """
+        if page_number <= 0:
+            return []
+
+        try:
+            import fitz  # PyMuPDF
+
+            evidence_dir = self._evidence_storage_dir()
+            file_hash = hashlib.sha1(file_path.name.encode("utf-8")).hexdigest()[:10]
+            base_name = self._safe_slug(file_path.stem)
+
+            rendered_items: list[dict] = []
+
+            doc = fitz.open(str(file_path))
+            try:
+                page_index = page_number - 1
+                if page_index < 0 or page_index >= len(doc):
+                    return []
+
+                page = doc.load_page(page_index)
+                crop_rects = self._find_visual_crop_rects(
+                    page=page,
+                    source_doc=source_doc,
+                    max_crops=max_crops,
+                )
+
+                # Do not save full PDF pages as evidence.
+                # If no valid image/table/chart crop is detected, skip visual evidence.
+                if not crop_rects:
+                    return []
+
+                zoom = max(2.0, float(settings.EVIDENCE_RENDER_ZOOM))
+                matrix = fitz.Matrix(zoom, zoom)
+
+                for idx, crop_rect in enumerate(crop_rects, start=1):
+                    if not self._is_useful_evidence_crop(page, crop_rect, source_doc):
+                        continue
+
+                    output_name = (
+                        f"{base_name}-{file_hash}-page-{page_number}-crop-{idx}.png"
+                    )
+                    output_path = evidence_dir / output_name
+
+                    if not output_path.exists():
+                        pix = page.get_pixmap(
+                            matrix=matrix,
+                            alpha=False,
+                            clip=crop_rect,
+                        )
+                        pix.save(str(output_path))
+
+                    rendered_items.append({
+                        "url": f"{settings.EVIDENCE_URL_PREFIX}/{output_name}",
+                        "crop_index": idx,
+                        "is_crop": True,
+                    })
+
+            finally:
+                doc.close()
+
+            return rendered_items
+
+        except Exception as e:
+            log.warning(
+                f"Could not render evidence preview for {file_path.name} page {page_number}: {e}"
+            )
+            return []
+
+    def _doc_has_visual_or_image_signal(self, doc: Document) -> bool:
+        """Best-effort check whether a chunk is related to an image/chart/diagram."""
+        metadata = doc.metadata or {}
+        category = str(metadata.get("category", "")).lower()
+        text = (doc.page_content or "").lower()
+
+        visual_categories = {
+            "image",
+            "figure",
+            "figurecaption",
+            "caption",
+        }
+
+        visual_words = (
+            "figure",
+            "illustration",
+            "diagram",
+            "chart",
+            "graph",
+            "image",
+            "flowchart",
+            "process flow",
+        )
+
+        return (
+            category in visual_categories
+            or any(word in text for word in visual_words)
+        )
+
+    def _doc_has_table_signal(self, doc: Document) -> bool:
+        """Best-effort check whether a chunk is a table or table-like content."""
+        metadata = doc.metadata or {}
+        category = str(metadata.get("category", "")).lower()
+        text = doc.page_content or ""
+        text_lower = text.lower()
+
+        low_value_table_phrases = (
+            "reference table of changes",
+            "changes made in the document",
+            "old version of the document",
+            "date changes made to document",
+            "paragraph no. where changes made",
+            "detailed description of the changes made",
+            "table of content",
+            "table of contents",
+        )
+
+        if any(phrase in text_lower for phrase in low_value_table_phrases):
+            return False
+
+        if category in ("table", "tablechunk"):
+            return True
+
+        # Official table captions: Table 01, Table 3.1, Table IV, etc.
+        if re.search(r"\btable\s+(\d+(\.\d+)?|[ivxlcdm]+)\b", text_lower):
+            return True
+
+        table_keywords = (
+            "criteria",
+            "minimum service period",
+            "duration",
+            "weightage",
+            "reference rating",
+            "achievement",
+            "eligibility",
+            "max. amount",
+            "benefit",
+            "percentage allocated",
+            "performance rating",
+            "staff level",
+            "target component",
+        )
+
+        keyword_hits = sum(1 for word in table_keywords if word in text_lower)
+        if keyword_hits >= 2:
+            return True
+
+        # Simple table-like signal: multiple rows with separators/tabs/spaced columns
+        lines = [line for line in text.splitlines() if line.strip()]
+        separator_rows = sum(
+            1 for line in lines
+            if "\t" in line or "|" in line or len(re.split(r"\s{2,}", line.strip())) >= 3
+        )
+
+        return len(lines) >= 3 and separator_rows >= 2
+
+    def _build_table_evidence(self, doc: Document, file_name: str, link: str) -> dict | None:
+        """Create table evidence metadata for a table-like chunk."""
+        if not self._doc_has_table_signal(doc):
+            return None
+
+        page_number = self._metadata_page_number(doc.metadata or {})
+
+        return {
+            "type": "table",
+            "title": f"Table from {file_name}",
+            "source": file_name,
+            "link": link,
+            "page": page_number,
+            "content": (doc.page_content or "").strip()[:5000],
+        }
+
+    def _build_image_evidence(
+        self,
+        doc: Document,
+        file_path: Path,
+        file_name: str,
+        link: str,
+        render_cache: dict[tuple[str, int], list[dict]] | None = None,
+    ) -> list[dict] | None:
+        """Create cropped image/table evidence metadata for visual PDF content."""
+        if file_path.suffix.lower() != ".pdf":
+            return None
+
+        has_visual_signal = self._doc_has_visual_or_image_signal(doc)
+        has_table_signal = self._doc_has_table_signal(doc)
+
+        if not has_visual_signal and not has_table_signal:
+            return None
+
+        page_number = self._metadata_page_number(doc.metadata or {})
+        if not page_number:
+            return None
+
+        cache_key = (str(file_path), page_number)
+
+        if render_cache is not None and cache_key in render_cache:
+            rendered_items = render_cache[cache_key]
+        else:
+            rendered_items = self._render_pdf_evidence_previews(
+                file_path=file_path,
+                page_number=page_number,
+                source_doc=doc,
+                max_crops=6,
+            )
+
+            if render_cache is not None:
+                render_cache[cache_key] = rendered_items
+
+        if not rendered_items:
+            return None
+
+        evidence_kind = "table" if has_table_signal and not has_visual_signal else "visual"
+        title_prefix = "Table reference" if evidence_kind == "table" else "Visual reference"
+
+        evidence_items: list[dict] = []
+
+        for rendered in rendered_items:
+            crop_index = rendered.get("crop_index")
+
+            title = f"{title_prefix} from {file_name}"
+            if len(rendered_items) > 1:
+                title = f"{title_prefix} {crop_index} from {file_name}"
+
+            evidence_items.append({
+                "type": "image",
+                "title": title,
+                "source": file_name,
+                "link": link,
+                "page": page_number,
+                "url": rendered["url"],
+                "crop_index": crop_index,
+                "evidence_kind": evidence_kind,
+            })
+
+        return evidence_items
 
     def _load_and_chunk_file(self, file_path: Path) -> list[Document]:
         """Use unstructured's native semantic chunking by headers and sections.
@@ -358,6 +1113,7 @@ class IngestionService:
 
             skipped_files = []
             failed_files = []
+            evidence_cache: dict[tuple[str, int], list[dict]] = {}
 
             for item in matching_items:
                 file_name = item["name"]
@@ -410,12 +1166,37 @@ class IngestionService:
                         failed_files.append({"file": file_name, "reason": "no extractable text (OCR needed?)"})
                         continue
 
+                    source_link = item.get("webUrl", "#")
+
                     for doc in chunks:
                         doc.metadata["source"] = file_name
-                        doc.metadata["link"] = item.get("webUrl", "#")
+                        doc.metadata["link"] = source_link
                         doc.metadata["onedrive_id"] = onedrive_id
                         doc.metadata["source_folder"] = folder_id
                         doc.metadata["last_modified"] = last_modified
+
+                        evidence_items = []
+
+                        table_evidence = self._build_table_evidence(
+                            doc=doc,
+                            file_name=file_name,
+                            link=source_link,
+                        )
+                        if table_evidence:
+                            evidence_items.append(table_evidence)
+
+                        image_evidence_items = self._build_image_evidence(
+                            doc=doc,
+                            file_path=dest_path,
+                            file_name=file_name,
+                            link=source_link,
+                            render_cache=evidence_cache,
+                        )
+                        if image_evidence_items:
+                            evidence_items.extend(image_evidence_items)
+
+                        if evidence_items:
+                            doc.metadata["evidence"] = evidence_items
 
                     # Now that we have valid replacement chunks, remove the
                     # stale vectors and write the new ones.

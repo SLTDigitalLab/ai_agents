@@ -8,7 +8,7 @@ the top-k document chunks as a single concatenated context string.
 """
 
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from langchain_core.tools import tool
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
@@ -24,11 +24,102 @@ log = logging.getLogger(__name__)
 # lightweight and stateless, so a single shared instance is fine.
 _sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
 
+# Per-thread evidence cache.
+# rag_tools.py collects image/table evidence from retrieved Qdrant chunks.
+# chat.py will consume this cache after the final answer is generated.
+_THREAD_EVIDENCE_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+def clear_thread_evidence(thread_id: str | None) -> None:
+    """Clear evidence collected for a thread before a new chat request starts."""
+    if thread_id:
+        _THREAD_EVIDENCE_CACHE.pop(thread_id, None)
+
+
+def _evidence_key(item: dict[str, Any]) -> tuple:
+    """Stable key used for deduplicating evidence items."""
+    return (
+        item.get("type"),
+        item.get("source"),
+        item.get("page"),
+        item.get("url"),
+        (item.get("content") or "")[:200],
+    )
+
+
+def _dedupe_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove duplicate evidence items while preserving order."""
+    seen = set()
+    unique: list[dict[str, Any]] = []
+
+    for item in items:
+        key = _evidence_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+
+    return unique
+
+
+def consume_thread_evidence(thread_id: str | None, max_items: int | None = None) -> list[dict[str, Any]]:
+    """Return and clear collected evidence for this thread."""
+    if not thread_id:
+        return []
+
+    items = _THREAD_EVIDENCE_CACHE.pop(thread_id, [])
+    items = _dedupe_evidence(items)
+
+    if max_items is not None:
+        return items[:max_items]
+
+    return items
+
+
+def _add_thread_evidence(
+    thread_id: str | None,
+    evidence_items: Any,
+    source: str,
+    link: str,
+) -> None:
+    """Add valid evidence metadata from retrieved Qdrant chunks."""
+    if not thread_id or not evidence_items:
+        return
+
+    if not isinstance(evidence_items, list):
+        return
+
+    cleaned_items: list[dict[str, Any]] = []
+
+    for raw_item in evidence_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        evidence_type = item.get("type")
+
+        if evidence_type not in ("image", "table"):
+            continue
+
+        # Image evidence must have a URL. Table evidence must have content.
+        if evidence_type == "image" and not item.get("url"):
+            continue
+
+        if evidence_type == "table" and not item.get("content"):
+            continue
+
+        item.setdefault("source", source)
+        item.setdefault("link", link)
+        cleaned_items.append(item)
+
+    if cleaned_items:
+        _THREAD_EVIDENCE_CACHE.setdefault(thread_id, []).extend(cleaned_items)
 
 @tool
 async def search_knowledge_base(
     query: str,
     agent_id: Annotated[str, InjectedState("agent_id")],
+    thread_id: Annotated[str | None, InjectedState("thread_id")] = None,
 ) -> str:
     """Search the knowledge base for documents relevant to the user's query.
 
@@ -94,11 +185,20 @@ async def search_knowledge_base(
             log.info(f"Hybrid search returned 0 results for agent='{agent_id}' query='{query}'")
             return "No relevant documents found."
 
-        # Include source metadata in the context
+        # Include source metadata in the context and collect visual/table evidence.
         context_parts = []
         for doc in results:
             source = doc.metadata.get("source", "Unknown Source")
             link = doc.metadata.get("link", "#")
+
+            evidence_items = doc.metadata.get("evidence") or []
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=evidence_items,
+                source=source,
+                link=link,
+            )
+
             context_parts.append(f"[Source: {source} | Link: {link}]\n{doc.page_content}")
 
         return "\n\n---\n\n".join(context_parts)

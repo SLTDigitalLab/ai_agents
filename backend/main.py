@@ -5,10 +5,15 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s | %(message)s",
 )
 
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance
 from services.ingestion import router as ingestion_router
+from core.config import settings
 
 app = FastAPI(title="Ask SLT API")
 
@@ -19,6 +24,19 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# --- Evidence image storage ---
+evidence_dir = Path(settings.EVIDENCE_STORAGE_DIR)
+if not evidence_dir.is_absolute():
+    evidence_dir = Path(__file__).resolve().parent / evidence_dir
+
+evidence_dir.mkdir(parents=True, exist_ok=True)
+
+app.mount(
+    settings.EVIDENCE_URL_PREFIX,
+    StaticFiles(directory=str(evidence_dir)),
+    name="evidence_images",
 )
 
 # --- 2. Register Routers ---

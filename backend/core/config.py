@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     QDRANT_URL: str
     POSTGRES_URL: str
 
+    # Evidence previews for PDF/image/table references
+    EVIDENCE_STORAGE_DIR: str = "storage/evidence"
+    EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
+    EVIDENCE_RENDER_ZOOM: float = 1.75
+    EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
+
     # API key for external clients (e.g. voice assistant) hitting the Finance retrieval endpoint
     VOICE_ASSISTANT_API_KEY: Optional[str] = None
 
