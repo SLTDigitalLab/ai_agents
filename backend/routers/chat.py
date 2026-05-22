@@ -290,14 +290,9 @@ def _select_best_evidence(answer_text: str, evidence_items: list[dict]) -> list[
         )
         return ranked_images[:1]
 
-    # If no image evidence exists, fall back to one best table/text evidence.
-    ranked = sorted(
-        filtered,
-        key=lambda item: _score_evidence_item(answer_text, item),
-        reverse=True,
-    )
-
-    return ranked[:1]
+    # If no image evidence exists, do not show raw extracted text as evidence.
+    # The Sources section is enough for text-only answers.
+    return []
 
 def _extract_used_source_keys(answer_text: str) -> tuple[set[str], set[str]]:
     """Extract source names and URLs from the final Sources section."""
