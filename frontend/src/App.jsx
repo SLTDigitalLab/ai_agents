@@ -79,13 +79,10 @@ const getAgentRGB = (colorStr) => {
   return (m && COLOR_RGB[m[1]]) || '120, 120, 120';
 };
 
-// Premium two-stop radial ambient: soft warm glow from top-right, cool shadow
-// tint from bottom-left, layered over a near-white base. Avoids banding because
-// both gradients fade smoothly across the entire viewport.
-const buildAmbientBackground = (rgb, theme = 'light') => {
-  // Flat base color, no agent-color tinting on either side.
-  return theme === 'dark' ? '#1c1f24' : '#f1f3f6';
-};
+// Flat background per theme. No agent tinting, no patterns, no gradients.
+const buildAmbientBackground = (_rgb, theme = 'light') => ({
+  backgroundColor: theme === 'dark' ? '#14171c' : '#fbfbfd',
+});
 
 // Faint film-grain texture — adds tactile depth, masks gradient banding.
 const GRAIN_DATA_URL = "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")";
@@ -294,7 +291,7 @@ const AgentWrapper = () => {
   return (
     <div
       className="h-screen flex flex-row relative overflow-hidden text-gray-900 dark:text-gray-100"
-      style={{ background: ambientBg }}
+      style={ambientBg}
     >
       {/* Premium film-grain overlay — adds subtle tactile depth */}
       <div
@@ -340,19 +337,19 @@ const AgentWrapper = () => {
           </motion.button>
         </AuthenticatedTemplate>
 
-        {/* Title + subtitle */}
+        {/* Agent identity: logo if provided, otherwise title text. */}
         <div className="min-w-0 flex-1 flex flex-col">
-          <h1 className="text-lg sm:text-xl font-bold text-gray-950 dark:text-gray-100 tracking-tight leading-tight truncate">
-            {agentConfig.title.replace(/^ASK /i, 'Ask ')}
-          </h1>
-          <AuthenticatedTemplate>
-            <p
-              className="text-[11px] sm:text-[13px] text-gray-500 font-light truncate max-w-full sm:max-w-[640px] leading-snug mt-0.5"
-              title={agentConfig.subtitle}
-            >
-              {agentConfig.subtitle}
-            </p>
-          </AuthenticatedTemplate>
+          {agentConfig.logo ? (
+            <img
+              src={agentConfig.logo}
+              alt={agentConfig.title}
+              className="h-8 sm:h-10 w-auto self-start max-w-full object-contain"
+            />
+          ) : (
+            <h1 className="text-lg sm:text-xl font-bold text-gray-950 dark:text-gray-100 tracking-tight leading-tight truncate">
+              {agentConfig.title.replace(/^ASK /i, 'Ask ')}
+            </h1>
+          )}
         </div>
 
         {/* Right cluster: SLT logo + mobile avatar */}

@@ -1,3 +1,6 @@
+import askHrLogo from '../assets/ASK HR Logo.png';
+import askFinanceLogo from '../assets/ASK FINANCE Logo.png';
+
 export const AGENTS = {
     // Default supervisor landing page
     workmateai: {
@@ -13,6 +16,7 @@ export const AGENTS = {
     askhr: {
         id: "hr",
         title: "ASK HR",
+        logo: askHrLogo,
         subtitle: "Welcome to your HR support center. Get instant assistance with leave, benefits, and policies.",
         color: "from-purple-900 to-purple-600",
         buttonColor: "bg-purple-600 hover:bg-purple-700",
@@ -23,6 +27,7 @@ export const AGENTS = {
     askfinance: {
         id: "finance",
         title: "ASK FINANCE",
+        logo: askFinanceLogo,
         subtitle: "Get immediate help with payroll, budgets, procurement, and financial guidelines.",
         color: "from-blue-900 to-blue-600",
         buttonColor: "bg-blue-600 hover:bg-blue-700",
