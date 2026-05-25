@@ -1,3 +1,22 @@
+"""
+Ask HR SLM agent — RAG + leave-balance API, all powered by the internal SLM
+(deepseek-r1:1.5b via Ollama).
+
+Flow (option-3 two-stage):
+  1. Classifier SLM call (non-streaming, hidden from user) tags the query
+     as LEAVE_BALANCE | KB_QUERY | GREETING.
+  2. Based on intent, fetch the appropriate context:
+       - LEAVE_BALANCE → call SLT ERP leave-balance API
+       - KB_QUERY      → hybrid retrieval from askhrslm_docs
+       - GREETING      → no context
+  3. Streaming SLM call answers using that context. <think> tokens are
+     stripped at the chat-router layer.
+
+Tool-calling is intentionally avoided — deepseek-r1:1.5b doesn't reliably
+emit valid tool-call JSON, so we route deterministically.
+
+"""
+
 import logging
 import re
 
