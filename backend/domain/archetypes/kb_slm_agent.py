@@ -138,7 +138,6 @@ async def call_model(state: AgentState) -> dict:
         return await _invoke_slm(state, system_prompt)
 
     # STANDARD FLOW (GREETING & KB) 
-    
     elif intent == "GREETING":
         context_block = ""
         rules = (
