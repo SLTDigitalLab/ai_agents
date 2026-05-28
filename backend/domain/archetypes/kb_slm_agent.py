@@ -14,7 +14,6 @@ Flow (option-3 two-stage):
 
 Tool-calling is intentionally avoided — deepseek-r1:1.5b doesn't reliably
 emit valid tool-call JSON, so we route deterministically.
-
 """
 
 import logging
@@ -37,9 +36,9 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 # Standard classification regexes
 _LEAVE_BALANCE_RE = re.compile(
     r"\b("
-    r"my\s+leave|leave\s+balance|leaves?\s+(remaining|left|available)|"
+    r"my\s+leave|leave\s+(balance|details)|leaves?\s+(remaining|left|available|details)|"
     r"how\s+many\s+leaves?|"
-    r"(annual|casual|sick|medical)\s+leave\s+(balance|remaining|left)|"
+    r"(annual|casual|sick|medical)\s+leave\s+(balance|remaining|left|details)|"
     r"days?\s+(of\s+)?leave\s+(remaining|left|available|do\s+i\s+have)"
     r")\b",
     re.IGNORECASE,
@@ -57,7 +56,7 @@ _NO_RE = re.compile(r"^\s*(no|n|nope|nah)\b", re.IGNORECASE)
 
 # The exact prompt the bot uses to ask for clarification.
 # The frontend can use this string to trigger UI buttons if needed.
-_LEAVE_CLARIFICATION_MSG = "Do you want a detailed explanation of your leave balance? (Please choose Yes or No)"
+_LEAVE_CLARIFICATION_MSG = "Do you want to check your personal leave balance? (Choose Yes for Personal Balance | No for General Leave Policies)"
 
 
 def _last_user_text(messages) -> str:
@@ -115,29 +114,33 @@ async def call_model(state: AgentState) -> dict:
 
     # LEAVE BALANCE HITL FLOW
     
-    # User asks for balance -> pause and prompt for preference
     if intent == "LEAVE_BALANCE_ASK":
         return {"messages": [AIMessage(content=_LEAVE_CLARIFICATION_MSG)]}
 
-    # User chose "No" -> Output raw data fast-path
-    elif intent == "LEAVE_NO":
-        leave_data = fetch_leave_balance_for_user(user_id)
-        answer = f"Here is your current leave balance from the SLT ERP:\n\n{leave_data}"
-        return {"messages": [AIMessage(content=answer)]}
-
-    # User chose "Yes" -> Use the SLM to generate a clear explanation
+    # User chose "Yes" -> Show Personal Leave Balance (API data fast path)
     elif intent == "LEAVE_YES":
         leave_data = fetch_leave_balance_for_user(user_id)
-        context_block = f"RAW ERP LEAVE DATA:\n{leave_data}"
-        rules = (
-            "Explain the user's leave balance in a friendly, easy-to-read way. "
-            "Break down the different categories (e.g., Annual, Sick, Casual). "
-            "Do NOT invent or calculate new numbers. Only use the data provided."
-        )
-        system_prompt = _build_system_prompt(context_block, rules)
-        return await _invoke_slm(state, system_prompt)
+        answer = f"Here is your personal leave balance from the SLT ERP:\n\n{leave_data}"
+        return {"messages": [AIMessage(content=answer)]}
 
-    # STANDARD FLOW (GREETING & KB) 
+    # User chose "No" -> Query the Knowledge Base for general leave policies ONLY
+    elif intent == "LEAVE_NO":
+        kb_query = "What are the general leave policies and details for all types of leaves?"
+        context = await search_hr_slm_kb.ainvoke({"query": kb_query})
+        
+        context_block = f"CONTEXT FROM HR KNOWLEDGE BASE:\n{context}"
+        rules = (
+            "You are providing general company policy information only. "
+            "1. Identify every type of leave mentioned in the context. "
+            "2. Write a well-structured point-form paragraph for each leave type explaining its general rules and definitions. "
+            "3. STRICT RULE: You must NEVER invent employee IDs, NEVER show personal leave balances, and NEVER explain how to calculate balances. "
+            "4. STRICT RULE: Do not add any closing disclaimers about verifying policies or contacting HR. "
+            "5. Base your entire answer EXACTLY on the provided context and nothing else."
+        )
+        system_prompt = _build_system_prompt(context_block, rules, include_sources=True)
+        return await _invoke_slm(state, system_prompt)
+    
+    # STANDARD FLOW (GREETING & KB)
     elif intent == "GREETING":
         context_block = ""
         rules = (
@@ -176,7 +179,6 @@ FORMATTING:
 3. Be concise. No closing pleasantries.
 {sources_rule}
 """
-
 
 async def _invoke_slm(state: AgentState, system_prompt: str) -> dict:
     """Helper function to execute the SLM call with trimmed message history."""
