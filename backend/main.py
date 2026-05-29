@@ -10,6 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
 from services.ingestion import router as ingestion_router
 
+from routers import voice
+
+
 app = FastAPI(
     title="Ask SLT API",
     docs_url="/api/docs",
@@ -36,6 +39,7 @@ app.include_router(feedback.router)  # Feedback (thumbs up/down)
 app.include_router(finance.router)  # External Finance KB retrieval (voice assistant)
 app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev local → prod vectors)
 app.include_router(ingestion_router)
+app.include_router(voice.router)  # Include the voice router
 
 @app.get("/")
 def read_root():
