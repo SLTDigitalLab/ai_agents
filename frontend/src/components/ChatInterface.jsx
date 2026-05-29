@@ -60,6 +60,18 @@ const appendChunkSmartly = (current, incoming) => {
     return (current || "") + (incoming || "");
 };
 
+// Agent gradient class → RGB triplet, for luminous glow effects.
+const AGENT_RGB = {
+    cyan: '6, 182, 212', purple: '147, 51, 234', blue: '37, 99, 235',
+    gray: '107, 114, 128', sky: '14, 165, 233', rose: '225, 29, 72',
+    emerald: '16, 185, 129', indigo: '79, 70, 229', orange: '234, 88, 12',
+    fuchsia: '192, 38, 211',
+};
+const getAgentRgb = (colorStr) => {
+    const m = colorStr?.match(/from-(\w+)-/);
+    return (m && AGENT_RGB[m[1]]) || '120, 120, 120';
+};
+
 const formatTime = (ts) => {
     if (!ts) return '';
     try {
@@ -775,9 +787,11 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const idleGreeting = useMemo(() => pickGreeting(firstName), [isIdle, agentConfig.id, firstName, threadId]);
 
     // ── Reusable Composer JSX ─────────────────────────────────────────────
-    const renderComposer = () => (
-        <form onSubmit={handleSend} className="relative flex items-end w-full pointer-events-auto">
-            <div className="relative flex items-end w-full bg-white dark:bg-[#2a2e36] rounded-3xl border border-gray-200 dark:border-[#3a3f48] shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.5)] p-1.5 focus-within:border-gray-300 dark:focus-within:border-[#4a505a] focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.12)] dark:focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.7)] transition-shadow">
+    // `accent` (idle only) wraps the input in a gradient border ring + soft
+    // ambient halo in the agent's color — premium "floating" look.
+    const renderComposer = (accent = false) => {
+        const controls = (
+            <>
                 <textarea
                     ref={inputRef}
                     rows={1}
@@ -810,9 +824,39 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         </svg>
                     )}
                 </button>
-            </div>
-        </form>
-    );
+            </>
+        );
+
+        if (accent) {
+            const rgb = getAgentRgb(agentConfig.color);
+            return (
+                <form onSubmit={handleSend} className="relative flex w-full pointer-events-auto">
+                    {/* Wide soft ambient halo radiating outward */}
+                    <div
+                        aria-hidden="true"
+                        className={`absolute -inset-3 rounded-[2.4rem] bg-gradient-to-r ${agentConfig.color} opacity-[0.10] dark:opacity-20 blur-2xl pointer-events-none`}
+                    />
+                    {/* Input box with a luminous multi-layer colored glow edge */}
+                    <div
+                        className="relative flex items-end w-full bg-white dark:bg-[#23262c] rounded-3xl p-1.5"
+                        style={{
+                            boxShadow: `0 0 0 1px rgba(${rgb}, 0.22), 0 0 14px -3px rgba(${rgb}, 0.25), 0 0 38px -8px rgba(${rgb}, 0.18), 0 16px 50px -16px rgba(0, 0, 0, 0.22)`,
+                        }}
+                    >
+                        {controls}
+                    </div>
+                </form>
+            );
+        }
+
+        return (
+            <form onSubmit={handleSend} className="relative flex items-end w-full pointer-events-auto">
+                <div className="relative flex items-end w-full bg-white dark:bg-[#2a2e36] rounded-3xl border border-gray-200 dark:border-[#3a3f48] shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.5)] p-1.5 focus-within:border-gray-300 dark:focus-within:border-[#4a505a] focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.12)] dark:focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.7)] transition-shadow">
+                    {controls}
+                </div>
+            </form>
+        );
+    };
 
     const disclaimerText = (
         <p className="text-center text-[0.65rem] text-gray-400 dark:text-gray-500 mt-2 font-light px-2">
@@ -851,7 +895,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         transition={{ duration: 0.45, delay: 0.12 }}
                         className="text-xl sm:text-2xl text-gray-500 dark:text-gray-400 mt-2 font-light text-center"
                     >
-                        How can I help you today?
+                        {agentConfig.idlePrompt || "How can I help you today?"}
                     </motion.p>
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
@@ -859,7 +903,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         transition={{ duration: 0.5, delay: 0.2 }}
                         className="w-full max-w-[720px] mt-10"
                     >
-                        {renderComposer()}
+                        {renderComposer(true)}
                         {disclaimerText}
                     </motion.div>
                 </motion.div>
