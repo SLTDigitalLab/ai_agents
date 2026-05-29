@@ -104,7 +104,6 @@ def _classify_intent(query: str, messages: list) -> str:
     log.info(f"[SLM router] intent=KB_QUERY | query={query!r}")
     return "KB_QUERY"
 
-
 async def call_model(state: AgentState) -> dict:
     user_query = _last_user_text(state["messages"])
     user_id = state.get("user_id", "") or ""
@@ -122,7 +121,7 @@ async def call_model(state: AgentState) -> dict:
         answer = f"Here is your personal leave balance from the SLT ERP:\n\n{leave_data}"
         return {"messages": [AIMessage(content=answer)]}
 
-    # User chose "No" -> Query the Knowledge Base for general leave policies ONLY
+    # User chose "No" -> Query the Knowledge Base for general leave policies
     elif intent == "LEAVE_NO":
         kb_query = "What are the general leave policies and details for all types of leaves?"
         context = await search_hr_slm_kb.ainvoke({"query": kb_query})
@@ -193,7 +192,6 @@ async def _invoke_slm(state: AgentState, system_prompt: str) -> dict:
     messages = [{"role": "system", "content": system_prompt}] + trimmed
     response = await llm.ainvoke(messages)
     return {"messages": [response]}
-
 
 def build_kb_slm_workflow() -> StateGraph:
     workflow = StateGraph(AgentState)
