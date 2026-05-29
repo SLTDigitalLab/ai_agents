@@ -56,8 +56,7 @@ _NO_RE = re.compile(r"^\s*(no|n|nope|nah)\b", re.IGNORECASE)
 
 # The exact prompt the bot uses to ask for clarification.
 # The frontend can use this string to trigger UI buttons if needed.
-_LEAVE_CLARIFICATION_MSG = "Do you want to check your personal leave balance? (Choose Yes for Personal Balance | No for General Leave Policies)"
-
+_LEAVE_CLARIFICATION_MSG = "Do you want to check your personal leave balance? (Choose Yes for Personal Balance, No for General Leave Policies)"
 
 def _last_user_text(messages) -> str:
     for msg in reversed(messages):

@@ -1,7 +1,7 @@
 import React from 'react';
 
 // The exact string sent by kb_slm_agent.py
-const LEAVE_CLARIFICATION_MSG = "Do you want to check your personal leave balance? (Choose Yes for Personal Balance | No for General Leave Policies)";
+const LEAVE_CLARIFICATION_MSG = "Do you want to check your personal leave balance? (Choose Yes for Personal Balance, No for General Leave Policies)";
 
 export default function Buttons({ message, isLast, onSend }) {
   // 100% SAFE GUARDRAIL: Only render if it's the last message and matches the intent string
