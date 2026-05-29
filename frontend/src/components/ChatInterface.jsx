@@ -6,6 +6,7 @@ import LifestoreForm from './forms/LifestoreForm';
 import EnterpriseForm from './forms/EnterpriseForm';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import Buttons from './Buttons';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -189,9 +190,6 @@ const ChatInterface = ({ agentConfig }) => {
         if (!agentConfig?.id) return;
 
         // ── CRITICAL: Immediately clear stale state to prevent race conditions ──
-        // Without this, the OLD agent's threadId stays in state until the async
-        // work below finishes, which can cause cross-contamination if the user
-        // sends a message during the transition.
         setThreadId('');          // Guard: handleSend checks for empty threadId
         setMessages([]);          // Clear previous agent's messages
         setFeedbackMap({});       // Clear previous agent's feedback
@@ -282,6 +280,7 @@ const ChatInterface = ({ agentConfig }) => {
 
         loadAgentState();
     }, [agentConfig.id, agentConfig.title, user.name]);
+
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef(null);
@@ -295,15 +294,20 @@ const ChatInterface = ({ agentConfig }) => {
         scrollToBottom();
     }, [messages]);
 
-    // Handle Sending Message
-    const handleSend = async (e) => {
-        e.preventDefault();
-        if (!input.trim() || !threadId || isLoadingHistory) return;
+    // Handle Sending Message (Supports programmatic injection from UI buttons)
+    const handleSend = async (e, directText = null) => {
+        if (e && e.preventDefault) e.preventDefault();
+        
+        const messageText = directText || input;
+
+        if (!messageText.trim() || !threadId || isLoadingHistory) return;
 
         // 1. Add User Message to UI
-        const userMessage = { type: 'user', text: input };
+        const userMessage = { type: 'user', text: messageText };
         setMessages(prev => [...prev, userMessage]);
-        setInput("");
+        
+        if (!directText) setInput("");
+        
         setIsLoading(true);
 
         try {
@@ -312,7 +316,7 @@ const ChatInterface = ({ agentConfig }) => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: userMessage.text,
+                    message: messageText,
                     agent_id: agentConfig.id,
                     user_id: user.username || "anonymous",
                     thread_id: threadId
@@ -331,7 +335,6 @@ const ChatInterface = ({ agentConfig }) => {
 
             // Add an initial empty bot message
             setMessages(prev => [...prev, { type: 'bot', text: "", formType: null }]);
-            // setIsLoading(false); // REMOVED: Keep loading dots until we have content
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -377,7 +380,6 @@ const ChatInterface = ({ agentConfig }) => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay: 0.1 }}
-            /* Chatbox Width adjustment */
             className="flex-1 flex flex-col w-full max-w-[1250px] mx-auto px-4 z-10 pt-6 pb-0 min-h-0 overflow-hidden"
         >
             {/* Title Section */}
@@ -398,10 +400,10 @@ const ChatInterface = ({ agentConfig }) => {
                 transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.3 }}
                 className="relative flex-1 mb-4 sm:mb-8 min-h-0 rounded-2xl sm:rounded-3xl z-10"
             >
-                {/* ── LIQUID GLASS AMBIENT AURA ── (Neon glow casting outward from behind the white interface) */}
+                {/* ── LIQUID GLASS AMBIENT AURA ── */}
                 <div className={`absolute -inset-2 blur-[30px] opacity-30 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 transition-colors duration-700 pointer-events-none`} />
 
-                {/* ── SOLID WHITE GLASS WINDOW ── (Highly polished professional inner reading area) */}
+                {/* ── SOLID WHITE GLASS WINDOW ── */}
                 <div className="relative bg-[#fbfcff] w-full h-full rounded-2xl sm:rounded-3xl border border-white/80 shadow-[0_20px_50px_-10px_rgba(0,0,0,0.2),inset_0_1px_1px_rgba(255,255,255,1)] flex flex-col overflow-hidden">
 
                     {/* Messages Area Wrapper */}
@@ -477,11 +479,19 @@ const ChatInterface = ({ agentConfig }) => {
                                                     );
                                                 })()}
                                             </div>
+
+                                            {/* Standalone HITL Buttons Component */}
+                                            <Buttons 
+                                                message={msg} 
+                                                isLast={index === messages.length - 1} 
+                                                onSend={(text) => handleSend(null, text)} 
+                                            />
+
                                             {/* Render Generative UI form if triggered */}
                                             {msg.formType === 'lifestore' && <LifestoreForm />}
                                             {msg.formType === 'enterprise' && <EnterpriseForm />}
 
-                                            {/* Feedback buttons for bot messages (not for greeting/first message) */}
+                                            {/* Feedback buttons for bot messages */}
                                             {msg.type === 'bot' && index > 0 && msg.text && !isLoading && (
                                                 <FeedbackButtons
                                                     messageIndex={index}
@@ -516,7 +526,7 @@ const ChatInterface = ({ agentConfig }) => {
                     <div className="w-full px-2 sm:px-6 pb-1.5 pt-0.5 bg-[#fbfcff] z-20 flex flex-col justify-end border-t border-gray-50/50">
                         <form onSubmit={handleSend} className="relative flex items-center w-full pointer-events-auto group">
 
-                            {/* Inner Solid Pill Component (Grey Border / Full Width) */}
+                            {/* Inner Solid Pill Component */}
                             <div className="relative flex items-center w-full bg-[#fbfcff]/95 backdrop-blur-3xl rounded-full border border-gray-200/80 shadow-[0_12px_40px_-10px_rgba(0,0,0,0.1),inset_0_2px_4px_rgba(255,255,255,1)] p-0.5 focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.15)] focus-within:ring-2 focus-within:ring-gray-200/50 transition-shadow">
 
                                 <input
