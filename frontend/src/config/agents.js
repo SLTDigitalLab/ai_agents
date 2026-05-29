@@ -6,7 +6,7 @@ export const AGENTS = {
         subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, Admin, or CIA.",
         color: "from-cyan-900 to-cyan-600",
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
-        idlePrompt: "What can I help you with across the workplace?",
+        idlePrompt: "Ask me about HR, Finance, IT, Admin, or CIA.",
         disclaimer: "Workmate AI provides internal workplace information. Please verify critical details with the relevant department."
     },
 

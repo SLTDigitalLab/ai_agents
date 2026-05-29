@@ -56,10 +56,30 @@ SPECIALIST_BUILDERS = {
 }
 
 
+_DOUBLED_TEXT_RE = re.compile(r"^(.+?)(?:\s*\1)+$", re.DOTALL)
+
+
+def _collapse_doubled_text(text: str) -> str:
+    """Collapse a string that is the same content repeated back-to-back.
+
+    Defensive safety net: if a specialist answer ever comes back with its full
+    text duplicated (e.g. a model/streaming quirk in the delegation path), this
+    removes the repetition so the user sees the answer only once. Only triggers
+    on an exact whole-message repeat, so normal answers are untouched.
+    """
+    stripped = text.strip()
+    if len(stripped) < 10:
+        return stripped
+    match = _DOUBLED_TEXT_RE.fullmatch(stripped)
+    if match:
+        return match.group(1).strip()
+    return stripped
+
+
 def _extract_text(content: Any) -> str:
     """Normalize LangChain message content into plain text."""
     if isinstance(content, str):
-        return content.strip()
+        return _collapse_doubled_text(content)
 
     if isinstance(content, list):
         text_parts: list[str] = []
@@ -68,7 +88,8 @@ def _extract_text(content: Any) -> str:
                 text_parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(str(block["text"]))
-        return " ".join(part.strip() for part in text_parts if part).strip()
+        joined = " ".join(part.strip() for part in text_parts if part).strip()
+        return _collapse_doubled_text(joined)
 
     return str(content).strip()
 
@@ -651,9 +672,14 @@ def _build_delegate_node(agent_id: str):
                 for message in result.get("messages", [])
                 if getattr(message, "type", None) == "ai"
             ]
-            final_message = ai_messages[-1] if ai_messages else AIMessage(
-                content="I could not get a response from the specialist agent."
-            )
+            if ai_messages:
+                # Normalize content (also collapses any accidental full-text
+                # duplication introduced by running the specialist via .ainvoke()).
+                final_message = AIMessage(content=_extract_text(ai_messages[-1].content))
+            else:
+                final_message = AIMessage(
+                    content="I could not get a response from the specialist agent."
+                )
             return {
                 "messages": [final_message],
                 "last_specialist_agent": agent_id,
@@ -664,7 +690,6 @@ def _build_delegate_node(agent_id: str):
             }
         except Exception:
             logger.exception("Supervisor delegation failed for agent=%s", agent_id)
-            logger.info("Delegated final message raw content: %r", final_message.content)
             return {
                 "messages": [
                     AIMessage(
