@@ -16,6 +16,7 @@ from qdrant_client import QdrantClient
 
 from core.config import settings
 from core.llm import get_embedding_model
+from core.llm_slm import get_slm_embedding_model
 from domain.tools.rag_tools import _sparse_embeddings
 
 router = APIRouter(prefix="/api/v1/kb", tags=["KB Retrieval"])
@@ -76,10 +77,12 @@ async def retrieve(
         logger.exception(f"Qdrant probe failed: {type(e).__name__}: {e}")
         raise HTTPException(status_code=502, detail="Vector store unavailable")
 
+    embedding = get_slm_embedding_model() if agent_id == "askhrslm" else get_embedding_model()
+
     vector_store = QdrantVectorStore(
         client=client,
         collection_name=collection_name,
-        embedding=get_embedding_model(),
+        embedding=embedding,
         sparse_embedding=_sparse_embeddings,
         retrieval_mode=RetrievalMode.HYBRID,
         vector_name="dense",

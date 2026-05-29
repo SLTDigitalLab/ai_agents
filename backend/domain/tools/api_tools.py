@@ -62,13 +62,14 @@ def fetch_leave_balance_for_user(user_id: str) -> str:
         if not leave_entries:
             return f"No leave records found for Service ID {sid}. Please contact HR."
 
-        lines = [f"**Leave balance for Employee {sid}:**", ""]
+        lines = ["**Your Leave Balance**", ""]
         for entry in leave_entries:
             plan = str(entry.get("Leave_Plan", "Unknown")).title()
             entitlement = entry.get("Entitlement", 0)
             balance = entry.get("Current_Balance", 0)
+            unit = "day" if balance == 1 else "days"
             lines.append(
-                f"- **{plan}** — {balance} days remaining (out of {entitlement} entitled)"
+                f"- **{plan}** — {balance} {unit} remaining out of {entitlement}"
             )
 
         return "\n".join(lines)
