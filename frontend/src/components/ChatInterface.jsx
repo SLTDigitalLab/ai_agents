@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
 import LifestoreForm from './forms/LifestoreForm';
 import EnterpriseForm from './forms/EnterpriseForm';
+import embryoLogo from '../assets/embryo-removebg.png';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -858,11 +859,14 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         );
     };
 
+    const disclaimerText = null; // Set to null to hide disclaimer. Uncomment the block below to restore it.
+    /*
     const disclaimerText = (
         <p className="text-center text-[0.65rem] text-gray-400 dark:text-gray-500 mt-2 font-light px-2">
             {agentConfig.disclaimer}
         </p>
     );
+    */
 
     return (
         <motion.div
@@ -879,7 +883,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0, y: -8 }}
                     transition={{ duration: 0.35, ease: 'easeOut' }}
-                    className="flex-1 flex flex-col items-center justify-center px-4 pb-24"
+                    className="flex-1 flex flex-col items-center justify-center px-4 pb-24 relative"
                 >
                     <motion.h2
                         initial={{ opacity: 0, y: 8 }}
@@ -901,10 +905,21 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.5, delay: 0.2 }}
-                        className="w-full max-w-[720px] mt-10"
+                        className="w-full max-w-[720px] mt-10 flex flex-col items-center"
                     >
                         {renderComposer(true)}
                         {disclaimerText}
+                    </motion.div>
+
+                    {/* Branding footer absolutely positioned at the bottom of the screen */}
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        transition={{ delay: 0.3 }}
+                        className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center justify-center gap-1.5 pointer-events-auto cursor-default select-none z-20"
+                    >
+                        <span className="text-[0.65rem] uppercase tracking-wider font-semibold text-gray-500 dark:text-gray-400">Powered by</span>
+                        <img src={embryoLogo} alt="Embryo Logo" className="h-[20px] w-auto object-contain dark:brightness-110" />
                     </motion.div>
                 </motion.div>
             ) : (
@@ -1073,9 +1088,13 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
                     {/* Docked composer — centered, content constrained */}
                     <div className="w-full flex flex-col items-center px-4 sm:px-6 pb-3 pt-1 z-20 shrink-0">
-                        <div className="w-full max-w-[820px]">
+                        <div className="w-full max-w-[820px] flex flex-col items-center">
                             {renderComposer()}
                             {disclaimerText}
+                            <div className="mt-3.5 flex items-center justify-center gap-1.5 pointer-events-auto cursor-default select-none">
+                                <span className="text-[0.65rem] uppercase tracking-wider font-semibold text-gray-500 dark:text-gray-400">Powered by</span>
+                                <img src={embryoLogo} alt="Embryo Logo" className="h-[20px] w-auto object-contain dark:brightness-110" />
+                            </div>
                         </div>
                     </div>
                 </motion.div>

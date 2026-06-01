@@ -13,6 +13,7 @@ import AdminRoute from './components/admin/AdminRoute';
 import IframeChatPage from './components/admin/IframeChatPage';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
+import embryoLogo from './assets/embryo-removebg.png';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 
 // Initialize MSAL outside the components
@@ -414,6 +415,15 @@ const AgentWrapper = () => {
                   Login with Microsoft
                 </motion.button>
               </div>
+            </motion.div>
+
+            {/* Bottom branding footer */}
+            <motion.div
+              variants={itemVariants}
+              className="mt-12 flex items-center justify-center gap-1.5 select-none cursor-default"
+            >
+              <span className="text-[0.65rem] uppercase tracking-widest font-semibold text-gray-500">Powered by</span>
+              <img src={embryoLogo} alt="Embryo Logo" className="h-[20px] w-auto object-contain" />
             </motion.div>
           </motion.div>
         </UnauthenticatedTemplate>
