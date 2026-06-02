@@ -382,6 +382,110 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
             "How often is the corporate risk profile updated?",
         ],
     },
+    "network": {
+        "display_name": "Network",
+        "description": (
+            "This domain handles SLTMobitel's enterprise and corporate network connectivity, "
+            "including WAN/LAN setup, routing and switching protocols, IP address allocation, "
+            "VPN tunnel configurations, firewall rules, transmission or fiber link issues, "
+            "network outages, packet loss, DNS/DHCP settings, port forwarding, and network service requests."
+        ),
+        "keywords": [
+            "network outage",
+            "WAN connection",
+            "LAN setup",
+            "IP address allocation",
+            "IP routing",
+            "network switch",
+            "router configuration",
+            "firewall rules",
+            "VPN tunnel",
+            "fiber link",
+            "ping failure",
+            "packet loss",
+            "subnet mask",
+            "dns configuration",
+            "dhcp server",
+            "port forwarding",
+            "noc helpdesk",
+            "network service request",
+        ],
+        "examples": [
+            "How do I request a static IP address allocation for a new server?",
+            "What is the procedure to report a corporate WAN connection outage?",
+            "How can I request opening a port in the core firewall for a vendor?",
+            "Who do I contact to resolve a fiber link issue at the regional office?",
+            "What is the configuration details for setting up a local LAN switch?",
+            "How do I configure the secondary DNS server for the corporate intranet?",
+        ],
+    },
+    "legal": {
+        "display_name": "Legal",
+        "description": (
+            "Handles legal affairs, contract review protocols, Non-Disclosure Agreements (NDAs), "
+            "regulatory compliance, statutory regulations, corporate agreements, intellectual property (IP) rights, "
+            "legal risk assessments, Memorandums of Understanding (MOUs), and official legal counsel requests."
+        ),
+        "keywords": [
+            "contract review",
+            "non-disclosure agreement",
+            "NDA form",
+            "legal agreement",
+            "regulatory compliance",
+            "statutory regulations",
+            "liability clause",
+            "indemnification",
+            "corporate legal counsel",
+            "intellectual property rights",
+            "copyright infringement",
+            "legal risk assessment",
+            "terms and conditions",
+            "memorandum of understanding",
+            "MOU",
+            "power of attorney",
+            "statutory audit",
+        ],
+        "examples": [
+            "What is the standard procedure to submit a vendor agreement for contract review?",
+            "Where can I find the template for a standard Non-Disclosure Agreement (NDA)?",
+            "How does the legal department handle indemnification clauses in supplier contracts?",
+            "What are the legal compliance guidelines for the new digital payment services?",
+            "Who is authorized to sign a Memorandum of Understanding (MOU) on behalf of SLT?",
+            "How do I request power of attorney for representing the company in a legal dispute?",
+        ],
+    },
+    "marketing": {
+        "display_name": "Marketing",
+        "description": (
+            "Handles marketing operations, brand guidelines, promotion approval procedures, "
+            "marketing campaigns, corporate logo usage, public relations (PR), sponsorship requests, "
+            "media planning, social media marketing guidelines, and corporate branding standards."
+        ),
+        "keywords": [
+            "brand guidelines",
+            "marketing campaign",
+            "promotion approval",
+            "corporate logo",
+            "sponsorship request",
+            "media planning",
+            "public relations",
+            "branding standards",
+            "advertising guidelines",
+            "social media marketing",
+            "press release template",
+            "marketing budget request",
+            "flyer design approval",
+            "SLT logo colors",
+        ],
+        "examples": [
+            "Where can I download the official SLTMobitel brand guidelines and logo formats?",
+            "What is the approval process for launching a new retail promotion campaign?",
+            "How do I submit a sponsorship request for a national university event?",
+            "What are the corporate branding rules for printing co-branded flyers?",
+            "Who approves social media marketing posts before they go live on our accounts?",
+            "Where do I submit a press release template for PR team review?",
+        ],
+    },
 }
 
 GENERAL_HELP_PATTERNS: tuple[str, ...] = (
@@ -426,6 +530,9 @@ CLARIFICATION_CHOICE_ALIASES: dict[str, tuple[str, ...]] = {
     "admin": ("admin", "administration", "facilities"),
     "it": ("it", "information technology", "tech support", "technical support"),
     "cia": ("cia", "cia office", "chief internal auditor"),
+    "network": ("network", "networks", "noc", "networking"),
+    "legal": ("legal", "law", "contracts", "agreements"),
+    "marketing": ("marketing", "branding", "promotions", "PR"),
 }
 
 FOLLOW_UP_PATTERNS: tuple[str, ...] = (

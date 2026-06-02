@@ -107,5 +107,38 @@ export const AGENTS = {
         buttonColor: "bg-orange-600 hover:bg-orange-700",
         idlePrompt: "Browse products, inventory, and lifestyle picks.",
         disclaimer: "If you need any further clarifications, please reach out to the Lifestore team."
+    },
+
+    // 8. Network
+    asknetwork: {
+        id: "network",
+        title: "ASK NETWORK",
+        subtitle: "Get support for SLTMobitel enterprise network, WAN/LAN setup, and IP routing issues.",
+        color: "from-teal-900 to-teal-600",
+        buttonColor: "bg-teal-600 hover:bg-teal-700",
+        idlePrompt: "Ask me about SLTMobitel network configuration or WAN/LAN setup.",
+        disclaimer: "If you need any further clarifications, please reach out to the Network Operations Center (NOC)."
+    },
+
+    // 9. Legal
+    asklegal: {
+        id: "legal",
+        title: "ASK LEGAL",
+        subtitle: "Legal guidance, contract review protocols, regulatory compliance, and statutory regulations.",
+        color: "from-amber-900 to-amber-600",
+        buttonColor: "bg-amber-600 hover:bg-amber-700",
+        idlePrompt: "Ask about legal guidelines, agreements, or regulatory compliance.",
+        disclaimer: "If you need any further clarifications, please reach out to the Legal & Regulatory department."
+    },
+
+    // 10. Marketing
+    askmarketing: {
+        id: "marketing",
+        title: "ASK MARKETING",
+        subtitle: "Brand guidelines, promotion policies, marketing campaigns, and corporate branding standards.",
+        color: "from-pink-900 to-pink-600",
+        buttonColor: "bg-pink-600 hover:bg-pink-700",
+        idlePrompt: "Ask about marketing campaigns, logo guidelines, or branding standards.",
+        disclaimer: "If you need any further clarifications, please reach out to the Marketing & Communications department."
     }
 };

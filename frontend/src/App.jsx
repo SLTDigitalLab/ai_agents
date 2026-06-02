@@ -75,6 +75,9 @@ const COLOR_RGB = {
   indigo:  '79, 70, 229',
   orange:  '234, 88, 12',
   fuchsia: '192, 38, 211',
+  teal:    '20, 184, 166',
+  amber:   '245, 158, 11',
+  pink:    '236, 72, 153',
 };
 const getAgentRGB = (colorStr) => {
   const m = colorStr?.match(/from-(\w+)-/);

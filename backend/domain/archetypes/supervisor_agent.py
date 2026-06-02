@@ -53,6 +53,9 @@ SPECIALIST_BUILDERS = {
     "admin": build_kb_workflow,
     "it": build_kb_workflow,
     "cia": build_kb_workflow,
+    "network": build_kb_workflow,
+    "legal": build_kb_workflow,
+    "marketing": build_kb_workflow,
 }
 
 
@@ -580,6 +583,9 @@ Available specialists:
 - IT: technical support, hardware, software, network, access management
 - Admin: facilities, transport, security, parking, office support
 - CIA: internal audit, risk management, governance, compliance, audit committee, internal controls
+- Network: enterprise network, WAN/LAN setup, IP address allocation, routing, noc requests
+- Legal: contract review, NDAs, regulatory compliance, statutory regulations, corporate agreements
+- Marketing: brand guidelines, marketing campaigns, promotions, logo usage, sponsorships
 
 Rules:
 1. Be concise, clear, and practical.
@@ -614,7 +620,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
 
     if reason == "vague_prompt" or not display_names:
         content = (
-            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -628,7 +634,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
     if len(display_names) == 1:
         content = (
             f"I think this may belong to **{display_names[0]}**. "
-            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -644,7 +650,7 @@ async def respond_out_of_scope(state: AgentState) -> dict:
     content = (
         "I cannot answer that request. "
         "I am limited to platform/help questions and requests related to "
-        "**HR**, **Finance**, **IT**, **Admin**, and **CIA**."
+        "**HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, and **Marketing**."
     )
     return {"messages": [AIMessage(content=content)]}
 
@@ -1034,7 +1040,7 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "I could not find a clear answer for this in our HR, Finance, "
-                        "Admin, IT, or CIA knowledge bases. Could you rephrase or add a bit more detail?"
+                        "Admin, IT, CIA, Network, Legal, or Marketing knowledge bases. Could you rephrase or add a bit more detail?"
                     )
                 )
             ],
@@ -1196,6 +1202,9 @@ def build_supervisor_workflow() -> StateGraph:
             "delegate_admin": "delegate_admin",
             "delegate_it": "delegate_it",
             "delegate_cia": "delegate_cia",
+            "delegate_network": "delegate_network",
+            "delegate_legal": "delegate_legal",
+            "delegate_marketing": "delegate_marketing",
         },
     )
 
@@ -1210,5 +1219,8 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("delegate_admin", END)
     workflow.add_edge("delegate_it", END)
     workflow.add_edge("delegate_cia", END)
+    workflow.add_edge("delegate_network", END)
+    workflow.add_edge("delegate_legal", END)
+    workflow.add_edge("delegate_marketing", END)
 
     return workflow
