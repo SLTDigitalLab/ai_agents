@@ -587,7 +587,7 @@ Available specialists:
 - CIA: internal audit, risk management, governance, compliance, audit committee, internal controls
 - Network: enterprise network, WAN/LAN setup, IP address allocation, routing, noc requests
 - Legal: contract review, NDAs, regulatory compliance, statutory regulations, corporate agreements
-- Marketing: brand guidelines, marketing campaigns, promotions, logo usage, sponsorships
+- Marketing: corporate brand identity (Corporate Brand Guidelines 2012), brand activations and events, sponsorships, outdoor branding (hoardings, MSANs, pylons, digital displays), vehicle and premises branding, POSM production/distribution, TVCs, and promotional giveaways
 - Enterprise Business: B2B corporate solutions — IP VPN, Internet Leased Lines (ILL), iDC hosting, managed Security Operations Centre (MSOC), IoT platforms, enterprise CPE/NTU and UC VoIP; governance via EIMC/ESGB, unit rate contracts, partnerships, and SME/MB/LB/GI account management
 - Consumer Business: B2C retail products — PSTN/Mega Line, ADSL, FTTH broadband, LTE, and PEO TV packages (Single/Double/Triple Play); consumer sales, dealer registration and commissions, loyalty promotions, pricing, billing, late payment fees, and disconnections
 
