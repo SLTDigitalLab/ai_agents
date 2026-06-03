@@ -561,7 +561,7 @@ async def answer_directly(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "Hi! I’m Workmate AI. I can help with platform questions "
-                        "or requests related to **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+                        "or requests related to **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
                     )
                 )
             ],
