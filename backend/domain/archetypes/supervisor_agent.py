@@ -53,13 +53,36 @@ SPECIALIST_BUILDERS = {
     "admin": build_kb_workflow,
     "it": build_kb_workflow,
     "cia": build_kb_workflow,
+    "network": build_kb_workflow,
+    "legal": build_kb_workflow,
+    "marketing": build_kb_workflow,
 }
+
+
+_DOUBLED_TEXT_RE = re.compile(r"^(.+?)(?:\s*\1)+$", re.DOTALL)
+
+
+def _collapse_doubled_text(text: str) -> str:
+    """Collapse a string that is the same content repeated back-to-back.
+
+    Defensive safety net: if a specialist answer ever comes back with its full
+    text duplicated (e.g. a model/streaming quirk in the delegation path), this
+    removes the repetition so the user sees the answer only once. Only triggers
+    on an exact whole-message repeat, so normal answers are untouched.
+    """
+    stripped = text.strip()
+    if len(stripped) < 10:
+        return stripped
+    match = _DOUBLED_TEXT_RE.fullmatch(stripped)
+    if match:
+        return match.group(1).strip()
+    return stripped
 
 
 def _extract_text(content: Any) -> str:
     """Normalize LangChain message content into plain text."""
     if isinstance(content, str):
-        return content.strip()
+        return _collapse_doubled_text(content)
 
     if isinstance(content, list):
         text_parts: list[str] = []
@@ -68,7 +91,8 @@ def _extract_text(content: Any) -> str:
                 text_parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(str(block["text"]))
-        return " ".join(part.strip() for part in text_parts if part).strip()
+        joined = " ".join(part.strip() for part in text_parts if part).strip()
+        return _collapse_doubled_text(joined)
 
     return str(content).strip()
 
@@ -537,7 +561,7 @@ async def answer_directly(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "Hi! I’m Workmate AI. I can help with platform questions "
-                        "or requests related to **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+                        "or requests related to **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
                     )
                 )
             ],
@@ -559,11 +583,14 @@ Available specialists:
 - IT: technical support, hardware, software, network, access management
 - Admin: facilities, transport, security, parking, office support
 - CIA: internal audit, risk management, governance, compliance, audit committee, internal controls
+- Network: enterprise network, WAN/LAN setup, IP address allocation, routing, noc requests
+- Legal: contract review, NDAs, regulatory compliance, statutory regulations, corporate agreements
+- Marketing: brand guidelines, marketing campaigns, promotions, logo usage, sponsorships
 
 Rules:
 1. Be concise, clear, and practical.
 2. If the user asks which specialist should handle something, answer directly.
-3. Do not invent HR, finance, IT, admin, or CIA facts.
+3. Do not invent HR, finance, IT, admin, CIA, network, legal, or marketing facts.
 4. If the user is clearly asking a specialist-domain factual question, say that you can route them to the right specialist and name the best fit.
 5. Do not mention routing scores, thresholds, embeddings, vectors, or internal implementation.
 6. Do not end with a closing question.
@@ -593,7 +620,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
 
     if reason == "vague_prompt" or not display_names:
         content = (
-            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -607,7 +634,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
     if len(display_names) == 1:
         content = (
             f"I think this may belong to **{display_names[0]}**. "
-            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -623,7 +650,7 @@ async def respond_out_of_scope(state: AgentState) -> dict:
     content = (
         "I cannot answer that request. "
         "I am limited to platform/help questions and requests related to "
-        "**HR**, **Finance**, **IT**, **Admin**, and **CIA**."
+        "**HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, and **Marketing**."
     )
     return {"messages": [AIMessage(content=content)]}
 
@@ -651,9 +678,14 @@ def _build_delegate_node(agent_id: str):
                 for message in result.get("messages", [])
                 if getattr(message, "type", None) == "ai"
             ]
-            final_message = ai_messages[-1] if ai_messages else AIMessage(
-                content="I could not get a response from the specialist agent."
-            )
+            if ai_messages:
+                # Normalize content (also collapses any accidental full-text
+                # duplication introduced by running the specialist via .ainvoke()).
+                final_message = AIMessage(content=_extract_text(ai_messages[-1].content))
+            else:
+                final_message = AIMessage(
+                    content="I could not get a response from the specialist agent."
+                )
             return {
                 "messages": [final_message],
                 "last_specialist_agent": agent_id,
@@ -664,7 +696,6 @@ def _build_delegate_node(agent_id: str):
             }
         except Exception:
             logger.exception("Supervisor delegation failed for agent=%s", agent_id)
-            logger.info("Delegated final message raw content: %r", final_message.content)
             return {
                 "messages": [
                     AIMessage(
@@ -1009,7 +1040,7 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "I could not find a clear answer for this in our HR, Finance, "
-                        "Admin, IT, or CIA knowledge bases. Could you rephrase or add a bit more detail?"
+                        "Admin, IT, CIA, Network, Legal, or Marketing knowledge bases. Could you rephrase or add a bit more detail?"
                     )
                 )
             ],
@@ -1171,6 +1202,9 @@ def build_supervisor_workflow() -> StateGraph:
             "delegate_admin": "delegate_admin",
             "delegate_it": "delegate_it",
             "delegate_cia": "delegate_cia",
+            "delegate_network": "delegate_network",
+            "delegate_legal": "delegate_legal",
+            "delegate_marketing": "delegate_marketing",
         },
     )
 
@@ -1185,5 +1219,8 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("delegate_admin", END)
     workflow.add_edge("delegate_it", END)
     workflow.add_edge("delegate_cia", END)
+    workflow.add_edge("delegate_network", END)
+    workflow.add_edge("delegate_legal", END)
+    workflow.add_edge("delegate_marketing", END)
 
     return workflow

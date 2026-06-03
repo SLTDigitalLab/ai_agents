@@ -11,7 +11,9 @@ Flow:
     START ──► agent (LLM supervisor) ──► tools_condition ──► tools ──► agent ──► END
 """
 
-from langchain_core.messages import trim_messages
+import re
+
+from langchain_core.messages import AIMessage, trim_messages
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -20,6 +22,40 @@ from core.llm import get_chat_model
 from domain.state import AgentState
 from domain.tools.api_tools import _extract_sid_from_email, get_employee_leave_balance
 from domain.tools.rag_tools import search_knowledge_base
+
+# Refusal shown when a user asks for someone else's leave balance.
+_OTHER_EMPLOYEE_LEAVE_REFUSAL = (
+    "Sorry, I can't do that. You can only view your own leave balance."
+)
+# A leave request is "for someone else" only if it mentions leave AND an
+# employee ID that is not the caller's own.
+_LEAVE_KEYWORDS = ("leave balance", "leave bal", "annual leave", "casual leave",
+                   "sick leave", "leaves", "my leave", "leave")
+_EMP_ID_RE = re.compile(r"\b\d{4,8}\b")
+
+
+def _latest_human_text(messages: list) -> str:
+    """Return the most recent human message as plain text."""
+    for message in reversed(messages or []):
+        if getattr(message, "type", None) == "human":
+            content = message.content
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def _is_other_employee_leave_request(text: str, auth_sid: str) -> bool:
+    """True when the user asks for a leave balance using an employee ID that
+    is clearly NOT their own. Used to deterministically refuse (and avoid the
+    LLM doing a confused two-pass tool-call + refusal, which streamed twice)."""
+    lowered = text.lower()
+    if not any(keyword in lowered for keyword in _LEAVE_KEYWORDS):
+        return False
+    auth_norm = auth_sid.lstrip("0")
+    for found in _EMP_ID_RE.findall(text):
+        if found.lstrip("0") != auth_norm:
+            return True
+    return False
+
 
 # ── LLM setup ────────────────────────────────────────────────────────────
 llm = get_chat_model()
@@ -37,6 +73,14 @@ async def call_model(state: AgentState) -> dict:
     # The authenticated caller's own employee ID, used so the agent can tell
     # a self leave-balance request apart from a request for someone else.
     auth_sid = _extract_sid_from_email(state.get("user_id", "")) or "unknown"
+
+    # Deterministic privacy guard: if the user asks for someone else's leave
+    # balance (an employee ID that is not their own), refuse immediately with a
+    # single clean message — without invoking the tool-calling LLM. This both
+    # enforces privacy reliably and avoids the model emitting the refusal twice.
+    latest_human = _latest_human_text(state.get("messages", []))
+    if auth_sid != "unknown" and _is_other_employee_leave_request(latest_human, auth_sid):
+        return {"messages": [AIMessage(content=_OTHER_EMPLOYEE_LEAVE_REFUSAL)]}
 
     if via_supervisor:
         identity_block = """You are Workmate AI, SLTMobitel's unified internal assistant. The user does not know about any sub-agents or routing — they are talking to a single assistant called Workmate AI. For this turn, answer using HR knowledge. At SLTMobitel, HR covers Leave Policies, Employee Benefits, and all Staff Loans (Distress, Motorcycle, Car, Education).
