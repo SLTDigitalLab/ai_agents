@@ -1,4 +1,9 @@
 import logging
+from dotenv import load_dotenv
+
+# --- 0. Load Environment Variables First ---
+# This ensures Langfuse (and other services) pick up the .env credentials immediately
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,13 +33,13 @@ app.add_middleware(
 
 # --- 2. Register Routers ---
 app.include_router(admin.router)
-app.include_router(chat.router)  # Connect the new chat endpoint
-app.include_router(orders.router)  # LifeStore order submissions
-app.include_router(enterprise.router)  # Enterprise lead → Bitrix24
-app.include_router(admin_dashboard.router)  # Admin dashboard panel
-app.include_router(feedback.router)  # Feedback (thumbs up/down)
-app.include_router(finance.router)  # External Finance KB retrieval (voice assistant)
-app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev local → prod vectors)
+app.include_router(chat.router)  # The Langfuse logic goes inside here!
+app.include_router(orders.router)  
+app.include_router(enterprise.router)  
+app.include_router(admin_dashboard.router)  
+app.include_router(feedback.router)  
+app.include_router(finance.router)  
+app.include_router(kb_retrieval.router)  
 app.include_router(ingestion_router)
 
 @app.get("/")
