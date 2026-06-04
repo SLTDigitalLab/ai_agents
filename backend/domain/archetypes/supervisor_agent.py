@@ -585,8 +585,8 @@ Available specialists:
 - IT: technical support, hardware, software, network, access management
 - Admin: facilities, transport, security, parking, office support
 - CIA: internal audit, risk management, governance, compliance, audit committee, internal controls
-- Network: enterprise network, WAN/LAN setup, IP address allocation, routing, noc requests
-- Legal: contract review, NDAs, regulatory compliance, statutory regulations, corporate agreements
+- Network: telecom infrastructure design/operation — Core and Transport (MPLS, SDH, OTN, 100G core), primary access (LTE, CDMA, MSAN, OLT), secondary fiber access (FTTH/ODN, FTC/FDP, OTDR), IP routing (OSPF, BGP, RSVP-TE, BRAS, VPNs), ENSA assurance, and NOC/BBNOC monitoring
+- Legal: contracts and contractual frameworks (GCC, SCC, MSA, NDAs), regulatory compliance (Personal Data Protection Act, Anti-Corruption Act, TRC), dispute resolution and arbitration (SIAC, ICLP), intellectual property, liability/indemnity, and legal certifications (GCEO circulars)
 - Marketing: corporate brand identity (Corporate Brand Guidelines 2012), brand activations and events, sponsorships, outdoor branding (hoardings, MSANs, pylons, digital displays), vehicle and premises branding, POSM production/distribution, TVCs, and promotional giveaways
 - Enterprise Business: B2B corporate solutions — IP VPN, Internet Leased Lines (ILL), iDC hosting, managed Security Operations Centre (MSOC), IoT platforms, enterprise CPE/NTU and UC VoIP; governance via EIMC/ESGB, unit rate contracts, partnerships, and SME/MB/LB/GI account management
 - Consumer Business: B2C retail products — PSTN/Mega Line, ADSL, FTTH broadband, LTE, and PEO TV packages (Single/Double/Triple Play); consumer sales, dealer registration and commissions, loyalty promotions, pricing, billing, late payment fees, and disconnections
