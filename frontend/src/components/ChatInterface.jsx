@@ -978,7 +978,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                             </div>
                                         ),
                                         th: ({ node, ...props }) => <th className="bg-gray-50 dark:bg-gray-800 px-4 py-2 font-semibold border-b border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 border-r dark:border-r-gray-700 last:border-r-0" {...props} />,
-                                        td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 border-r border-gray-100 dark:border-r-gray-800 last:border-r-0 text-gray-600 dark:text-gray-300" {...props} />,
+                                        td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 border-r last:border-r-0 text-gray-600 dark:text-gray-300" {...props} />,
                                         tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 dark:even:bg-gray-800/40 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors" {...props} />,
                                         code: ({ node, inline, className, children, ...props }) => {
                                             if (inline) {

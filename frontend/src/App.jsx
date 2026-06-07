@@ -247,9 +247,6 @@ const AgentWrapper = () => {
   const user = accounts[0] || {};
   const agentConfig = AGENTS[agentType];
   const { theme } = useTheme();
-  const isAuthed = accounts.length > 0;
-  // Dark mode only applies in the authenticated chat surface; login stays light.
-  const effectiveTheme = isAuthed && theme === 'dark' ? 'dark' : 'light';
 
   if (!agentConfig) {
     return (
@@ -259,39 +256,58 @@ const AgentWrapper = () => {
     );
   }
 
+  const isAuthed = accounts.length > 0;
+  const isPublicAgent = agentConfig.public === true;
+
+  // Dark mode only applies in the authenticated chat surface; login stays light.
+  // Public agents stay light because they are customer-facing.
+  const effectiveTheme =
+    !isPublicAgent && isAuthed && theme === "dark" ? "dark" : "light";
+
   // Dynamic browser tab title
   useEffect(() => {
     document.title = `${agentConfig.title}`;
-    return () => { document.title = 'SLTMobitel AI Agent'; };
+    return () => {
+      document.title = "SLTMobitel AI Agent";
+    };
   }, [agentConfig.title]);
 
   // Toggle the `dark` class on <html> so Tailwind's class strategy applies
-  // reliably across the entire tree (including portals/fixed elements).
-  // Removed on unmount so login screen, admin pages, and logout never get stuck dark.
+  // reliably across the entire tree.
+  // Public LifeStore/Enterprise agents do not use authenticated dark mode.
   useEffect(() => {
     const root = document.documentElement;
-    if (effectiveTheme === 'dark') root.classList.add('dark');
-    else root.classList.remove('dark');
-    return () => { root.classList.remove('dark'); };
+
+    if (effectiveTheme === "dark") root.classList.add("dark");
+    else root.classList.remove("dark");
+
+    return () => {
+      root.classList.remove("dark");
+    };
   }, [effectiveTheme]);
 
   const handleLogin = () => {
-    // 1. Set flags so the app knows this is a legitimate user action, not a back-button loop
-    sessionStorage.setItem('intentionalLogin', 'true');
-    sessionStorage.setItem('lastAgent', location.pathname);
+    // 1. Set flags so the app knows this is a legitimate user action, not a back-button loop.
+    sessionStorage.setItem("intentionalLogin", "true");
+    sessionStorage.setItem("lastAgent", location.pathname);
 
-    // 2. Use Redirect, NOT popup
-    instance.loginRedirect(loginRequest).catch(e => console.error(e));
+    // 2. Use Redirect, NOT popup.
+    instance.loginRedirect(loginRequest).catch((e) => console.error(e));
   };
 
   const handleLogout = () => {
-    instance.logoutRedirect({
-      postLogoutRedirectUri: window.location.origin + location.pathname
-    }).catch(e => console.error(e));
+    instance
+      .logoutRedirect({
+        postLogoutRedirectUri: window.location.origin + location.pathname,
+      })
+      .catch((e) => console.error(e));
   };
 
   const chatRef = useRef(null);
-  const ambientBg = buildAmbientBackground(getAgentRGB(agentConfig.color), effectiveTheme);
+  const ambientBg = buildAmbientBackground(
+    getAgentRGB(agentConfig.color),
+    effectiveTheme
+  );
 
   return (
     <div
@@ -305,147 +321,228 @@ const AgentWrapper = () => {
         style={{ backgroundImage: GRAIN_DATA_URL }}
       />
 
-      {/* ── Left Sidebar (authenticated only) ─────────── */}
-      <AuthenticatedTemplate>
-        <SidebarRail
-          onNewChat={() => chatRef.current?.clearChat()}
-          user={user}
-          onLogout={handleLogout}
-          agentColor={agentConfig.color}
-        />
-      </AuthenticatedTemplate>
+      {/* ── Left Sidebar: internal authenticated agents only ─────────── */}
+      {!isPublicAgent && (
+        <AuthenticatedTemplate>
+          <SidebarRail
+            onNewChat={() => chatRef.current?.clearChat()}
+            user={user}
+            onLogout={handleLogout}
+            agentColor={agentConfig.color}
+          />
+        </AuthenticatedTemplate>
+      )}
 
       {/* ── Main Column ───────────────────────────────── */}
       <div className="flex-1 flex flex-col min-h-0 min-w-0 relative">
-
-      {/* ── Top Bar ────────────────────────────────────── */}
-      <motion.header
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-        className="relative z-20 flex items-center gap-2 sm:gap-4 px-3 sm:px-14 py-3 sm:py-4"
-      >
-        {/* Mobile-only: new chat button (sidebar is hidden below sm) */}
-        <AuthenticatedTemplate>
-          <motion.button
-            type="button"
-            onClick={() => chatRef.current?.clearChat()}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            title="New chat"
-            className="sm:hidden flex items-center justify-center w-9 h-9 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 shrink-0"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-              <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
-              <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
-            </svg>
-          </motion.button>
-        </AuthenticatedTemplate>
-
-        {/* Agent identity: logo if provided, otherwise title text. */}
-        <div className="min-w-0 flex-1 flex flex-col">
-          {agentConfig.logo ? (
-            <img
-              src={agentConfig.logo}
-              alt={agentConfig.title}
-              className="h-8 sm:h-10 w-auto self-start max-w-full object-contain"
-            />
-          ) : (
-            <h1 className="text-lg sm:text-xl font-bold text-gray-950 dark:text-gray-100 tracking-tight leading-tight truncate">
-              {agentConfig.title.replace(/^ASK /i, 'Ask ')}
-            </h1>
-          )}
-        </div>
-
-        {/* Right cluster: SLT logo + mobile avatar */}
-        <div className="flex items-center gap-2 sm:gap-0 shrink-0">
-          <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-10 w-auto drop-shadow-sm" />
-          <AuthenticatedTemplate>
-            <div className="sm:hidden">
-              <UserAvatarMenu user={user} onLogout={handleLogout} agentColor={agentConfig.color} placement="downLeft" />
-            </div>
-          </AuthenticatedTemplate>
-        </div>
-      </motion.header>
-
-      {/* ── Content Area ───────────────────────────────── */}
-      <AnimatePresence mode="wait">
-        {/* ── Unauthenticated Login View (light mode) ─────────────── */}
-        <UnauthenticatedTemplate key="unauth">
-          <motion.div
-            key="unauth-content"
-            initial="hidden"
-            animate="visible"
-            exit={{ opacity: 0, y: -20 }}
-            variants={containerVariants}
-            className="flex-1 flex flex-col items-center justify-center px-4 z-10"
-          >
-
-            {/* Title */}
-            <motion.h1
-              variants={itemVariants}
-              className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 tracking-tight text-center"
-            >
-              {agentConfig.title.replace(/^ASK /i, 'Ask ')}
-            </motion.h1>
-
-            <motion.div
-              variants={cardVariants}
-              className="relative w-full max-w-md mt-8"
-            >
-              <div className={`absolute -inset-1 blur-2xl opacity-20 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 pointer-events-none`} />
-              <div className="relative bg-white w-full rounded-3xl p-8 sm:p-10 flex flex-col items-center justify-center border border-gray-200/80 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.12)]">
-                <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${agentConfig.color} flex items-center justify-center mb-6 shadow-md`}>
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.8} stroke="currentColor" className="w-7 h-7 text-white">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-                  </svg>
-                </div>
-
-                <p className="text-gray-700 text-[0.8rem] font-bold mb-2 tracking-[0.2em] uppercase">
-                  Secure Identity
-                </p>
-                <p className="text-gray-500 text-sm mb-8 text-center font-light">
-                  Authenticate securely through your corporate Microsoft tunnel
-                </p>
-
-                <motion.button
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={handleLogin}
-                  className="relative flex items-center justify-center gap-3 w-full px-8 py-3.5 rounded-full bg-gray-900 hover:bg-gray-800 text-white font-medium shadow-md transition-colors"
+        {/* ── Top Bar ────────────────────────────────────── */}
+        <motion.header
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          className="relative z-20 flex items-center gap-2 sm:gap-4 px-3 sm:px-14 py-3 sm:py-4"
+        >
+          {/* Mobile-only new chat button: internal authenticated agents only */}
+          {!isPublicAgent && (
+            <AuthenticatedTemplate>
+              <motion.button
+                type="button"
+                onClick={() => chatRef.current?.clearChat()}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                title="New chat"
+                className="sm:hidden flex items-center justify-center w-9 h-9 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 shrink-0"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                  className="w-5 h-5"
                 >
-                  <MicrosoftIcon />
-                  Login with Microsoft
-                </motion.button>
-              </div>
-            </motion.div>
+                  <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
+                  <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
+                </svg>
+              </motion.button>
+            </AuthenticatedTemplate>
+          )}
 
-            {/* Bottom branding footer */}
+          {/* Agent identity: logo if provided, otherwise title text */}
+          <div className="min-w-0 flex-1 flex flex-col">
+            {agentConfig.logo ? (
+              <img
+                src={agentConfig.logo}
+                alt={agentConfig.title}
+                className="h-8 sm:h-10 w-auto self-start max-w-full object-contain"
+              />
+            ) : (
+              <h1 className="text-lg sm:text-xl font-bold text-gray-950 dark:text-gray-100 tracking-tight leading-tight truncate">
+                {agentConfig.title.replace(/^ASK /i, "Ask ")}
+              </h1>
+            )}
+          </div>
+
+          {/* Right cluster: SLT logo + mobile avatar for internal authenticated agents */}
+          <div className="flex items-center gap-2 sm:gap-0 shrink-0">
+            <img
+              src={sltLogo}
+              alt="SLTMobitel"
+              className="h-7 sm:h-10 w-auto drop-shadow-sm"
+            />
+
+            {!isPublicAgent && (
+              <AuthenticatedTemplate>
+                <div className="sm:hidden">
+                  <UserAvatarMenu
+                    user={user}
+                    onLogout={handleLogout}
+                    agentColor={agentConfig.color}
+                    placement="downLeft"
+                  />
+                </div>
+              </AuthenticatedTemplate>
+            )}
+          </div>
+        </motion.header>
+
+        {/* ── Content Area ───────────────────────────────── */}
+        <AnimatePresence mode="wait">
+          {isPublicAgent ? (
+            /*
+              Public customer-facing agents:
+              - Ask LifeStore
+              - Ask Enterprise
+
+              These bypass Microsoft authentication completely.
+            */
             <motion.div
-              variants={itemVariants}
-              className="mt-12 flex items-center justify-center gap-1.5 select-none cursor-default"
+              key="public-chat-content"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.4 }}
+              className="flex-1 flex flex-col min-h-0 z-10"
             >
-              <span className="text-[0.65rem] uppercase tracking-widest font-semibold text-gray-500">Powered by</span>
-              <img src={embryoLogo} alt="Embryo Logo" className="h-[20px] w-auto object-contain" />
+              <ChatInterface ref={chatRef} agentConfig={agentConfig} />
             </motion.div>
-          </motion.div>
-        </UnauthenticatedTemplate>
+          ) : (
+            /*
+              Internal agents:
+              - Workmate AI
+              - HR
+              - Finance
+              - Admin
+              - IT
+              - CIA
+              - Process
+              - Network
+              - Legal
+              - Marketing
+              - HR SLM
 
-        {/* ── Authenticated Chat View ────────────────────── */}
-        <AuthenticatedTemplate key="auth">
-          <motion.div
-            key="auth-content"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.4 }}
-            className="flex-1 flex flex-col min-h-0 z-10"
-          >
-            <ChatInterface ref={chatRef} agentConfig={agentConfig} />
-          </motion.div>
-        </AuthenticatedTemplate>
-      </AnimatePresence>
+              These still require Microsoft authentication.
+            */
+            <>
+              {/* ── Unauthenticated Login View: internal agents only ─────────────── */}
+              <UnauthenticatedTemplate key="unauth">
+                <motion.div
+                  key="unauth-content"
+                  initial="hidden"
+                  animate="visible"
+                  exit={{ opacity: 0, y: -20 }}
+                  variants={containerVariants}
+                  className="flex-1 flex flex-col items-center justify-center px-4 z-10"
+                >
+                  {/* Title */}
+                  <motion.h1
+                    variants={itemVariants}
+                    className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 tracking-tight text-center"
+                  >
+                    {agentConfig.title.replace(/^ASK /i, "Ask ")}
+                  </motion.h1>
 
+                  {/* Login card */}
+                  <motion.div
+                    variants={cardVariants}
+                    className="relative w-full max-w-md mt-8"
+                  >
+                    <div
+                      className={`absolute -inset-1 blur-2xl opacity-20 bg-gradient-to-br ${agentConfig.color} rounded-[2.5rem] -z-10 pointer-events-none`}
+                    />
+
+                    <div className="relative bg-white w-full rounded-3xl p-8 sm:p-10 flex flex-col items-center justify-center border border-gray-200/80 shadow-[0_20px_50px_-15px_rgba(0,0,0,0.12)]">
+                      <div
+                        className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${agentConfig.color} flex items-center justify-center mb-6 shadow-md`}
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          strokeWidth={1.8}
+                          stroke="currentColor"
+                          className="w-7 h-7 text-white"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+                          />
+                        </svg>
+                      </div>
+
+                      <p className="text-gray-700 text-[0.8rem] font-bold mb-2 tracking-[0.2em] uppercase">
+                        Secure Identity
+                      </p>
+
+                      <p className="text-gray-500 text-sm mb-8 text-center font-light">
+                        Authenticate securely through your corporate Microsoft
+                        tunnel
+                      </p>
+
+                      <motion.button
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
+                        onClick={handleLogin}
+                        className="relative flex items-center justify-center gap-3 w-full px-8 py-3.5 rounded-full bg-gray-900 hover:bg-gray-800 text-white font-medium shadow-md transition-colors"
+                      >
+                        <MicrosoftIcon />
+                        Login with Microsoft
+                      </motion.button>
+                    </div>
+                  </motion.div>
+
+                  {/* Bottom branding footer */}
+                  <motion.div
+                    variants={itemVariants}
+                    className="mt-12 flex items-center justify-center gap-1.5 select-none cursor-default"
+                  >
+                    <span className="text-[0.65rem] uppercase tracking-widest font-semibold text-gray-500">
+                      Powered by
+                    </span>
+                    <img
+                      src={embryoLogo}
+                      alt="Embryo Logo"
+                      className="h-[20px] w-auto object-contain"
+                    />
+                  </motion.div>
+                </motion.div>
+              </UnauthenticatedTemplate>
+
+              {/* ── Authenticated Chat View: internal agents only ────────────────────── */}
+              <AuthenticatedTemplate key="auth">
+                <motion.div
+                  key="auth-content"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.4 }}
+                  className="flex-1 flex flex-col min-h-0 z-10"
+                >
+                  <ChatInterface ref={chatRef} agentConfig={agentConfig} />
+                </motion.div>
+              </AuthenticatedTemplate>
+            </>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

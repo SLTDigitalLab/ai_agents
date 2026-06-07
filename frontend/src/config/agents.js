@@ -78,6 +78,7 @@ export const AGENTS = {
 
     // 5. Enterprise
     askenterprise: {
+        public: true,
         id: "enterprise",
         title: "ASK ENTERPRISE",
         subtitle: "Strategic insights, enterprise solutions, and corporate business intelligence.",
@@ -100,6 +101,7 @@ export const AGENTS = {
 
     // 7. Lifestore
     asklifestore: {
+        public: true,
         id: "lifestore",
         title: "ASK LIFESTORE",
         subtitle: "Product details, inventory queries, and smart lifestyle solutions for customers.",
