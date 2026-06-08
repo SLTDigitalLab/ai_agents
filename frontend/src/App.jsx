@@ -78,6 +78,8 @@ const COLOR_RGB = {
   teal:    '20, 184, 166',
   amber:   '245, 158, 11',
   pink:    '236, 72, 153',
+  violet:  '124, 58, 237',
+  green:   '22, 163, 74',
 };
 const getAgentRGB = (colorStr) => {
   const m = colorStr?.match(/from-(\w+)-/);

@@ -38,6 +38,8 @@ AGENT_BUILDERS: dict[str, callable] = {
     "network": build_kb_workflow,
     "legal": build_kb_workflow,
     "marketing": build_kb_workflow,
+    "enterprise_business": build_kb_workflow,
+    "consumer_business": build_kb_workflow,
 
     # Archetype 2 – KB + API
     "hr": build_kb_api_workflow,
