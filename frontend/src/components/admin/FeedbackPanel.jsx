@@ -18,6 +18,11 @@ const AGENT_COLORS = {
     lifestore: { bg: 'bg-orange-500/10', border: 'border-orange-500/20', text: 'text-orange-400' },
     it: { bg: 'bg-sky-500/10', border: 'border-sky-500/20', text: 'text-sky-400' },
     cia: { bg: 'bg-rose-500/10', border: 'border-rose-500/20', text: 'text-rose-400' },
+    network: { bg: 'bg-teal-500/10', border: 'border-teal-500/20', text: 'text-teal-400' },
+    legal: { bg: 'bg-amber-500/10', border: 'border-amber-500/20', text: 'text-amber-400' },
+    marketing: { bg: 'bg-pink-500/10', border: 'border-pink-500/20', text: 'text-pink-400' },
+    enterprise_business: { bg: 'bg-violet-500/10', border: 'border-violet-500/20', text: 'text-violet-400' },
+    consumer_business: { bg: 'bg-green-500/10', border: 'border-green-500/20', text: 'text-green-400' },
 };
 
 const DEFAULT_COLOR = { bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', text: 'text-cyan-400' };

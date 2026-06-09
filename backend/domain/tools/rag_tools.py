@@ -17,6 +17,7 @@ import json
 import logging
 from typing import Annotated, Optional
 
+import httpx
 from langchain_core.tools import tool
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langgraph.prebuilt import InjectedState
@@ -33,6 +34,29 @@ try:
     from neo4j import GraphDatabase
 except Exception:
     GraphDatabase = None
+
+async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
+    """Proxy retrieval to a remote Ask SLT instance's /api/v1/kb endpoint.
+
+    Used by local dev environments to skip ingestion and read prod vectors.
+    """
+    base = settings.KB_REMOTE_URL.rstrip("/")
+    url = f"{base}/api/v1/kb/{agent_id}/retrieve"
+    headers = {"X-API-Key": settings.KB_REMOTE_API_KEY or ""}
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(url, json={"query": query, "top_k": k}, headers=headers)
+        if resp.status_code == 404:
+            return "[KB_UNAVAILABLE] No knowledge base is configured for this agent."
+        resp.raise_for_status()
+        chunks = resp.json().get("chunks", [])
+
+    if not chunks:
+        return "No relevant documents found."
+
+    return "\n\n---\n\n".join(
+        f"[Source: {c.get('source', 'Unknown Source')} | Link: {c.get('link', '#')}]\n{c.get('text', '')}"
+        for c in chunks
+    )
 
 
 _neo4j_driver = None
@@ -87,7 +111,33 @@ async def _search_qdrant_knowledge_base(
     agent_id: str,
     k: int = 12,
 ) -> str:
+    """Search the Qdrant knowledge base for documents relevant to the user's query.
+
+    Uses hybrid retrieval (dense semantic + BM25 lexical) to balance
+    semantic understanding with exact-match recall on codes, IDs, and
+    proper nouns.
+
+    Args:
+        query: The user's natural-language question.
+        agent_id: Identifier for the target agent (e.g. "hr", "finance").
+                  Determines the Qdrant collection searched.
+
+    Returns:
+        A concatenated string of the most relevant document chunks,
+        or an informational message when no documents are found.
+    """
     collection_name = _resolve_collection_name(agent_id)
+
+    if settings.KB_REMOTE_URL:
+        try:
+            return await _search_remote(agent_id, query, k=10)
+        except Exception as e:
+            log.exception(
+                f"Remote KB retrieval failed for agent='{agent_id}' "
+                f"url='{settings.KB_REMOTE_URL}': {type(e).__name__}: {e}"
+            )
+            return "No relevant documents found."
+
 
     try:
         embeddings = get_embedding_model()

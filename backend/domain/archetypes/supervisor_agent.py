@@ -20,8 +20,9 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, trim_messages
 from langgraph.graph import END, START, StateGraph
+from pydantic import BaseModel, Field
 
-from core.llm import get_chat_model, get_embedding_model
+from core.llm import get_chat_model, get_routing_embedding_model
 from domain.archetypes.kb_agent import build_kb_workflow
 from domain.archetypes.kb_api_agent import build_kb_api_workflow
 from domain.archetypes.kb_form_agent import build_kb_form_workflow
@@ -52,13 +53,38 @@ SPECIALIST_BUILDERS = {
     "admin": build_kb_workflow,
     "it": build_kb_workflow,
     "cia": build_kb_workflow,
+    "network": build_kb_workflow,
+    "legal": build_kb_workflow,
+    "marketing": build_kb_workflow,
+    "enterprise_business": build_kb_workflow,
+    "consumer_business": build_kb_workflow,
 }
+
+
+_DOUBLED_TEXT_RE = re.compile(r"^(.+?)(?:\s*\1)+$", re.DOTALL)
+
+
+def _collapse_doubled_text(text: str) -> str:
+    """Collapse a string that is the same content repeated back-to-back.
+
+    Defensive safety net: if a specialist answer ever comes back with its full
+    text duplicated (e.g. a model/streaming quirk in the delegation path), this
+    removes the repetition so the user sees the answer only once. Only triggers
+    on an exact whole-message repeat, so normal answers are untouched.
+    """
+    stripped = text.strip()
+    if len(stripped) < 10:
+        return stripped
+    match = _DOUBLED_TEXT_RE.fullmatch(stripped)
+    if match:
+        return match.group(1).strip()
+    return stripped
 
 
 def _extract_text(content: Any) -> str:
     """Normalize LangChain message content into plain text."""
     if isinstance(content, str):
-        return content.strip()
+        return _collapse_doubled_text(content)
 
     if isinstance(content, list):
         text_parts: list[str] = []
@@ -67,7 +93,8 @@ def _extract_text(content: Any) -> str:
                 text_parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(str(block["text"]))
-        return " ".join(part.strip() for part in text_parts if part).strip()
+        joined = " ".join(part.strip() for part in text_parts if part).strip()
+        return _collapse_doubled_text(joined)
 
     return str(content).strip()
 
@@ -97,7 +124,7 @@ def _profile_text(agent_id: str) -> str:
 @lru_cache(maxsize=1)
 def _specialist_profile_vectors() -> dict[str, list[float]]:
     """Embed all specialist routing profiles once and cache them."""
-    embedding_model = get_embedding_model()
+    embedding_model = get_routing_embedding_model()
     agent_ids = list(SPECIALIST_ROUTING_PROFILES.keys())
     profile_texts = [_profile_text(agent_id) for agent_id in agent_ids]
     vectors = embedding_model.embed_documents(profile_texts)
@@ -261,7 +288,7 @@ async def _score_specialists(
     last_specialist_agent: str | None,
 ) -> list[tuple[str, float]]:
     """Embed the query and score it against specialist routing profiles."""
-    embedding_model = get_embedding_model()
+    embedding_model = get_routing_embedding_model()
     query_vector = await asyncio.to_thread(embedding_model.embed_query, query)
     profile_vectors = _specialist_profile_vectors()
 
@@ -356,6 +383,31 @@ async def route_request(state: AgentState) -> dict:
     second_agent, second_score = scored[1]
     score_gap = top_score - second_score
     rounded_scores = {agent_id: round(score, 4) for agent_id, score in scored}
+
+    # Both specialists are strongly scored → cross-department compound query, fan out.
+    # Checked before the single-winner path so a keyword boost on one topic doesn't
+    # suppress a legitimately strong second department.
+    if top_score >= STRONG_ROUTE_THRESHOLD and second_score >= STRONG_ROUTE_THRESHOLD:
+        fan_out_targets = [top_agent, second_agent][:MULTI_DELEGATE_MAX_AGENTS]
+        logger.info(
+            "Supervisor route | action=multi_delegate | reason=both_strongly_scored | targets=%s | top=%s %.4f | second=%s %.4f | query=%r",
+            fan_out_targets,
+            top_agent,
+            top_score,
+            second_agent,
+            second_score,
+            query[:200],
+        )
+        return {
+            "routing_action": "multi_delegate",
+            "routed_agent_ids": fan_out_targets,
+            "routing_reason": f"both_strongly_scored:{'+'.join(fan_out_targets)}",
+            "routing_scores": rounded_scores,
+            "delegation_query": query,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
 
     if top_score >= STRONG_ROUTE_THRESHOLD and score_gap >= MIN_ROUTE_MARGIN:
         logger.info(
@@ -511,7 +563,7 @@ async def answer_directly(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "Hi! I’m Workmate AI. I can help with platform questions "
-                        "or requests related to **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+                        "or requests related to **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
                     )
                 )
             ],
@@ -533,11 +585,16 @@ Available specialists:
 - IT: technical support, hardware, software, network, access management
 - Admin: facilities, transport, security, parking, office support
 - CIA: internal audit, risk management, governance, compliance, audit committee, internal controls
+- Network: telecom infrastructure design/operation — Core and Transport (MPLS, SDH, OTN, 100G core), primary access (LTE, CDMA, MSAN, OLT), secondary fiber access (FTTH/ODN, FTC/FDP, OTDR), IP routing (OSPF, BGP, RSVP-TE, BRAS, VPNs), ENSA assurance, and NOC/BBNOC monitoring
+- Legal: contracts and contractual frameworks (GCC, SCC, MSA, NDAs), regulatory compliance (Personal Data Protection Act, Anti-Corruption Act, TRC), dispute resolution and arbitration (SIAC, ICLP), intellectual property, liability/indemnity, and legal certifications (GCEO circulars)
+- Marketing: corporate brand identity (Corporate Brand Guidelines 2012), brand activations and events, sponsorships, outdoor branding (hoardings, MSANs, pylons, digital displays), vehicle and premises branding, POSM production/distribution, TVCs, and promotional giveaways
+- Enterprise Business: B2B corporate solutions — IP VPN, Internet Leased Lines (ILL), iDC hosting, managed Security Operations Centre (MSOC), IoT platforms, enterprise CPE/NTU and UC VoIP; governance via EIMC/ESGB, unit rate contracts, partnerships, and SME/MB/LB/GI account management
+- Consumer Business: B2C retail products — PSTN/Mega Line, ADSL, FTTH broadband, LTE, and PEO TV packages (Single/Double/Triple Play); consumer sales, dealer registration and commissions, loyalty promotions, pricing, billing, late payment fees, and disconnections
 
 Rules:
 1. Be concise, clear, and practical.
 2. If the user asks which specialist should handle something, answer directly.
-3. Do not invent HR, finance, IT, admin, or CIA facts.
+3. Do not invent HR, finance, IT, admin, CIA, network, legal, marketing, enterprise business, or consumer business facts.
 4. If the user is clearly asking a specialist-domain factual question, say that you can route them to the right specialist and name the best fit.
 5. Do not mention routing scores, thresholds, embeddings, vectors, or internal implementation.
 6. Do not end with a closing question.
@@ -567,7 +624,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
 
     if reason == "vague_prompt" or not display_names:
         content = (
-            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, **Marketing**, **Enterprise Business**, or **Consumer Business**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -581,7 +638,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
     if len(display_names) == 1:
         content = (
             f"I think this may belong to **{display_names[0]}**. "
-            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, or **CIA**."
+            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, **Marketing**, **Enterprise Business**, or **Consumer Business**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -597,7 +654,7 @@ async def respond_out_of_scope(state: AgentState) -> dict:
     content = (
         "I cannot answer that request. "
         "I am limited to platform/help questions and requests related to "
-        "**HR**, **Finance**, **IT**, **Admin**, and **CIA**."
+        "**HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, **Marketing**, **Enterprise Business**, and **Consumer Business**."
     )
     return {"messages": [AIMessage(content=content)]}
 
@@ -625,9 +682,14 @@ def _build_delegate_node(agent_id: str):
                 for message in result.get("messages", [])
                 if getattr(message, "type", None) == "ai"
             ]
-            final_message = ai_messages[-1] if ai_messages else AIMessage(
-                content="I could not get a response from the specialist agent."
-            )
+            if ai_messages:
+                # Normalize content (also collapses any accidental full-text
+                # duplication introduced by running the specialist via .ainvoke()).
+                final_message = AIMessage(content=_extract_text(ai_messages[-1].content))
+            else:
+                final_message = AIMessage(
+                    content="I could not get a response from the specialist agent."
+                )
             return {
                 "messages": [final_message],
                 "last_specialist_agent": agent_id,
@@ -638,7 +700,6 @@ def _build_delegate_node(agent_id: str):
             }
         except Exception:
             logger.exception("Supervisor delegation failed for agent=%s", agent_id)
-            logger.info("Delegated final message raw content: %r", final_message.content)
             return {
                 "messages": [
                     AIMessage(
@@ -689,6 +750,97 @@ async def _invoke_specialist_for_fan_out(
         return agent_id, ""
 
 
+class _SubQueryAssignment(BaseModel):
+    """One sub-question paired with the specialist responsible for it."""
+
+    specialist_id: str = Field(
+        description="The specialist id this sub-question belongs to. MUST be one of the ids provided in the prompt."
+    )
+    sub_question: str = Field(
+        description="The focused sub-question for this specialist, copied from the user's original query with minimal edits."
+    )
+
+
+class _Decomposition(BaseModel):
+    sub_queries: list[_SubQueryAssignment] = Field(
+        description="One entry per relevant specialist. Omit a specialist entirely if nothing in the user query relates to its scope."
+    )
+
+
+_decomposer_llm = None
+
+
+def _get_decomposer_llm():
+    """Lazy-load the LLM used to split compound queries with structured output."""
+    global _decomposer_llm
+    if _decomposer_llm is None:
+        _decomposer_llm = get_chat_model().with_structured_output(_Decomposition)
+    return _decomposer_llm
+
+
+async def decompose_query(state: AgentState) -> dict:
+    """Split a compound query into per-specialist sub-questions before fan-out.
+
+    Runs only when the router chose multi_delegate. Falls back to the full query
+    for any specialist whose sub-question can't be extracted, so a decomposition
+    failure never regresses behaviour beyond the previous fan-out approach.
+    """
+    routed_agent_ids = list(state.get("routed_agent_ids") or [])
+    full_query = state.get("delegation_query") or _latest_user_query(state)
+
+    if len(routed_agent_ids) < 2 or not full_query:
+        return {"specialist_queries": {}}
+
+    scope_lines: list[str] = []
+    for agent_id in routed_agent_ids:
+        profile = SPECIALIST_ROUTING_PROFILES.get(agent_id, {})
+        display = profile.get("display_name", agent_id.upper())
+        description = profile.get("description", "")
+        scope_lines.append(f'- specialist_id="{agent_id}" ({display}): {description}')
+
+    system_prompt = (
+        "You split a user's compound question into focused sub-questions and assign each "
+        "to the specialist that owns that topic. For every relevant specialist, output ONE "
+        "entry with their exact specialist_id and the focused sub-question (in the user's "
+        "original phrasing). If a specialist's scope is not addressed in the user's query, "
+        "OMIT that specialist entirely — do not include them with an empty question. "
+        "Use ONLY the specialist_id values listed below; never invent new ids. "
+        "Match each sub-question to the specialist whose scope description ACTUALLY covers "
+        "that topic — do not guess by position or order."
+    )
+    user_prompt = (
+        f'User query: "{full_query}"\n\n'
+        f"Available specialists:\n" + "\n".join(scope_lines) + "\n\n"
+        f"For each relevant specialist, return their specialist_id and the focused "
+        f"sub-question that belongs to them. Read each specialist's scope carefully before "
+        f"assigning a sub-question to them."
+    )
+
+    try:
+        decomposer = _get_decomposer_llm()
+        result: _Decomposition = await decomposer.ainvoke(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+        )
+        specialist_queries: dict[str, str] = {}
+        for entry in result.sub_queries:
+            aid = (entry.specialist_id or "").strip().lower()
+            sub_q = (entry.sub_question or "").strip()
+            if aid in routed_agent_ids and sub_q:
+                specialist_queries[aid] = sub_q
+        logger.info(
+            "Supervisor decompose | full=%r | sub=%s",
+            full_query[:200],
+            {aid: q[:120] for aid, q in specialist_queries.items()},
+        )
+        return {"specialist_queries": specialist_queries}
+    except Exception:
+        logger.exception("Supervisor query decomposition failed; falling back to full query")
+        return {"specialist_queries": {}}
+
+
 async def multi_delegate(state: AgentState) -> dict:
     """Run the top specialists in parallel and stash their answers for synthesis."""
     agent_ids = list(state.get("routed_agent_ids") or [])
@@ -698,20 +850,51 @@ async def multi_delegate(state: AgentState) -> dict:
             "last_specialist_agent": None,
         }
 
-    delegation_query = state.get("delegation_query") or _latest_user_query(state)
+    fallback_query = state.get("delegation_query") or _latest_user_query(state)
+    specialist_queries = state.get("specialist_queries") or {}
+
+    # If the decomposer assigned a sub-question to at least one specialist, trust
+    # its judgment and only invoke the specialists it picked. Skipping the others
+    # avoids hallucinated answers from specialists the decomposer correctly
+    # excluded (e.g. HR being pulled into a vehicle-category question).
+    #
+    # Fall back to "full query for every routed specialist" only when decomposition
+    # produced nothing at all — i.e. a genuine decomposer failure, not a deliberate
+    # exclusion.
+    assigned = {
+        aid: (q or "").strip()
+        for aid, q in specialist_queries.items()
+        if (q or "").strip()
+    }
+
+    invocations: list[tuple[str, str]] = []
+    if assigned:
+        for agent_id in agent_ids:
+            if agent_id in assigned:
+                invocations.append((agent_id, assigned[agent_id]))
+        skipped = [aid for aid in agent_ids if aid not in assigned]
+        if skipped:
+            logger.info(
+                "Supervisor multi_delegate | skipping_per_decomposer=%s",
+                skipped,
+            )
+    else:
+        for agent_id in agent_ids:
+            invocations.append((agent_id, fallback_query))
 
     results = await asyncio.gather(
         *[
-            _invoke_specialist_for_fan_out(agent_id, state, delegation_query)
-            for agent_id in agent_ids
+            _invoke_specialist_for_fan_out(agent_id, state, query)
+            for agent_id, query in invocations
         ]
     )
 
     specialist_answers = {agent_id: answer for agent_id, answer in results}
     logger.info(
-        "Supervisor multi_delegate | agents=%s | answer_lengths=%s",
+        "Supervisor multi_delegate | agents=%s | answer_lengths=%s | per_specialist_queries=%s",
         agent_ids,
         {aid: len(ans) for aid, ans in specialist_answers.items()},
+        {aid: q[:120] for aid, q in invocations},
     )
     for aid, ans in specialist_answers.items():
         logger.info("Supervisor multi_delegate raw | agent=%s | answer=%r", aid, ans[:600])
@@ -777,9 +960,76 @@ def _flatten_for_synthesis(text: str) -> str:
     return flattened.strip()
 
 
+_SOURCES_SPLIT_RE = re.compile(
+    r"\n\s*\*{0,2}\s*Sources\s*:?\s*\*{0,2}\s*",
+    re.IGNORECASE,
+)
+_MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\([^)]+\)")
+
+
+def _split_body_and_sources(answer: str) -> tuple[str, list[str]]:
+    """Split a specialist answer into (body, list of markdown source links).
+
+    The body is everything before the trailing 'Sources:' line. Sources are
+    extracted as Markdown links so we can deduplicate them across specialists.
+    Falls back gracefully if no Sources section is present.
+    """
+    parts = _SOURCES_SPLIT_RE.split(answer, maxsplit=1)
+    if len(parts) == 1:
+        return answer.strip(), []
+    body = parts[0].rstrip()
+    sources_blob = parts[1].strip()
+    links = _MARKDOWN_LINK_RE.findall(sources_blob)
+    return body, links
+
+
+def _synthesize_concat_distinct(
+    useful: dict[str, str],
+    specialist_queries: dict[str, str],
+    query: str,
+) -> dict:
+    """Combine answers when each specialist addressed a different sub-question.
+
+    Deterministic concatenation — no LLM call. Each answer is self-contained
+    and starts with its own BLUF sentence, so we just stack the bodies and
+    merge the Sources lists. Avoids LLM truncation/dropping seen during testing.
+    """
+    bodies: list[str] = []
+    deduped_links: list[str] = []
+    seen: set[str] = set()
+
+    # Stack answers in the order routed_agent_ids defined (preserves routing priority).
+    for agent_id, answer in useful.items():
+        body, links = _split_body_and_sources(answer)
+        if body:
+            bodies.append(body)
+        for link in links:
+            if link not in seen:
+                seen.add(link)
+                deduped_links.append(link)
+
+    final = "\n\n".join(bodies).strip()
+    if deduped_links:
+        final += "\n\nSources: " + ", ".join(deduped_links)
+
+    logger.info(
+        "Supervisor synthesis (concat-distinct) | parts=%d | specialists=%s | source_links=%d",
+        len(useful),
+        list(useful.keys()),
+        len(deduped_links),
+    )
+
+    return {
+        "messages": [AIMessage(content=final)],
+        "specialist_answers": {},
+        "specialist_queries": {},
+    }
+
+
 async def synthesize_multi_answer(state: AgentState) -> dict:
     """Merge multiple specialist answers into one final user-facing reply."""
     specialist_answers: dict[str, str] = state.get("specialist_answers") or {}
+    specialist_queries: dict[str, str] = state.get("specialist_queries") or {}
     query = _latest_user_query(state)
 
     useful = {
@@ -794,11 +1044,12 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "I could not find a clear answer for this in our HR, Finance, "
-                        "Admin, IT, or CIA knowledge bases. Could you rephrase or add a bit more detail?"
+                        "Admin, IT, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business knowledge bases. Could you rephrase or add a bit more detail?"
                     )
                 )
             ],
             "specialist_answers": {},
+            "specialist_queries": {},
         }
 
     # Only one specialist gave useful info — return it verbatim, no merging LLM call.
@@ -807,7 +1058,20 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
         return {
             "messages": [AIMessage(content=only_answer)],
             "specialist_answers": {},
+            "specialist_queries": {},
         }
+
+    # If decomposition produced distinct sub-questions for each useful specialist,
+    # treat answers as side-by-side sections instead of competing same-topic variants.
+    useful_sub_queries = {
+        aid: specialist_queries.get(aid, "").strip()
+        for aid in useful
+        if specialist_queries.get(aid, "").strip()
+    }
+    if len(useful_sub_queries) >= 2 and len(
+        {q.lower() for q in useful_sub_queries.values()}
+    ) >= 2:
+        return _synthesize_concat_distinct(useful, specialist_queries, query)
 
     # Pick a BASE (the more trustworthy answer) and a SECONDARY.
     # Preference order:
@@ -889,6 +1153,7 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
     return {
         "messages": [response],
         "specialist_answers": {},
+        "specialist_queries": {},
     }
 
 
@@ -908,7 +1173,7 @@ def _route_to_node(state: AgentState) -> str:
             return f"delegate_{routed_agent_id}"
     if action == "multi_delegate":
         if state.get("routed_agent_ids"):
-            return "multi_delegate"
+            return "decompose_query"
     return "ask_for_clarification"
 
 
@@ -920,6 +1185,7 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_node("answer_directly", answer_directly)
     workflow.add_node("ask_for_clarification", ask_for_clarification)
     workflow.add_node("respond_out_of_scope", respond_out_of_scope)
+    workflow.add_node("decompose_query", decompose_query)
     workflow.add_node("multi_delegate", multi_delegate)
     workflow.add_node("synthesize_multi_answer", synthesize_multi_answer)
 
@@ -934,18 +1200,24 @@ def build_supervisor_workflow() -> StateGraph:
             "answer_directly": "answer_directly",
             "ask_for_clarification": "ask_for_clarification",
             "respond_out_of_scope": "respond_out_of_scope",
-            "multi_delegate": "multi_delegate",
+            "decompose_query": "decompose_query",
             "delegate_hr": "delegate_hr",
             "delegate_finance": "delegate_finance",
             "delegate_admin": "delegate_admin",
             "delegate_it": "delegate_it",
             "delegate_cia": "delegate_cia",
+            "delegate_network": "delegate_network",
+            "delegate_legal": "delegate_legal",
+            "delegate_marketing": "delegate_marketing",
+            "delegate_enterprise_business": "delegate_enterprise_business",
+            "delegate_consumer_business": "delegate_consumer_business",
         },
     )
 
     workflow.add_edge("answer_directly", END)
     workflow.add_edge("ask_for_clarification", END)
     workflow.add_edge("respond_out_of_scope", END)
+    workflow.add_edge("decompose_query", "multi_delegate")
     workflow.add_edge("multi_delegate", "synthesize_multi_answer")
     workflow.add_edge("synthesize_multi_answer", END)
     workflow.add_edge("delegate_hr", END)
@@ -953,5 +1225,10 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("delegate_admin", END)
     workflow.add_edge("delegate_it", END)
     workflow.add_edge("delegate_cia", END)
+    workflow.add_edge("delegate_network", END)
+    workflow.add_edge("delegate_legal", END)
+    workflow.add_edge("delegate_marketing", END)
+    workflow.add_edge("delegate_enterprise_business", END)
+    workflow.add_edge("delegate_consumer_business", END)
 
     return workflow
