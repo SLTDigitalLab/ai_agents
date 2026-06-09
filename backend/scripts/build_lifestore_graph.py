@@ -3,6 +3,7 @@ import os
 import re
 import time
 from pathlib import Path
+from dotenv import load_dotenv
 from typing import Optional
 from urllib.parse import urljoin
 
@@ -25,6 +26,9 @@ HEADERS = {
 
 REQUEST_DELAY_SECONDS = float(os.getenv("LIFESTORE_GRAPH_DELAY", "0.5"))
 CLEAR_GRAPH = os.getenv("CLEAR_LIFESTORE_GRAPH", "false").lower() == "true"
+
+ROOT_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT_DIR / ".env")
 
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
