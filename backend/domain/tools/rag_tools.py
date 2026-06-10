@@ -71,10 +71,37 @@ def _is_lifestore_agent(agent_id: str) -> bool:
 
 
 def _resolve_collection_name(agent_id: str) -> str:
-    lifestore_collection = _get_setting("LIFESTORE_QDRANT_COLLECTION", None)
+    """
+    Resolve the actual Qdrant collection used for retrieval.
 
-    if _is_lifestore_agent(agent_id) and lifestore_collection:
-        return lifestore_collection
+    Important:
+    - Ingestion may receive collection_name="lifestore".
+    - The backend ingestion layer creates the real Qdrant collection as "lifestore_docs".
+    - Retrieval must search the real Qdrant collection, not the base name.
+    """
+    if _is_lifestore_agent(agent_id):
+        explicit_search_collection = _get_setting(
+            "LIFESTORE_QDRANT_SEARCH_COLLECTION",
+            None,
+        )
+
+        if explicit_search_collection:
+            return explicit_search_collection
+
+        delete_collection = _get_setting(
+            "LIFESTORE_QDRANT_DELETE_COLLECTION",
+            None,
+        )
+
+        if delete_collection:
+            return delete_collection
+
+        base_collection = _get_setting("LIFESTORE_QDRANT_COLLECTION", "lifestore")
+
+        if base_collection.endswith("_docs"):
+            return base_collection
+
+        return f"{base_collection}_docs"
 
     return f"{agent_id}_docs"
 
@@ -264,7 +291,10 @@ def _format_graph_rows(rows: list[dict]) -> str:
             specs = {}
 
         specs_text = ", ".join(f"{k}: {v}" for k, v in specs.items()) if specs else "None"
-        tags_text = ", ".join(tags) if tags else "None"
+        tags_text = ", ".join(str(tag) for tag in tags if tag) if tags else "None"
+
+        description = row.get("description") or ""
+        description = " ".join(str(description).split())
 
         parts.append(
             "\n".join(
@@ -277,8 +307,10 @@ def _format_graph_rows(rows: list[dict]) -> str:
                     f"Price: {row.get('price') or 'Unknown'}",
                     f"Stock Status: {row.get('stock_status') or 'Unknown'}",
                     f"URL: {row.get('url') or 'Unknown'}",
+                    f"Image URL: {row.get('image_url') or 'Unknown'}",
                     f"Tags: {tags_text}",
                     f"Specs: {specs_text}",
+                    f"Description: {description or 'No description available'}",
                 ]
             )
         )
@@ -498,9 +530,9 @@ async def search_knowledge_base(
     graph_context = _search_lifestore_graph(query=query, limit=12)
 
     return f"""
-[NEO4J GRAPH FACTS - USE THESE FOR STOCK, PRICE, BRAND, CATEGORY, PRODUCT TYPE, URL]
+[NEO4J GRAPH FACTS - VERIFIED PRODUCT FACTS. USE THESE FOR NAME, BRAND, SELLER, PRICE, STOCK, CATEGORY, PRODUCT TYPE, URL, DESCRIPTION, FEATURES, AND SPECIFICATIONS]
 {graph_context}
 
-[QDRANT VECTOR CONTEXT - USE THIS FOR DESCRIPTIONS AND GENERAL PRODUCT DETAILS]
+[QDRANT VECTOR CONTEXT - VERIFIED PRODUCT PAGE CONTENT. USE THIS FOR DESCRIPTIONS, FUNCTIONALITIES, FEATURES, SPECIFICATIONS, AND GENERAL PRODUCT DETAILS]
 {qdrant_context}
 """.strip()
