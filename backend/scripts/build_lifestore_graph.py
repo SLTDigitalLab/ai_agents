@@ -1,35 +1,72 @@
+import hashlib
 import json
 import os
 import re
 import time
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, urldefrag
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from neo4j import GraphDatabase
+
+
+# ---------------------------------------------------------------------
+# Paths + .env
+# ---------------------------------------------------------------------
+ROOT_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT_DIR / ".env")
 
 
 # ---------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------
-BASE_URL = "https://lifestore.lk"
-START_PATH = "/categories"
+BASE_URL = os.getenv("LIFESTORE_GRAPH_BASE_URL", "https://lifestore.lk").rstrip("/")
 
-OUTPUT_FILE = Path("data/real/lifestore_all.json")
+START_URLS = [
+    url.strip()
+    for url in os.getenv(
+        "LIFESTORE_GRAPH_START_URLS",
+        "https://lifestore.lk/products?categories=All&products,https://lifestore.lk/categories",
+    ).split(",")
+    if url.strip()
+]
+
+OUTPUT_FILE = ROOT_DIR / Path(
+    os.getenv("LIFESTORE_GRAPH_OUTPUT_FILE", "data/real/lifestore_all.json")
+)
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
 }
 
 REQUEST_DELAY_SECONDS = float(os.getenv("LIFESTORE_GRAPH_DELAY", "0.5"))
+
+# If true, deletes existing Product nodes and dangling Brand/Category/Availability nodes.
+# Use true once when changing from old LS0001 IDs to stable URL-based IDs.
 CLEAR_GRAPH = os.getenv("CLEAR_LIFESTORE_GRAPH", "false").lower() == "true"
 
+# If true, products not found in the latest scrape are removed.
+# Keep false unless you are sure you want exact sync behavior.
+REMOVE_MISSING_PRODUCTS = (
+    os.getenv("REMOVE_MISSING_LIFESTORE_PRODUCTS", "false").lower() == "true"
+)
+
+MAX_LISTING_PAGES = int(os.getenv("LIFESTORE_GRAPH_MAX_LISTING_PAGES", "1000"))
+
+# 0 means unlimited.
+PRODUCT_URL_LIMIT = int(os.getenv("LIFESTORE_GRAPH_PRODUCT_URL_LIMIT", "0"))
+
 NEO4J_URI = os.getenv("NEO4J_URI")
-NEO4J_USERNAME = os.getenv("NEO4J_USERNAME", "neo4j")
+NEO4J_USERNAME = os.getenv("NEO4J_USERNAME") or "neo4j"
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
-NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
+NEO4J_DATABASE = os.getenv("NEO4J_DATABASE") or "neo4j"
 
 
 # ---------------------------------------------------------------------
@@ -37,6 +74,11 @@ NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 # ---------------------------------------------------------------------
 def clean_text(text: str | None) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
+
+
+def normalize_url(url: str) -> str:
+    clean_url, _ = urldefrag(url)
+    return clean_url.strip().rstrip("/")
 
 
 def parse_price_value(text: str) -> Optional[float]:
@@ -72,20 +114,82 @@ def get_lines(soup: BeautifulSoup) -> list[str]:
     return [line for line in lines if line]
 
 
+def make_stable_product_id(product_url: str) -> str:
+    """
+    Create a stable Product ID from the product URL.
+
+    This is better than LS0001, LS0002, etc. because product ordering can change
+    when LifeStore adds/removes products.
+    """
+    parsed = urlparse(product_url)
+    slug = parsed.path.rstrip("/").split("/")[-1]
+
+    clean_slug = re.sub(r"[^a-zA-Z0-9]+", "_", slug).strip("_").upper()
+    digest = hashlib.sha1(product_url.encode("utf-8")).hexdigest()[:8].upper()
+
+    if clean_slug:
+        return f"LS_{clean_slug[:40]}_{digest}"
+
+    return f"LS_{digest}"
+
+
 # ---------------------------------------------------------------------
 # Listing page crawler
 # ---------------------------------------------------------------------
-def extract_product_urls(soup: BeautifulSoup) -> list[str]:
+def is_same_site(url: str) -> bool:
+    parsed_base = urlparse(BASE_URL)
+    parsed_url = urlparse(url)
+
+    return parsed_url.netloc in {
+        parsed_base.netloc,
+        "lifestore.lk",
+        "www.lifestore.lk",
+    }
+
+
+def is_product_url(url: str) -> bool:
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+
+    return is_same_site(url) and path.startswith("/product/")
+
+
+def is_listing_url(url: str) -> bool:
+    parsed = urlparse(url)
+    path = parsed.path or "/"
+
+    if not is_same_site(url):
+        return False
+
+    if path.startswith("/product/"):
+        return False
+
+    allowed_prefixes = [
+        "/products",
+        "/categories",
+        "/category",
+    ]
+
+    return any(path.startswith(prefix) for prefix in allowed_prefixes)
+
+
+def extract_product_urls(soup: BeautifulSoup, current_url: str) -> list[str]:
     urls = []
     seen = set()
 
     for a in soup.find_all("a", href=True):
         href = a.get("href", "").strip()
 
-        if "/product/" not in href:
+        if not href:
             continue
 
-        full_url = urljoin(BASE_URL, href)
+        if href.startswith(("mailto:", "tel:", "javascript:", "#")):
+            continue
+
+        full_url = normalize_url(urljoin(current_url, href))
+
+        if not is_product_url(full_url):
+            continue
 
         if full_url not in seen:
             seen.add(full_url)
@@ -94,56 +198,121 @@ def extract_product_urls(soup: BeautifulSoup) -> list[str]:
     return urls
 
 
-def extract_next_page_url(soup: BeautifulSoup) -> Optional[str]:
+def extract_listing_urls(soup: BeautifulSoup, current_url: str) -> list[str]:
+    urls = []
+    seen = set()
+
     for a in soup.find_all("a", href=True):
-        text = clean_text(a.get_text(" "))
         href = a.get("href", "").strip()
 
-        if "Next page" in text and href:
-            return urljoin(BASE_URL, href)
+        if not href:
+            continue
 
-    return None
+        if href.startswith(("mailto:", "tel:", "javascript:", "#")):
+            continue
+
+        full_url = normalize_url(urljoin(current_url, href))
+
+        if not is_listing_url(full_url):
+            continue
+
+        if full_url not in seen:
+            seen.add(full_url)
+            urls.append(full_url)
+
+    return urls
 
 
 def scrape_listing_pages() -> list[str]:
-    url = urljoin(BASE_URL, START_PATH)
-    all_urls = []
-    seen_products = set()
-    visited_pages = set()
+    """
+    Flexible LifeStore listing crawler.
+
+    Instead of depending only on /categories and text like 'Next page',
+    this crawls useful LifeStore listing/category/product-list pages and
+    collects every /product/ URL it can find.
+
+    This makes the graph update more flexible if LifeStore adds:
+    - more category pages
+    - more pagination pages
+    - more product listing URLs
+    - products under /products?... links
+    """
+    queue: list[str] = []
+    queued: set[str] = set()
+    visited_pages: set[str] = set()
+
+    all_product_urls: list[str] = []
+    seen_products: set[str] = set()
+
+    for start_url in START_URLS:
+        full_start_url = normalize_url(start_url)
+
+        if full_start_url not in queued:
+            queue.append(full_start_url)
+            queued.add(full_start_url)
+
     page_num = 1
 
-    while url and url not in visited_pages:
+    while queue and len(visited_pages) < MAX_LISTING_PAGES:
+        url = queue.pop(0)
+
+        if url in visited_pages:
+            continue
+
         visited_pages.add(url)
 
         print(f"Scraping listing page {page_num}: {url}")
 
-        html = fetch_page(url)
+        try:
+            html = fetch_page(url)
+        except Exception as exc:
+            print(f"  failed listing page: {url} -> {exc}")
+            page_num += 1
+            continue
+
         soup = BeautifulSoup(html, "html.parser")
 
-        product_urls = extract_product_urls(soup)
+        product_urls = extract_product_urls(soup, url)
         print(f"  found product urls: {len(product_urls)}")
 
         for product_url in product_urls:
-            if product_url not in seen_products:
-                seen_products.add(product_url)
-                all_urls.append(product_url)
+            normalized_product_url = normalize_url(product_url)
 
-        next_url = extract_next_page_url(soup)
-        print(f"  next page: {next_url}")
+            if normalized_product_url not in seen_products:
+                seen_products.add(normalized_product_url)
+                all_product_urls.append(normalized_product_url)
 
-        if not next_url or next_url in visited_pages:
-            break
+                if PRODUCT_URL_LIMIT > 0 and len(all_product_urls) >= PRODUCT_URL_LIMIT:
+                    print(f"Product URL limit reached: {PRODUCT_URL_LIMIT}")
+                    print(f"Visited listing pages: {len(visited_pages)}")
+                    print(f"Total unique product URLs: {len(all_product_urls)}")
+                    return all_product_urls
 
-        url = next_url
+        listing_urls = extract_listing_urls(soup, url)
+
+        for next_url in listing_urls:
+            if next_url in visited_pages or next_url in queued:
+                continue
+
+            if len(visited_pages) + len(queue) >= MAX_LISTING_PAGES:
+                break
+
+            queue.append(next_url)
+            queued.add(next_url)
+
+        print(f"  queued listing pages: {len(queue)}")
+
         page_num += 1
         time.sleep(REQUEST_DELAY_SECONDS)
 
-    print(f"Total unique product URLs: {len(all_urls)}")
-    return all_urls
+    print(f"Visited listing pages: {len(visited_pages)}")
+    print(f"Total unique product URLs: {len(all_product_urls)}")
+
+    return all_product_urls
 
 
 # ---------------------------------------------------------------------
-# Product page extraction logic from your previous working scraper
+# Product page extraction logic
 # ---------------------------------------------------------------------
 def extract_name(lines: list[str], soup: BeautifulSoup) -> str:
     for i in range(len(lines) - 2):
@@ -179,7 +348,6 @@ def extract_price(lines: list[str], name: str) -> Optional[float]:
         return None
 
     start_idx = lines.index(name)
-
     end_idx = len(lines)
 
     for marker in [
@@ -195,7 +363,6 @@ def extract_price(lines: list[str], name: str) -> Optional[float]:
                 break
 
     window = lines[start_idx:end_idx]
-
     price_candidates = []
 
     for line in window:
@@ -213,7 +380,7 @@ def extract_price(lines: list[str], name: str) -> Optional[float]:
 
 def extract_stock(lines: list[str], name: str) -> int:
     """
-    This is the important LifeStore-specific logic from your old scraper.
+    LifeStore-specific stock logic.
 
     If the product page has 'Quantity' near the product area, it means the
     product is purchasable/in stock. If not, it is treated as out of stock.
@@ -222,7 +389,6 @@ def extract_stock(lines: list[str], name: str) -> int:
         return 0
 
     start_idx = lines.index(name)
-
     end_idx = len(lines)
 
     for marker in [
@@ -263,7 +429,6 @@ def extract_description(lines: list[str]) -> str:
             break
 
     desc_lines = lines[start:end] if end is not None else lines[start:]
-
     cleaned = []
 
     for line in desc_lines:
@@ -641,6 +806,7 @@ def scrape_product_page(url: str, product_id: str) -> dict:
         "product_type": "",
         "tags": [],
         "specs": {},
+        "source": "lifestore",
     }
 
     return enrich_product(product)
@@ -658,6 +824,7 @@ def create_constraints(driver):
         "CREATE INDEX product_name_index IF NOT EXISTS FOR (p:Product) ON (p.name)",
         "CREATE INDEX product_url_index IF NOT EXISTS FOR (p:Product) ON (p.url)",
         "CREATE INDEX product_type_index IF NOT EXISTS FOR (p:Product) ON (p.product_type)",
+        "CREATE INDEX product_source_index IF NOT EXISTS FOR (p:Product) ON (p.source)",
     ]
 
     with driver.session(database=NEO4J_DATABASE) as session:
@@ -667,23 +834,48 @@ def create_constraints(driver):
     print("Neo4j constraints/indexes ready.")
 
 
-def clear_graph(driver):
-    with driver.session(database=NEO4J_DATABASE) as session:
-        session.run("MATCH (n) DETACH DELETE n")
+def clear_lifestore_graph(driver):
+    """
+    Safer than MATCH (n) DETACH DELETE n.
 
-    print("Existing graph cleared.")
+    Deletes Product nodes and then removes dangling Brand/Category/Availability
+    nodes that are no longer connected to anything.
+    """
+    with driver.session(database=NEO4J_DATABASE) as session:
+        session.run("MATCH (p:Product) DETACH DELETE p")
+        session.run(
+            """
+            MATCH (n)
+            WHERE NOT (n)--()
+              AND any(label IN labels(n) WHERE label IN ["Brand", "Category", "Availability"])
+            DELETE n
+            """
+        )
+
+    print("Existing LifeStore product graph cleared.")
+
+
+def cleanup_dangling_lookup_nodes(driver):
+    with driver.session(database=NEO4J_DATABASE) as session:
+        session.run(
+            """
+            MATCH (n)
+            WHERE NOT (n)--()
+              AND any(label IN labels(n) WHERE label IN ["Brand", "Category", "Availability"])
+            DELETE n
+            """
+        )
 
 
 def upsert_product(driver, product: dict):
     """
-    Minimal clean graph:
+    Clean graph structure:
+
     Product -> Brand
     Product -> Category
     Product -> Availability
 
-    No Tag nodes.
-    No Spec nodes.
-    Specs/tags are stored as Product properties.
+    Tags and specs are stored as Product properties.
     """
     cypher = """
     MERGE (p:Product {product_id: $product_id})
@@ -702,8 +894,24 @@ def upsert_product(driver, product: dict):
         p.product_type = $product_type,
         p.tags = $tags,
         p.specs_json = $specs_json,
-        p.updated_at = datetime()
+        p.source = "lifestore",
+        p.missing_from_latest_scrape = false,
+        p.updated_at = datetime(),
+        p.last_seen_at = datetime()
 
+    WITH p
+    OPTIONAL MATCH (p)-[old_brand:MADE_BY]->(:Brand)
+    DELETE old_brand
+
+    WITH p
+    OPTIONAL MATCH (p)-[old_category:BELONGS_TO]->(:Category)
+    DELETE old_category
+
+    WITH p
+    OPTIONAL MATCH (p)-[old_availability:HAS_AVAILABILITY]->(:Availability)
+    DELETE old_availability
+
+    WITH p
     MERGE (b:Brand {name: $brand})
     MERGE (p)-[:MADE_BY]->(b)
 
@@ -737,6 +945,56 @@ def upsert_product(driver, product: dict):
         )
 
 
+def mark_or_remove_missing_products(driver, current_product_ids: list[str]):
+    """
+    Handles products that were in Neo4j before but were not found in the latest scrape.
+
+    Default:
+    - Mark them as missing/out_of_stock.
+
+    If REMOVE_MISSING_LIFESTORE_PRODUCTS=true:
+    - Remove them from the graph.
+    """
+    if not current_product_ids:
+        print("No current product IDs supplied; skipping missing-product cleanup.")
+        return
+
+    with driver.session(database=NEO4J_DATABASE) as session:
+        if REMOVE_MISSING_PRODUCTS:
+            result = session.run(
+                """
+                MATCH (p:Product {source: "lifestore"})
+                WHERE NOT p.product_id IN $current_product_ids
+                DETACH DELETE p
+                RETURN count(p) AS removed_count
+                """,
+                current_product_ids=current_product_ids,
+            ).single()
+
+            removed_count = result["removed_count"] if result else 0
+            print(f"Removed missing LifeStore products: {removed_count}")
+
+        else:
+            result = session.run(
+                """
+                MATCH (p:Product {source: "lifestore"})
+                WHERE NOT p.product_id IN $current_product_ids
+                SET
+                    p.missing_from_latest_scrape = true,
+                    p.stock_status = "out_of_stock",
+                    p.stock = 0,
+                    p.last_missing_at = datetime()
+                RETURN count(p) AS marked_count
+                """,
+                current_product_ids=current_product_ids,
+            ).single()
+
+            marked_count = result["marked_count"] if result else 0
+            print(f"Marked missing LifeStore products as out_of_stock: {marked_count}")
+
+    cleanup_dangling_lookup_nodes(driver)
+
+
 def print_graph_counts(driver):
     with driver.session(database=NEO4J_DATABASE) as session:
         print("\n--- Node counts ---")
@@ -746,10 +1004,24 @@ def print_graph_counts(driver):
             ).single()["count"]
             print(f"{label}: {count}")
 
+        print("\n--- LifeStore product counts ---")
+        result = session.run(
+            """
+            MATCH (p:Product {source: "lifestore"})
+            RETURN
+                count(p) AS total,
+                count(CASE WHEN p.missing_from_latest_scrape = true THEN 1 END) AS missing
+            """
+        ).single()
+
+        if result:
+            print(f"LifeStore products: {result['total']}")
+            print(f"Missing from latest scrape: {result['missing']}")
+
         print("\n--- Availability counts ---")
         result = session.run(
             """
-            MATCH (p:Product)-[:HAS_AVAILABILITY]->(a:Availability)
+            MATCH (p:Product {source: "lifestore"})-[:HAS_AVAILABILITY]->(a:Availability)
             RETURN a.status AS status, count(p) AS count
             ORDER BY count DESC
             """
@@ -785,49 +1057,86 @@ def main():
         auth=(NEO4J_USERNAME, NEO4J_PASSWORD),
     )
 
-    driver.verify_connectivity()
-    print("Connected to Neo4j.")
+    try:
+        driver.verify_connectivity()
+        print("Connected to Neo4j.")
 
-    if CLEAR_GRAPH:
-        clear_graph(driver)
+        if CLEAR_GRAPH:
+            clear_lifestore_graph(driver)
 
-    create_constraints(driver)
+        create_constraints(driver)
 
-    product_urls = scrape_listing_pages()
+        product_urls = scrape_listing_pages()
 
-    products = []
-    total = len(product_urls)
+        if not product_urls:
+            raise RuntimeError("No LifeStore product URLs were found. Graph update stopped.")
 
-    for idx, product_url in enumerate(product_urls, start=1):
-        print(f"Scraping product {idx}/{total}: {product_url}")
+        products = []
+        failed = []
+        total = len(product_urls)
 
-        try:
-            product = scrape_product_page(product_url, f"LS{idx:04d}")
+        for idx, product_url in enumerate(product_urls, start=1):
+            print(f"Scraping product {idx}/{total}: {product_url}")
 
-            print(
-                f"  name={product['name']!r}, "
-                f"price={product['price']!r}, "
-                f"stock={product['stock_status']!r}, "
-                f"brand={product['brand']!r}, "
-                f"category={product['category']!r}, "
-                f"type={product['product_type']!r}"
-            )
+            try:
+                product_id = make_stable_product_id(product_url)
+                product = scrape_product_page(product_url, product_id)
 
-            products.append(product)
-            upsert_product(driver, product)
+                print(
+                    f"  id={product['product_id']!r}, "
+                    f"name={product['name']!r}, "
+                    f"price={product['price']!r}, "
+                    f"stock={product['stock_status']!r}, "
+                    f"brand={product['brand']!r}, "
+                    f"category={product['category']!r}, "
+                    f"type={product['product_type']!r}"
+                )
 
-            time.sleep(REQUEST_DELAY_SECONDS)
+                products.append(product)
+                upsert_product(driver, product)
 
-        except Exception as e:
-            print(f"  failed: {product_url} -> {e}")
+                time.sleep(REQUEST_DELAY_SECONDS)
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(products, f, indent=2, ensure_ascii=False)
+            except Exception as exc:
+                print(f"  failed: {product_url} -> {exc}")
+                failed.append(
+                    {
+                        "url": product_url,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
 
-    print(f"\nSaved {len(products)} products to {OUTPUT_FILE}")
+        if not products:
+            raise RuntimeError("Product URLs were found, but no products were successfully scraped.")
 
-    print_graph_counts(driver)
-    driver.close()
+        current_product_ids = [product["product_id"] for product in products]
+        mark_or_remove_missing_products(driver, current_product_ids)
+
+        output_data = {
+            "source": "lifestore",
+            "scraped_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "start_urls": START_URLS,
+            "product_count": len(products),
+            "failed_count": len(failed),
+            "products": products,
+            "failed": failed,
+        }
+
+        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, indent=2, ensure_ascii=False)
+
+        print(f"\nSaved {len(products)} products to {OUTPUT_FILE}")
+
+        if failed:
+            print(f"Failed products: {len(failed)}")
+            print("First few failures:")
+            for item in failed[:5]:
+                print(item)
+
+        print_graph_counts(driver)
+
+    finally:
+        driver.close()
 
 
 if __name__ == "__main__":
