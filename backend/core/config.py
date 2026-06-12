@@ -92,9 +92,6 @@ class Settings(BaseSettings):
 
     LIFESTORE_QDRANT_COLLECTION: str = "lifestore_docs"
 
-    N8N_HELPDESK_WEBHOOK_URL: Optional[str] = None 
-
-
     class Config:
         env_file = ".env"
         extra = "ignore"

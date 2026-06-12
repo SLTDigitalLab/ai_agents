@@ -35,13 +35,6 @@ class AgentState(TypedDict):
     # Used by agent nodes to adapt response tone.
     sentiment: str
 
-    # Helpdesk n8n resume metadata persisted across turns so a paused workflow
-    # can continue instead of starting from the webhook again.
-    # Managed internally by helpdesk_n8n_agent archetype.
-    helpdesk_execution_id: NotRequired[str]
-    helpdesk_resume_url: NotRequired[str]
-    helpdesk_waiting_for_input: NotRequired[bool]
-
     # Supervisor-only routing fields
     routing_action: NotRequired[str]
     routing_reason: NotRequired[str]
