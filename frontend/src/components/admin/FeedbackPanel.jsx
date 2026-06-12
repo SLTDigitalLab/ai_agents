@@ -21,6 +21,8 @@ const AGENT_COLORS = {
     network: { bg: 'bg-teal-500/10', border: 'border-teal-500/20', text: 'text-teal-400' },
     legal: { bg: 'bg-amber-500/10', border: 'border-amber-500/20', text: 'text-amber-400' },
     marketing: { bg: 'bg-pink-500/10', border: 'border-pink-500/20', text: 'text-pink-400' },
+    enterprise_business: { bg: 'bg-violet-500/10', border: 'border-violet-500/20', text: 'text-violet-400' },
+    consumer_business: { bg: 'bg-green-500/10', border: 'border-green-500/20', text: 'text-green-400' },
 };
 
 const DEFAULT_COLOR = { bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', text: 'text-cyan-400' };

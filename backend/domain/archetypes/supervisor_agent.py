@@ -56,6 +56,8 @@ SPECIALIST_BUILDERS = {
     "network": build_kb_workflow,
     "legal": build_kb_workflow,
     "marketing": build_kb_workflow,
+    "enterprise_business": build_kb_workflow,
+    "consumer_business": build_kb_workflow,
 }
 
 
@@ -583,14 +585,16 @@ Available specialists:
 - IT: technical support, hardware, software, network, access management
 - Admin: facilities, transport, security, parking, office support
 - CIA: internal audit, risk management, governance, compliance, audit committee, internal controls
-- Network: enterprise network, WAN/LAN setup, IP address allocation, routing, noc requests
-- Legal: contract review, NDAs, regulatory compliance, statutory regulations, corporate agreements
-- Marketing: brand guidelines, marketing campaigns, promotions, logo usage, sponsorships
+- Network: telecom infrastructure design/operation — Core and Transport (MPLS, SDH, OTN, 100G core), primary access (LTE, CDMA, MSAN, OLT), secondary fiber access (FTTH/ODN, FTC/FDP, OTDR), IP routing (OSPF, BGP, RSVP-TE, BRAS, VPNs), ENSA assurance, and NOC/BBNOC monitoring
+- Legal: contracts and contractual frameworks (GCC, SCC, MSA, NDAs), regulatory compliance (Personal Data Protection Act, Anti-Corruption Act, TRC), dispute resolution and arbitration (SIAC, ICLP), intellectual property, liability/indemnity, and legal certifications (GCEO circulars)
+- Marketing: corporate brand identity (Corporate Brand Guidelines 2012), brand activations and events, sponsorships, outdoor branding (hoardings, MSANs, pylons, digital displays), vehicle and premises branding, POSM production/distribution, TVCs, and promotional giveaways
+- Enterprise Business: B2B corporate solutions — IP VPN, Internet Leased Lines (ILL), iDC hosting, managed Security Operations Centre (MSOC), IoT platforms, enterprise CPE/NTU and UC VoIP; governance via EIMC/ESGB, unit rate contracts, partnerships, and SME/MB/LB/GI account management
+- Consumer Business: B2C retail products — PSTN/Mega Line, ADSL, FTTH broadband, LTE, and PEO TV packages (Single/Double/Triple Play); consumer sales, dealer registration and commissions, loyalty promotions, pricing, billing, late payment fees, and disconnections
 
 Rules:
 1. Be concise, clear, and practical.
 2. If the user asks which specialist should handle something, answer directly.
-3. Do not invent HR, finance, IT, admin, CIA, network, legal, or marketing facts.
+3. Do not invent HR, finance, IT, admin, CIA, network, legal, marketing, enterprise business, or consumer business facts.
 4. If the user is clearly asking a specialist-domain factual question, say that you can route them to the right specialist and name the best fit.
 5. Do not mention routing scores, thresholds, embeddings, vectors, or internal implementation.
 6. Do not end with a closing question.
@@ -620,7 +624,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
 
     if reason == "vague_prompt" or not display_names:
         content = (
-            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
+            "Please tell me which area this is about: **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, **Marketing**, **Enterprise Business**, or **Consumer Business**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -634,7 +638,7 @@ async def ask_for_clarification(state: AgentState) -> dict:
     if len(display_names) == 1:
         content = (
             f"I think this may belong to **{display_names[0]}**. "
-            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, or **Marketing**."
+            f"Please reply with **{display_names[0]}** if that is correct, or say **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, **Marketing**, **Enterprise Business**, or **Consumer Business**."
         )
         return {"messages": [AIMessage(content=content)]}
 
@@ -650,7 +654,7 @@ async def respond_out_of_scope(state: AgentState) -> dict:
     content = (
         "I cannot answer that request. "
         "I am limited to platform/help questions and requests related to "
-        "**HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, and **Marketing**."
+        "**HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, **Marketing**, **Enterprise Business**, and **Consumer Business**."
     )
     return {"messages": [AIMessage(content=content)]}
 
@@ -1040,7 +1044,7 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
                 AIMessage(
                     content=(
                         "I could not find a clear answer for this in our HR, Finance, "
-                        "Admin, IT, CIA, Network, Legal, or Marketing knowledge bases. Could you rephrase or add a bit more detail?"
+                        "Admin, IT, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business knowledge bases. Could you rephrase or add a bit more detail?"
                     )
                 )
             ],
@@ -1205,6 +1209,8 @@ def build_supervisor_workflow() -> StateGraph:
             "delegate_network": "delegate_network",
             "delegate_legal": "delegate_legal",
             "delegate_marketing": "delegate_marketing",
+            "delegate_enterprise_business": "delegate_enterprise_business",
+            "delegate_consumer_business": "delegate_consumer_business",
         },
     )
 
@@ -1222,5 +1228,7 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("delegate_network", END)
     workflow.add_edge("delegate_legal", END)
     workflow.add_edge("delegate_marketing", END)
+    workflow.add_edge("delegate_enterprise_business", END)
+    workflow.add_edge("delegate_consumer_business", END)
 
     return workflow

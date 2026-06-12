@@ -2,6 +2,7 @@ import os
 import shutil
 import tempfile
 import logging
+import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile
@@ -48,7 +49,7 @@ class IngestionService:
             chunk_overlap=300,
         )
 
-    async def _ensure_collection_exists(self, collection_name: str):
+    def _ensure_collection_exists(self, collection_name: str):
         """Manually checks if a collection exists. If not, creates it safely.
 
         Collections are created with NAMED dense + sparse vector configs to
@@ -75,6 +76,16 @@ class IngestionService:
             )
 
     async def ingest_website(self, url: str, agent_name: str):
+        """Async wrapper — offloads the blocking work to a worker thread.
+
+        The actual loading, splitting and Qdrant upsert are synchronous and
+        CPU/IO-bound. Running them directly on the event loop would freeze
+        every chat stream until ingestion finished, so we push the work to a
+        thread and keep the loop free to serve agents.
+        """
+        return await asyncio.to_thread(self._ingest_website_sync, url, agent_name)
+
+    def _ingest_website_sync(self, url: str, agent_name: str):
         """Ingest a web page using HTML-header-aware splitting.
 
         First splits on HTML headings (h1-h4) so each chunk inherits its
@@ -119,7 +130,7 @@ class IngestionService:
         collection_name = f"{agent_name}_docs"
 
         # Create collection manually first
-        await self._ensure_collection_exists(collection_name)
+        self._ensure_collection_exists(collection_name)
 
         # Upsert to Qdrant (hybrid: dense + sparse)
         vector_store = QdrantVectorStore(
@@ -279,12 +290,23 @@ class IngestionService:
             log.warning(f"Could not delete old vectors for {file_name}: {e}")
 
     async def process_onedrive_ingestion(self, folder_id: str, access_token: str, agent_name: str, force: bool = False):
+        """Async wrapper — offloads the blocking OneDrive ingestion to a thread.
+
+        Downloads, parsing/OCR and embedding are all synchronous and can run
+        for minutes. Offloading keeps the event loop free so chat for every
+        agent stays responsive while documents are ingested.
         """
-        Ingest PDFs, Word docs, Powerpoint and Excel from a OneDrive folder 
+        return await asyncio.to_thread(
+            self._process_onedrive_sync, folder_id, access_token, agent_name, force
+        )
+
+    def _process_onedrive_sync(self, folder_id: str, access_token: str, agent_name: str, force: bool = False):
+        """
+        Ingest PDFs, Word docs, Powerpoint and Excel from a OneDrive folder
         using a direct Graph API token.
         Downloads files -> Semantically chunks them -> Upserts to Qdrant.
         """
-        import requests 
+        import requests
         from urllib3.util.retry import Retry
         from requests.adapters import HTTPAdapter
 
@@ -343,8 +365,8 @@ class IngestionService:
 
             # Define Collection Name
             collection_name = f"{agent_name}_docs"
-            await self._ensure_collection_exists(collection_name)
-            
+            self._ensure_collection_exists(collection_name)
+
             # Initialize Vector Store once (hybrid: dense + sparse)
             vector_store = QdrantVectorStore(
                 client=self.client,
