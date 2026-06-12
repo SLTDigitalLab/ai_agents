@@ -282,3 +282,4 @@ def build_helpdesk_n8n_workflow() -> StateGraph:
     workflow.add_edge(START, "webhook")
     workflow.add_edge("webhook", END)
     return workflow
+

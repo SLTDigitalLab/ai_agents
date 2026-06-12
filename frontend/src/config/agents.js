@@ -169,7 +169,6 @@ export const AGENTS = {
 
     },
 
-
     // 13.Helpdesk Agent (n8n workflow integration)
     helpdesk: {
         id: "helpdesk",
@@ -181,8 +180,6 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
 
     }
-
-
 };
 
 
