@@ -140,5 +140,16 @@ export const AGENTS = {
         buttonColor: "bg-pink-600 hover:bg-pink-700",
         idlePrompt: "Ask about marketing campaigns, logo guidelines, or branding standards.",
         disclaimer: "If you need any further clarifications, please reach out to the Marketing & Communications department."
+    },
+
+    // 11.Helpdesk
+    helpdesk: {
+        id: "helpdesk",
+        title: "HELP DESK",
+        subtitle: "Your AI-powered Knowledge Assistant for instant solutions, troubleshooting, and automated IT ticket management.",
+        color: "from-purple-900 to-purple-600",
+        buttonColor: "bg-purple-600 hover:bg-purple-700",
+        idlePrompt: "Describe your IT issue, search for instructional guides, or ask for an update on your existing ticket status.",
+        disclaimer: "This AI agent provides instant solutions from the organizational Knowledge Bank. If a resolution cannot be found, it will automatically generate and properly route a support ticket to the IT Help Desk team."
     }
 };
