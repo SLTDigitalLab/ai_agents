@@ -144,6 +144,8 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Marketing & Communications department."
     },
 
+
+
     // 11. Enterprise Business
     askenterprisebusiness: {
         id: "enterprise_business",
@@ -164,5 +166,18 @@ export const AGENTS = {
         buttonColor: "bg-green-600 hover:bg-green-700",
         idlePrompt: "Ask about home broadband, mobile plans, or consumer promotions.",
         disclaimer: "If you need any further clarifications, please reach out to the Consumer Business team."
+
+    },
+
+    // 13.Helpdesk
+    helpdesk: {
+        id: "helpdesk",
+        title: "HELP DESK",
+        subtitle: "Your AI-powered Knowledge Assistant for instant solutions, troubleshooting, and automated IT ticket management.",
+        color: "from-purple-900 to-purple-600",
+        buttonColor: "bg-purple-600 hover:bg-purple-700",
+        idlePrompt: "Describe your IT issue, search for instructional guides, or ask for an update on your existing ticket status.",
+        disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
+
     }
 };
