@@ -16,7 +16,8 @@ from domain.state import AgentState
 
 def _message_to_text(message: Any) -> str:
     """Extract a plain-text string from a LangChain message object or raw value."""
-    
+
+    # Get message content safely.
     content = getattr(message, "content", message)
     if isinstance(content, list):
         parts: list[str] = []
@@ -36,6 +37,7 @@ def _format_markdown_table(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return ""
 
+    # Collect all table columns.
     columns: list[str] = []
     for row in rows:
         for key in row.keys():
@@ -59,6 +61,7 @@ def _format_markdown_table(rows: list[dict[str, Any]]) -> str:
 def _format_n8n_payload(payload: Any) -> str:
     """Normalize common n8n response shapes into a single markdown reply."""
     if isinstance(payload, list):
+        # Format each item in the list.
         parts = [_format_n8n_payload(item) for item in payload]
         return "\n\n".join(part for part in parts if part).strip()
 
@@ -66,11 +69,13 @@ def _format_n8n_payload(payload: Any) -> str:
         if "display_text" in payload or "data_table" in payload or "num" in payload:
             parts: list[str] = []
 
+            # Add main reply text.
             display_text = payload.get("display_text")
             if display_text:
                 parts.append(_message_to_text(display_text))
 
             data_table = payload.get("data_table")
+            # Add table data if n8n sends it.
             if isinstance(data_table, list) and data_table:
                 first_row = data_table[0]
                 if isinstance(first_row, dict):
@@ -86,7 +91,7 @@ def _format_n8n_payload(payload: Any) -> str:
 
             return "\n\n".join(part for part in parts if part).strip()
 
-        # Preferred keys to check in order.
+        # Check common reply keys.
         for key in ("reply", "message", "text", "response", "output", "result", "answer"):
             v = payload.get(key)
             if v:
@@ -96,7 +101,7 @@ def _format_n8n_payload(payload: Any) -> str:
                         return reply
                 return str(v).strip()
 
-        
+        # Check nested response data.
         for nested_key in ("data", "output", "result", "response"):
             nested_value = payload.get(nested_key)
             if nested_value is not None:
@@ -114,6 +119,7 @@ def _format_n8n_payload(payload: Any) -> str:
 def _extract_nested_value(payload: Any, keys: tuple[str, ...]) -> Any:
     """Find the first matching value in a nested n8n response payload."""
     if isinstance(payload, list):
+        # Search inside each list item.
         for item in payload:
             value = _extract_nested_value(item, keys)
             if value not in (None, ""):
@@ -128,6 +134,7 @@ def _extract_nested_value(payload: Any, keys: tuple[str, ...]) -> Any:
         if value not in (None, ""):
             return value
 
+    # Search common nested fields.
     for nested_key in ("data", "output", "result", "response"):
         nested_value = payload.get(nested_key)
         value = _extract_nested_value(nested_value, keys)
@@ -142,6 +149,7 @@ def _extract_execution_id(payload: Any) -> str | None:
     if value not in (None, ""):
         return str(value)
 
+    # Some n8n replies keep the id here.
     if isinstance(payload, dict):
         execution = payload.get("$execution")
         if isinstance(execution, dict) and execution.get("id") not in (None, ""):
@@ -159,9 +167,10 @@ def _extract_waiting_for_input(payload: Any, resume_url: str | None) -> bool:
     value = _extract_nested_value(payload, ("waitingForInput", "waiting_for_input"))
     return bool(value) or resume_url is not None
 
-#send the latest user message and conversation context to n8n and return the reply, along with any execution metadata for resuming paused workflows
+# Send the user message to n8n.
 async def forward_to_n8n(state: AgentState) -> dict:
- 
+
+    # Read webhook URL from settings.
     webhook_url = getattr(settings, "N8N_HELPDESK_WEBHOOK_URL", "")
     if not webhook_url:
         return {
@@ -175,13 +184,13 @@ async def forward_to_n8n(state: AgentState) -> dict:
             ]
         }
 
-    # Build a trimmed conversation payload
+    # Keep only recent messages.
     conversation = []
     for msg in state.get("messages", [])[-10:]:
         role = "assistant" if getattr(msg, "type", "") == "ai" else "user"
         conversation.append({"role": role, "content": _message_to_text(msg)})
 
-    # Latest user message (fallback to empty string)
+    # Find the latest user message.
     latest_user = ""
     for msg in reversed(state.get("messages", [])):
         if getattr(msg, "type", "") in ("human", "user"):
@@ -194,11 +203,13 @@ async def forward_to_n8n(state: AgentState) -> dict:
         or "helpdesk"
     )
 
-    stored_execution_id = state.get("helpdesk_execution_id") # previously stored execution ID for resuming a paused workflow, if any
-    stored_resume_url = state.get("helpdesk_resume_url") # previously stored resume URL for resuming a paused workflow, if any
+    # Get saved resume data.
+    stored_execution_id = state.get("helpdesk_execution_id")
+    stored_resume_url = state.get("helpdesk_resume_url")
     waiting_for_input = bool(state.get("helpdesk_waiting_for_input"))
     should_resume = waiting_for_input and bool(stored_resume_url)
 
+    # Build request body for n8n.
     payload = {
         "sessionId": session_id,
         "userId": state.get("user_id", "anonymous"),
@@ -209,6 +220,7 @@ async def forward_to_n8n(state: AgentState) -> dict:
     if stored_execution_id:
         payload["executionId"] = stored_execution_id
 
+    # Resume old workflow when needed.
     request_url = stored_resume_url if should_resume else webhook_url
 
     try:
@@ -217,6 +229,7 @@ async def forward_to_n8n(state: AgentState) -> dict:
 
         resp.raise_for_status()
 
+        # Read response from n8n.
         response_payload: Any = None
         reply_text = resp.text.strip()
         try:
@@ -230,14 +243,15 @@ async def forward_to_n8n(state: AgentState) -> dict:
         waiting_for_input = _extract_waiting_for_input(response_payload, resume_url) if response_payload is not None else False
 
         if response_payload is not None:
-            # Keep the latest n8n resume metadata in graph state so the next
-            # turn resumes the paused execution instead of starting a new one.
+            # Save resume data for next turn.
             stored_execution_id = execution_id or stored_execution_id
             stored_resume_url = resume_url or stored_resume_url
             if not waiting_for_input:
+                # Clear resume data when workflow is done.
                 stored_execution_id = None
                 stored_resume_url = None
 
+        # Return reply and updated state.
         state_update = {
             "messages": [AIMessage(content=reply_text or "Helpdesk workflow returned an empty response from n8n.")],
             "helpdesk_execution_id": stored_execution_id,
@@ -260,7 +274,7 @@ async def forward_to_n8n(state: AgentState) -> dict:
         }
 
 
-# Define the LangGraph workflow for the helpdesk → n8n archetype, which consists of a single step forwarding to n8n and returning the reply.
+# Build the helpdesk workflow.
 def build_helpdesk_n8n_workflow() -> StateGraph:
 
     workflow = StateGraph(AgentState)
