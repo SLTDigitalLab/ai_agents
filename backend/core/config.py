@@ -94,7 +94,6 @@ class Settings(BaseSettings):
 
     N8N_HELPDESK_WEBHOOK_URL: Optional[str] = None 
 
-
     class Config:
         env_file = ".env"
         extra = "ignore"

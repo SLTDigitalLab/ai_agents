@@ -56,7 +56,7 @@ AGENT_BUILDERS: dict[str, callable] = {
     # Archetype 5 – Helpdesk → n8n Forwarding workflow
     "helpdesk": build_helpdesk_n8n_workflow,
 }
-  
+
 
 def get_agent_builder(agent_id: str):
     """Return the StateGraph builder function for the given agent.

@@ -144,8 +144,6 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Marketing & Communications department."
     },
 
-
-
     // 11. Enterprise Business
     askenterprisebusiness: {
         id: "enterprise_business",
@@ -181,7 +179,6 @@ export const AGENTS = {
 
     }
 };
-
 
 
 
