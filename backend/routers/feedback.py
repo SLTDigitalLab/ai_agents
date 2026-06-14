@@ -17,6 +17,7 @@ from core.config import settings
 from core.checkpointer import get_postgres_checkpointer
 from domain.registry import AGENT_BUILDERS, get_agent_builder
 from schemas.feedback import FeedbackRequest, FeedbackResponse
+from services.sessions import ensure_sessions_table
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,16 @@ def _ensure_feedback_table():
                         message_index INTEGER    NOT NULL,
                         rating      VARCHAR(10)  NOT NULL CHECK (rating IN ('up', 'down')),
                         user_id     VARCHAR(255) NOT NULL,
+                        user_name   VARCHAR(255),
                         created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                         updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                         UNIQUE (agent_id, thread_id, message_index, user_id)
                     )
+                """)
+                # Backfill column for tables created before user_name existed.
+                cur.execute("""
+                    ALTER TABLE public.feedback
+                    ADD COLUMN IF NOT EXISTS user_name VARCHAR(255)
                 """)
         _table_created = True
     except Exception as e:
@@ -113,17 +120,21 @@ async def submit_feedback(req: FeedbackRequest):
         with psycopg.connect(settings.POSTGRES_URL, autocommit=True) as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("""
-                    INSERT INTO public.feedback (agent_id, thread_id, message_index, rating, user_id)
-                    VALUES (%(agent_id)s, %(thread_id)s, %(message_index)s, %(rating)s, %(user_id)s)
+                    INSERT INTO public.feedback (agent_id, thread_id, message_index, rating, user_id, user_name)
+                    VALUES (%(agent_id)s, %(thread_id)s, %(message_index)s, %(rating)s, %(user_id)s, %(user_name)s)
                     ON CONFLICT (agent_id, thread_id, message_index, user_id)
-                    DO UPDATE SET rating = %(rating)s, updated_at = NOW()
-                    RETURNING id, agent_id, thread_id, message_index, rating, user_id
+                    DO UPDATE SET
+                        rating = %(rating)s,
+                        user_name = COALESCE(%(user_name)s, public.feedback.user_name),
+                        updated_at = NOW()
+                    RETURNING id, agent_id, thread_id, message_index, rating, user_id, user_name
                 """, {
                     "agent_id": req.agent_id,
                     "thread_id": req.thread_id,
                     "message_index": req.message_index,
                     "rating": req.rating,
                     "user_id": req.user_id,
+                    "user_name": req.user_name or None,
                 })
                 row = cur.fetchone()
 
@@ -214,6 +225,7 @@ async def get_feedback_stats(
 ):
     """Return aggregate feedback statistics for the admin dashboard."""
     _ensure_feedback_table()
+    ensure_sessions_table()  # required for the LEFT JOIN below
 
     try:
         with psycopg.connect(settings.POSTGRES_URL, autocommit=True) as conn:
@@ -248,12 +260,20 @@ async def get_feedback_stats(
                 """)
                 per_agent = cur.fetchall()
 
-                # Recent feedback entries (last 50)
+                # Recent feedback entries (last 50). Backfill the display name
+                # from chat_sessions for rows captured before user_name existed.
+                recent_filter = agent_filter.replace("agent_id", "f.agent_id")
                 cur.execute(f"""
-                    SELECT id, agent_id, thread_id, message_index, rating, user_id, created_at
-                    FROM public.feedback
-                    {agent_filter}
-                    ORDER BY created_at DESC
+                    SELECT
+                        f.id, f.agent_id, f.thread_id, f.message_index, f.rating,
+                        f.user_id,
+                        COALESCE(f.user_name, cs.user_name) AS user_name,
+                        f.created_at
+                    FROM public.feedback f
+                    LEFT JOIN public.chat_sessions cs
+                        ON cs.agent_id = f.agent_id AND cs.thread_id = f.thread_id
+                    {recent_filter}
+                    ORDER BY f.created_at DESC
                     LIMIT 50
                 """, params)
                 recent = cur.fetchall()

@@ -16,6 +16,7 @@ from psycopg.rows import dict_row
 from core.config import settings
 from core.checkpointer import get_postgres_checkpointer
 from domain.registry import AGENT_BUILDERS, get_agent_builder
+from services.sessions import get_sessions_users
 
 router = APIRouter(prefix="/api/v1/admin/dashboard", tags=["Admin Dashboard"])
 
@@ -184,6 +185,15 @@ async def list_sessions(
         total = db_total
         sessions = all_sessions
 
+    # 4. Attach the user identity (id + display name) for each returned session.
+    users_map = get_sessions_users(agent, [s["session_id"] for s in sessions])
+    for s in sessions:
+        info = users_map.get(s["session_id"]) or {}
+        s["user_id"] = info.get("user_id")
+        s["user_name"] = info.get("user_name")
+        last_active = info.get("last_active_at")
+        s["last_active_at"] = last_active.isoformat() if last_active else None
+
     return {
         "sessions": sessions,
         "total": total,
@@ -215,8 +225,16 @@ async def get_session_detail(agent: str, session_id: str):
             graph = workflow.compile(checkpointer=checkpointer)
             snapshot = graph.get_state(config)
 
+            user_info = get_sessions_users(agent, [session_id]).get(session_id) or {}
+
             if not snapshot.values:
-                return {"session_id": session_id, "agent": agent, "messages": []}
+                return {
+                    "session_id": session_id,
+                    "agent": agent,
+                    "user_id": user_info.get("user_id"),
+                    "user_name": user_info.get("user_name"),
+                    "messages": [],
+                }
 
             # Extract and clean messages (same pattern as chat.py get_history)
             messages = []
@@ -245,6 +263,8 @@ async def get_session_detail(agent: str, session_id: str):
             return {
                 "session_id": session_id,
                 "agent": agent,
+                "user_id": user_info.get("user_id"),
+                "user_name": user_info.get("user_name"),
                 "messages": messages,
             }
 

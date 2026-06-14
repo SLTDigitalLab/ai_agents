@@ -11,4 +11,5 @@ class ChatRequest(BaseModel):
     message: str
     agent_id: str
     user_id: str
+    user_name: Optional[str] = None
     thread_id: Optional[str] = "default_thread"

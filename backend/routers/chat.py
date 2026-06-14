@@ -15,6 +15,7 @@ from core.checkpointer import get_postgres_checkpointer, get_async_postgres_chec
 from domain.registry import get_agent_builder
 from domain.guardrails import classify_intent
 from schemas.chat import ChatRequest
+from services.sessions import record_session
 from langchain_core.tracers.context import tracing_v2_enabled
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
@@ -89,6 +90,15 @@ async def chat(request: ChatRequest):
         try:
             # Thread config enables LangGraph memory/checkpointing per conversation
             config = {"configurable": {"thread_id": request.thread_id}}
+
+            # Record who is behind this session (id + display name) so the admin
+            # panel can attribute sessions and agents can personalize by name.
+            record_session(
+                agent_id=request.agent_id,
+                thread_id=request.thread_id,
+                user_id=request.user_id,
+                user_name=request.user_name,
+            )
 
             # ── Run guardrail classifier FIRST ──────────────────────────
             # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
