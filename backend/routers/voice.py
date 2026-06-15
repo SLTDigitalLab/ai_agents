@@ -11,9 +11,10 @@ No new environment variables required.
 import io
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from typing import Literal
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
-from core.config import settings          # existing settings — has settings.OPENAI_API_KEY
+from core.config import settings         
 
 logger = logging.getLogger(__name__)
 
@@ -23,35 +24,47 @@ router = APIRouter(prefix="/api/v1/voice", tags=["voice"])
 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
-# ── STT  ────────────────────────────────────────────────────────────────────
+# STT  
 @router.post("/stt")
 async def speech_to_text(
     audio: UploadFile = File(...),
-    language: str = Form(default="en"),   # "en" | "si" | "ta"  — Whisper supports all
+    language: Literal["en", "si", "ta"] = Form("en"),
 ):
-    """
-    Receives an audio file (webm/mp4/wav) from the browser,
-    sends it to OpenAI Whisper, and returns the transcribed text.
-    """
     try:
-        # Read the uploaded audio bytes
         audio_bytes = await audio.read()
-
         if len(audio_bytes) == 0:
             raise HTTPException(status_code=400, detail="Empty audio file received")
 
-        # Whisper needs a file-like object with a filename so it knows the format
         audio_file = io.BytesIO(audio_bytes)
         audio_file.name = audio.filename or "recording.webm"
 
-        # Call Whisper API
-        transcript = await client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file,
-            language=language,            # pass language hint for accuracy
-        )
+        if language == "en":
+            # Standard English transcription
+            transcript = await client.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="en",
+                response_format="verbose_json",
+            )
 
-        logger.info(f"STT transcription successful: '{transcript.text[:60]}...'")
+        elif language == "ta":
+            # Tamil — use translation endpoint (speech → English text)
+            # Whisper supports Tamil transcription but translation is more reliable
+            transcript = await client.audio.translations.create(
+                model="whisper-1",
+                file=audio_file,
+            )
+
+        elif language == "si":
+            # Sinhala — NOT supported by Whisper API
+            # Use translation endpoint without language hint — Whisper auto-detects
+            # and translates to English. Works reasonably for Sinhala speech.
+            transcript = await client.audio.translations.create(
+                model="whisper-1",
+                file=audio_file,
+            )
+
+        logger.info(f"STT language={language}, text='{transcript.text[:80]}'")
         return {"text": transcript.text}
 
     except HTTPException:
@@ -61,11 +74,11 @@ async def speech_to_text(
         raise HTTPException(status_code=500, detail=f"Speech-to-text failed: {str(e)}")
 
 
-# ── TTS  ────────────────────────────────────────────────────────────────────
+#  TTS  
 @router.post("/tts")
 async def text_to_speech(
     text: str = Form(...),
-    voice: str = Form(default="alloy"),   # alloy | echo | fable | onyx | nova | shimmer
+    voice: str = Form(default="alloy"),  
 ):
     """
     Receives a text string from the frontend,

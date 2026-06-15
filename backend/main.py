@@ -11,6 +11,7 @@ from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, 
 from services.ingestion import router as ingestion_router
 
 from routers import voice
+from routers.voice_agent import realtime
 
 
 app = FastAPI(
@@ -40,6 +41,7 @@ app.include_router(finance.router)  # External Finance KB retrieval (voice assis
 app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev local → prod vectors)
 app.include_router(ingestion_router)
 app.include_router(voice.router)  # Include the voice router
+app.include_router(realtime.router)   # Live voice agent Realtime API ( new feature for live voice agent)
 
 @app.get("/")
 def read_root():

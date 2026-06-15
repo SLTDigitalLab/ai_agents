@@ -33,7 +33,7 @@ const appendChunkSmartly = (current, incoming) => {
     return (current || "") + (incoming || "");
 };
 
-// ── Source UI Components ──────────────────────────────────────
+// ── Source UI Components ───────
 
 const SourceBadge = ({ name, url, color }) => (
     <motion.a
@@ -124,7 +124,7 @@ const VoicePlayback = ({ audioUrl, duration }) => {
     );
 };
 
-// ── Feedback Buttons Component ────────────────────────────────
+// ── Feedback Buttons Component ─
 const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRating, onFeedback }) => {
     const [rating, setRating] = useState(existingRating || null);
     const [submitting, setSubmitting] = useState(false);
@@ -217,7 +217,7 @@ const ChatInterface = ({ agentConfig }) => {
     const { accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
 
-    // ── Existing state ────────────────────────────────────────
+    // ── Existing state ─────────
     const [threadId, setThreadId] = useState('');
     const [messages, setMessages] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -226,14 +226,14 @@ const ChatInterface = ({ agentConfig }) => {
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef(null);
 
-    // ── Voice input state ─────────────────────────────────────
+    // ── Voice input state ──────
     const [voiceMode, setVoiceMode] = useState(false);
 
     // ── Voice output (TTS) state ──────────────────────────────
     const [speakingIndex, setSpeakingIndex] = useState(null);
     const currentAudioRef = useRef(null);
 
-    // ── TTS helpers ───────────────────────────────────────────
+    // ── TTS helpers ────────────
     const stopSpeaking = () => {
         if (currentAudioRef.current) {
             currentAudioRef.current.pause();
@@ -295,7 +295,7 @@ const ChatInterface = ({ agentConfig }) => {
         }
     };
 
-    // ── Agent switching ───────────────────────────────────────
+    // ── Agent switching ────────
     useEffect(() => {
         if (!agentConfig?.id) return;
 
@@ -385,7 +385,7 @@ const ChatInterface = ({ agentConfig }) => {
         loadAgentState();
     }, [agentConfig.id, agentConfig.title, user.name]);
 
-    // ── Auto-scroll ───────────────────────────────────────────
+    // ── Auto-scroll ────────────
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     };
@@ -394,7 +394,7 @@ const ChatInterface = ({ agentConfig }) => {
         scrollToBottom();
     }, [messages]);
 
-    // ── Voice send (STT → chat) ───────────────────────────────
+    // ── Voice send (STT → chat) 
     const handleVoiceSend = async (audioBlob, durationSeconds) => {
         setVoiceMode(false);
         if (!threadId || isLoadingHistory) return;
@@ -494,7 +494,7 @@ const ChatInterface = ({ agentConfig }) => {
         }
     };
 
-    // ── Text send ─────────────────────────────────────────────
+    // ── Text send ──────────────
     const handleSend = async (e) => {
         e.preventDefault();
         if (!input.trim() || !threadId || isLoadingHistory) return;
