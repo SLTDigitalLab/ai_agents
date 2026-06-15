@@ -14,8 +14,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from core.config import settings
-from core.checkpointer import get_postgres_checkpointer
-from domain.registry import AGENT_BUILDERS, get_agent_builder
+from domain.registry import AGENT_BUILDERS, get_compiled_sync_graph
 from schemas.feedback import FeedbackRequest, FeedbackResponse
 from services.sessions import ensure_sessions_table
 
@@ -69,35 +68,32 @@ def _load_session_messages(agent_id: str, thread_id: str) -> list:
     Returns a list of {"type": "human"|"ai", "content": str} dicts.
     """
     try:
-        builder_fn = get_agent_builder(agent_id)
-        workflow = builder_fn()
         config = {"configurable": {"thread_id": thread_id}}
 
-        with get_postgres_checkpointer(agent_id) as checkpointer:
-            graph = workflow.compile(checkpointer=checkpointer)
-            snapshot = graph.get_state(config)
+        graph = get_compiled_sync_graph(agent_id)
+        snapshot = graph.get_state(config)
 
-            if not snapshot.values:
-                return []
+        if not snapshot.values:
+            return []
 
-            messages = []
-            for msg in snapshot.values.get("messages", []):
-                if msg.type not in ("human", "ai"):
-                    continue
-                content = msg.content
-                if isinstance(content, list):
-                    parts = []
-                    for block in content:
-                        if isinstance(block, str):
-                            parts.append(block)
-                        elif isinstance(block, dict) and "text" in block:
-                            parts.append(block["text"])
-                    content = " ".join(parts).strip()
-                elif not isinstance(content, str):
-                    content = str(content).strip()
-                if content:
-                    messages.append({"type": msg.type, "content": content})
-            return messages
+        messages = []
+        for msg in snapshot.values.get("messages", []):
+            if msg.type not in ("human", "ai"):
+                continue
+            content = msg.content
+            if isinstance(content, list):
+                parts = []
+                for block in content:
+                    if isinstance(block, str):
+                        parts.append(block)
+                    elif isinstance(block, dict) and "text" in block:
+                        parts.append(block["text"])
+                content = " ".join(parts).strip()
+            elif not isinstance(content, str):
+                content = str(content).strip()
+            if content:
+                messages.append({"type": msg.type, "content": content})
+        return messages
     except Exception as e:
         logger.warning(f"Failed to load session {agent_id}/{thread_id}: {e}")
         return []
