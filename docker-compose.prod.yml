@@ -5,7 +5,7 @@ services:
     image: ankane/pgvector:latest
     container_name: slt_postgres
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U slt -d slt_db"]
+      test: [ "CMD-SHELL", "pg_isready -U slt -d slt_db" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -34,9 +34,9 @@ services:
     build:
       context: ./backend
     container_name: slt_backend
-    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    command: [ "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000" ]
     ports:
-      - "127.0.0.1:8100:8000"   # Only bind to localhost — Nginx will proxy
+      - "127.0.0.1:8100:8000" # Only bind to localhost — Nginx will proxy
     depends_on:
       db_postgres:
         condition: service_healthy
@@ -58,7 +58,7 @@ services:
       context: ./frontend
     container_name: slt_frontend
     ports:
-      - "127.0.0.1:3100:3000"   # Only bind to localhost — Nginx will proxy
+      - "127.0.0.1:3100:3000" # Only bind to localhost — Nginx will proxy
     depends_on:
       - backend
     env_file:

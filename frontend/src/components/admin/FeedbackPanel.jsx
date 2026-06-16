@@ -41,6 +41,41 @@ const AGENT_COLORS = {
         badge: 'bg-orange-500/20 border-orange-500/25 text-orange-200',
         text: 'text-orange-300',
     },
+    it: {
+        card: 'bg-sky-500/10 border-sky-500/20',
+        badge: 'bg-sky-500/20 border-sky-500/25 text-sky-200',
+        text: 'text-sky-300',
+    },
+    cia: {
+        card: 'bg-rose-500/10 border-rose-500/20',
+        badge: 'bg-rose-500/20 border-rose-500/25 text-rose-200',
+        text: 'text-rose-300',
+    },
+    network: {
+        card: 'bg-teal-500/10 border-teal-500/20',
+        badge: 'bg-teal-500/20 border-teal-500/25 text-teal-200',
+        text: 'text-teal-300',
+    },
+    legal: {
+        card: 'bg-amber-500/10 border-amber-500/20',
+        badge: 'bg-amber-500/20 border-amber-500/25 text-amber-200',
+        text: 'text-amber-300',
+    },
+    marketing: {
+        card: 'bg-pink-500/10 border-pink-500/20',
+        badge: 'bg-pink-500/20 border-pink-500/25 text-pink-200',
+        text: 'text-pink-300',
+    },
+    enterprise_business: {
+        card: 'bg-violet-500/10 border-violet-500/20',
+        badge: 'bg-violet-500/20 border-violet-500/25 text-violet-200',
+        text: 'text-violet-300',
+    },
+    consumer_business: {
+        card: 'bg-green-500/10 border-green-500/20',
+        badge: 'bg-green-500/20 border-green-500/25 text-green-200',
+        text: 'text-green-300',
+    },
 };
 
 const DEFAULT_COLOR = {

@@ -3,6 +3,7 @@ Factory for initializing LLMs and Embeddings based on environment configurations
 """
 
 import logging
+from functools import lru_cache
 from typing import Optional
 
 from core.config import settings
@@ -10,6 +11,7 @@ from core.config import settings
 log = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=1)
 def get_chat_model():
     """
     Returns an instantiated chat model based on the LLM_PROVIDER setting.
@@ -49,9 +51,11 @@ def get_chat_model():
         raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
 
 
+@lru_cache(maxsize=1)
 def get_embedding_model():
     """
     Returns an instantiated embedding model based on the EMBEDDING_PROVIDER setting.
+    Used for document embedding (Qdrant ingestion + retrieval).
     """
     provider = settings.EMBEDDING_PROVIDER.lower().strip()
     model_name = settings.EMBEDDING_MODEL
@@ -87,6 +91,45 @@ def get_embedding_model():
         raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {provider}")
 
 
+@lru_cache(maxsize=1)
+def get_routing_embedding_model():
+    """
+    Returns a smaller, faster embedding model used ONLY for supervisor routing
+    similarity scoring. Independent from the main EMBEDDING_MODEL so Qdrant
+    collections (embedded with the main model) keep working unchanged.
+
+    Defaults to text-embedding-3-small (1536 dims, ~5x cheaper and 2-3x faster
+    than text-embedding-3-large). Override via ROUTING_EMBEDDING_* env vars.
+    """
+    provider = settings.ROUTING_EMBEDDING_PROVIDER.lower().strip()
+    model_name = settings.ROUTING_EMBEDDING_MODEL
+    api_key = settings.ROUTING_EMBEDDING_API_KEY
+
+    if provider == "openai":
+        from langchain_openai import OpenAIEmbeddings
+
+        final_api_key = api_key or settings.OPENAI_API_KEY
+
+        log.info(f"Initialized routing embedding model (OpenAI): {model_name}")
+        return OpenAIEmbeddings(
+            model=model_name,
+            api_key=final_api_key,
+        )
+    elif provider == "gemini":
+        from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+        final_api_key = api_key or settings.GOOGLE_API_KEY
+
+        log.info(f"Initialized routing embedding model (Gemini): {model_name}")
+        return GoogleGenerativeAIEmbeddings(
+            model=model_name,
+            google_api_key=final_api_key,
+        )
+    else:
+        raise ValueError(f"Unsupported ROUTING_EMBEDDING_PROVIDER: {provider}")
+
+
+@lru_cache(maxsize=1)
 def get_guardrail_model():
     """
     Returns a lightweight, fast LLM for the guardrail intent classifier.

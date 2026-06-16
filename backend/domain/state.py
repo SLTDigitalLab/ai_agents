@@ -52,6 +52,9 @@ class AgentState(TypedDict):
     # Multi-specialist fan-out (set when routing is ambiguous between two specialists).
     routed_agent_ids: NotRequired[list[str]]
     specialist_answers: NotRequired[dict[str, str]]
+    # Per-specialist focused sub-queries produced by decompose_query. Each routed
+    # specialist receives only its own sub-question instead of the full compound query.
+    specialist_queries: NotRequired[dict[str, str]]
 
     # True when a specialist graph is invoked indirectly by the supervisor
     # (Workmate AI). Specialists use this to keep the unified "Workmate AI"

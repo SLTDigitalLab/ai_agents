@@ -12,13 +12,19 @@ Object.values(AGENTS).forEach(cfg => {
 });
 
 const AGENT_COLORS = {
-    hr: { bg: 'from-purple-500/10 to-purple-600/5', border: 'border-purple-500/20', text: 'text-purple-300', badge: 'bg-purple-500/20 text-purple-200' },
-    finance: { bg: 'from-blue-500/10 to-blue-600/5', border: 'border-blue-500/20', text: 'text-blue-300', badge: 'bg-blue-500/20 text-blue-200' },
-    admin: { bg: 'from-slate-400/10 to-slate-500/5', border: 'border-slate-400/20', text: 'text-slate-300', badge: 'bg-slate-400/20 text-slate-200' },
-    process: { bg: 'from-emerald-500/10 to-emerald-600/5', border: 'border-emerald-500/20', text: 'text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-200' },
-    enterprise: { bg: 'from-indigo-500/10 to-indigo-600/5', border: 'border-indigo-500/20', text: 'text-indigo-300', badge: 'bg-indigo-500/20 text-indigo-200' },
-    lifestore: { bg: 'from-orange-500/10 to-orange-600/5', border: 'border-orange-500/20', text: 'text-orange-300', badge: 'bg-orange-500/20 text-orange-200' },
-    it: { bg: 'from-sky-500/10 to-sky-600/5', border: 'border-sky-500/20', text: 'text-sky-300', badge: 'bg-sky-500/20 text-sky-200' },
+  hr: { bg: 'from-purple-500/10 to-purple-600/5', border: 'border-purple-500/20', text: 'text-purple-300', badge: 'bg-purple-500/20 text-purple-200' },
+  finance: { bg: 'from-blue-500/10 to-blue-600/5', border: 'border-blue-500/20', text: 'text-blue-300', badge: 'bg-blue-500/20 text-blue-200' },
+  admin: { bg: 'from-slate-400/10 to-slate-500/5', border: 'border-slate-400/20', text: 'text-slate-300', badge: 'bg-slate-400/20 text-slate-200' },
+  process: { bg: 'from-emerald-500/10 to-emerald-600/5', border: 'border-emerald-500/20', text: 'text-emerald-300', badge: 'bg-emerald-500/20 text-emerald-200' },
+  enterprise: { bg: 'from-indigo-500/10 to-indigo-600/5', border: 'border-indigo-500/20', text: 'text-indigo-300', badge: 'bg-indigo-500/20 text-indigo-200' },
+  lifestore: { bg: 'from-orange-500/10 to-orange-600/5', border: 'border-orange-500/20', text: 'text-orange-300', badge: 'bg-orange-500/20 text-orange-200' },
+  it: { bg: 'from-sky-500/10 to-sky-600/5', border: 'border-sky-500/20', text: 'text-sky-300', badge: 'bg-sky-500/20 text-sky-200' },
+  cia: { bg: 'from-rose-500/10 to-rose-600/5', border: 'border-rose-500/20', text: 'text-rose-300', badge: 'bg-rose-500/20 text-rose-300' },
+  network: { bg: 'from-teal-500/10 to-teal-600/5', border: 'border-teal-500/20', text: 'text-teal-300', badge: 'bg-teal-500/20 text-teal-300' },
+  legal: { bg: 'from-amber-500/10 to-amber-600/5', border: 'border-amber-500/20', text: 'text-amber-300', badge: 'bg-amber-500/20 text-amber-300' },
+  marketing: { bg: 'from-pink-500/10 to-pink-600/5', border: 'border-pink-500/20', text: 'text-pink-300', badge: 'bg-pink-500/20 text-pink-300' },
+  enterprise_business: { bg: 'from-violet-500/10 to-violet-600/5', border: 'border-violet-500/20', text: 'text-violet-300', badge: 'bg-violet-500/20 text-violet-300' },
+  consumer_business: { bg: 'from-green-500/10 to-green-600/5', border: 'border-green-500/20', text: 'text-green-300', badge: 'bg-green-500/20 text-green-300' },
 };
 
 const DEFAULT_COLOR = {

@@ -5,17 +5,17 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s | %(message)s",
 )
 
-from pathlib import Path
-
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
 from services.ingestion import router as ingestion_router
-from core.config import settings
 
-app = FastAPI(title="Ask SLT API")
+app = FastAPI(
+    title="Ask SLT API",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+)
 
 # --- 1. Add CORS Middleware ---
 app.add_middleware(
@@ -26,19 +26,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Evidence image storage ---
-evidence_dir = Path(settings.EVIDENCE_STORAGE_DIR)
-if not evidence_dir.is_absolute():
-    evidence_dir = Path(__file__).resolve().parent / evidence_dir
-
-evidence_dir.mkdir(parents=True, exist_ok=True)
-
-app.mount(
-    settings.EVIDENCE_URL_PREFIX,
-    StaticFiles(directory=str(evidence_dir)),
-    name="evidence_images",
-)
-
 # --- 2. Register Routers ---
 app.include_router(admin.router)
 app.include_router(chat.router)  # Connect the new chat endpoint
@@ -47,6 +34,7 @@ app.include_router(enterprise.router)  # Enterprise lead → Bitrix24
 app.include_router(admin_dashboard.router)  # Admin dashboard panel
 app.include_router(feedback.router)  # Feedback (thumbs up/down)
 app.include_router(finance.router)  # External Finance KB retrieval (voice assistant)
+app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev local → prod vectors)
 app.include_router(ingestion_router)
 
 @app.get("/")

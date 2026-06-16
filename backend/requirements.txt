@@ -1,3 +1,4 @@
+aiohttp==3.13.2
 fastapi==0.129.0
 uvicorn==0.41.0
 python-dotenv==1.2.1
@@ -26,4 +27,5 @@ fastembed>=0.5.1
 fastapi-mail==1.6.2
 httpx==0.28.1
 pytesseract==0.3.13
-PyMuPDF>=1.24.0
+neo4j==6.0.3
+langchain-ollama==1.0.1
