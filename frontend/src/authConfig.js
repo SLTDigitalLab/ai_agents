@@ -15,3 +15,9 @@ export const loginRequest = {
     scopes: ["User.Read"],
     prompt: "select_account"
 };
+
+// Used only for automatic OneDrive ingestion.
+// This reads files accessible to the currently logged-in Microsoft account.
+export const graphTokenRequest = {
+    scopes: ["Files.Read"]
+};

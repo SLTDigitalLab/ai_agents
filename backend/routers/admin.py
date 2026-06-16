@@ -22,6 +22,13 @@ class OneDriveIngestRequest(BaseModel):
     agent_name: str
     force: bool = False
 
+class SharePointIngestRequest(BaseModel):
+    site_url: str
+    folder_path: str
+    token: str
+    agent_name: str
+    force: bool = False   
+
 class TestLeaveBalanceRequest(BaseModel):
     sid: str
 
@@ -82,6 +89,43 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
         )
     )
     return {"status": "started", "agent_name": request.agent_name, "source": "onedrive"}
+
+@router.post("/ingest-sharepoint")
+async def process_sharepoint_ingestion_api(request: SharePointIngestRequest):
+    """
+    Process SharePoint Ingestion API - Ingest PDFs, Word docs, PowerPoint,
+    Excel, images, and EML files from a SharePoint document library folder
+    using Microsoft Graph.
+
+    Runs in the background; poll /ingestion-status for completion.
+    """
+    current = ingestion_status.get_status()
+    if current.get("active"):
+        raise HTTPException(status_code=409, detail="Another ingestion job is already running.")
+
+    ingestion_status.start(agent_name=request.agent_name, source="sharepoint")
+
+    asyncio.create_task(
+        _run_ingestion_task(
+            ingestion_service.process_sharepoint_ingestion(
+                site_url=request.site_url,
+                folder_path=request.folder_path,
+                access_token=request.token,
+                agent_name=request.agent_name,
+                force=request.force,
+            ),
+            label=(
+                f"SharePoint agent='{request.agent_name}' "
+                f"site_url='{request.site_url}' folder_path='{request.folder_path}'"
+            ),
+        )
+    )
+
+    return {
+        "status": "started",
+        "agent_name": request.agent_name,
+        "source": "sharepoint",
+    }
 
 @router.get("/ingestion-status")
 async def get_ingestion_status():

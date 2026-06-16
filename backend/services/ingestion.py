@@ -1222,4 +1222,283 @@ class IngestionService:
             }
 
 
+    async def process_sharepoint_ingestion(
+        self,
+        site_url: str,
+        folder_path: str,
+        access_token: str,
+        agent_name: str,
+        force: bool = False,
+    ):
+        """
+        Ingest files from a SharePoint document library folder using Microsoft Graph.
+
+        Simple version:
+        - Admin enters SharePoint site URL
+        - Admin enters folder path inside the default Documents library
+        - Admin enters Graph API token
+
+        Example:
+        site_url: https://mysliit.sharepoint.com/sites/WorkmateAITestKB
+        folder_path: AI-Ingestion-Test
+        """
+        import requests
+        from urllib.parse import urlparse, quote
+        from urllib3.util.retry import Retry
+        from requests.adapters import HTTPAdapter
+
+        # Setup a resilient session
+        session = requests.Session()
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[500, 502, 503, 504])
+        session.mount("https://", HTTPAdapter(max_retries=retries))
+        session.mount("http://", HTTPAdapter(max_retries=retries))
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+
+        parsed_site = urlparse(site_url.strip())
+        hostname = parsed_site.netloc
+        site_path = parsed_site.path.strip("/")
+
+        if not hostname or not site_path:
+            return {
+                "status": "error",
+                "message": "Invalid SharePoint site URL. Example: https://tenant.sharepoint.com/sites/SiteName",
+            }
+
+        clean_folder_path = folder_path.strip().strip("/")
+
+        if not clean_folder_path:
+            return {
+                "status": "error",
+                "message": "SharePoint folder path is required. Example: AI-Ingestion-Test",
+            }
+
+        encoded_site_path = quote(site_path, safe="/")
+        encoded_folder_path = quote(clean_folder_path, safe="/")
+
+        # Step 1: Resolve SharePoint site URL into Graph site ID.
+        site_lookup_url = f"https://graph.microsoft.com/v1.0/sites/{hostname}:/{encoded_site_path}"
+
+        try:
+            site_resp = session.get(site_lookup_url, headers=headers, timeout=30)
+
+            if site_resp.status_code != 200:
+                return {
+                    "status": "error",
+                    "message": f"SharePoint site lookup failed: {site_resp.status_code} {site_resp.text}",
+                }
+
+            site_id = site_resp.json().get("id")
+
+            if not site_id:
+                return {
+                    "status": "error",
+                    "message": "SharePoint site lookup succeeded, but no site ID was returned.",
+                }
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to resolve SharePoint site URL: {e}",
+            }
+
+        # Step 2: Use resolved site ID to list folder children from the default document library.
+        url = (
+            f"https://graph.microsoft.com/v1.0/sites/{site_id}"
+            f"/drive/root:/{encoded_folder_path}:/children"
+            f"?$top=200"
+        )
+
+        items = []
+
+        try:
+            while url:
+                resp = session.get(url, headers=headers, timeout=30)
+
+                if resp.status_code != 200:
+                    return {
+                        "status": "error",
+                        "message": f"SharePoint Graph API Error: {resp.status_code} {resp.text}",
+                    }
+
+                payload = resp.json()
+                items.extend(payload.get("value", []))
+                url = payload.get("@odata.nextLink")
+
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to connect to SharePoint Graph API: {e}",
+            }
+
+        log.info(
+            f"SharePoint Graph API returned {len(items)} total items "
+            f"for site_url={site_url}, folder_path={clean_folder_path}"
+        )
+
+        ALLOWED_EXTENSIONS = (
+            ".pdf",
+            ".docx",
+            ".pptx",
+            ".xlsx",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".eml",
+        )
+
+        matching_items = [
+            item for item in items
+            if item.get("file") and item.get("name", "").lower().endswith(ALLOWED_EXTENSIONS)
+        ]
+
+        if not matching_items:
+            return {
+                "status": "warning",
+                "message": f"No supported files found in SharePoint folder path: {clean_folder_path}",
+            }
+
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            total_chunks = 0
+            processed_files = []
+
+            collection_name = f"{agent_name}_docs"
+            await self._ensure_collection_exists(collection_name)
+
+            vector_store = QdrantVectorStore(
+                client=self.client,
+                collection_name=collection_name,
+                embedding=self.embeddings,
+                sparse_embedding=self.sparse_embeddings,
+                retrieval_mode=RetrievalMode.HYBRID,
+                vector_name="dense",
+                sparse_vector_name="sparse",
+            )
+
+            skipped_files = []
+            failed_files = []
+            evidence_cache: dict[tuple[str, int], list[dict]] = {}
+
+            for item in matching_items:
+                file_name = item["name"]
+                download_url = item.get("@microsoft.graph.downloadUrl")
+
+                if not download_url:
+                    log.error(f"No download URL for SharePoint file {file_name}; skipping.")
+                    failed_files.append({
+                        "file": file_name,
+                        "reason": "no download URL from SharePoint Graph",
+                    })
+                    continue
+
+                sharepoint_item_id = item.get("id", "unknown")
+                last_modified = item.get("lastModifiedDateTime", "")
+
+                if not force and self._file_already_ingested(
+                    collection_name,
+                    sharepoint_item_id,
+                    last_modified,
+                ):
+                    log.info(f"Skipping unchanged SharePoint file: {file_name}")
+                    skipped_files.append(file_name)
+                    continue
+
+                dest_path = temp_dir / file_name
+
+                try:
+                    log.info(f"Downloading SharePoint file {file_name}...")
+
+                    file_resp = session.get(download_url, timeout=120)
+
+                    if file_resp.status_code != 200:
+                        log.error(
+                            f"Failed to download SharePoint file {file_name}: "
+                            f"HTTP {file_resp.status_code}"
+                        )
+                        failed_files.append({
+                            "file": file_name,
+                            "reason": f"download HTTP {file_resp.status_code}",
+                        })
+                        continue
+
+                    with open(dest_path, "wb") as f:
+                        f.write(file_resp.content)
+
+                    chunks = self._load_and_chunk_file(dest_path)
+
+                    if not chunks:
+                        log.error(
+                            f"No chunks produced for SharePoint file {file_name} — "
+                            f"likely scanned PDF without text layer or unsupported content."
+                        )
+                        failed_files.append({
+                            "file": file_name,
+                            "reason": "no extractable text (OCR needed?)",
+                        })
+                        continue
+
+                    source_link = item.get("webUrl", "#")
+
+                    for doc in chunks:
+                        doc.metadata["source"] = file_name
+                        doc.metadata["link"] = source_link
+
+                        # Keep old key so existing skip/delete helpers still work.
+                        doc.metadata["onedrive_id"] = sharepoint_item_id
+
+                        # SharePoint metadata
+                        doc.metadata["source_type"] = "sharepoint"
+                        doc.metadata["sharepoint_site_url"] = site_url
+                        doc.metadata["sharepoint_folder_path"] = clean_folder_path
+                        doc.metadata["sharepoint_item_id"] = sharepoint_item_id
+                        doc.metadata["source_folder"] = clean_folder_path
+                        doc.metadata["last_modified"] = last_modified
+
+                        evidence_items = []
+
+                        table_evidence = self._build_table_evidence(
+                            doc=doc,
+                            file_name=file_name,
+                            link=source_link,
+                        )
+                        if table_evidence:
+                            evidence_items.append(table_evidence)
+
+                        image_evidence_items = self._build_image_evidence(
+                            doc=doc,
+                            file_path=dest_path,
+                            file_name=file_name,
+                            link=source_link,
+                            render_cache=evidence_cache,
+                        )
+                        if image_evidence_items:
+                            evidence_items.extend(image_evidence_items)
+
+                        if evidence_items:
+                            doc.metadata["evidence"] = evidence_items
+
+                    self._delete_file_vectors(collection_name, sharepoint_item_id, file_name)
+
+                    vector_store.add_documents(chunks)
+                    total_chunks += len(chunks)
+                    processed_files.append(file_name)
+
+                except Exception as e:
+                    log.exception(f"Failed to process SharePoint file {file_name}: {e}")
+                    failed_files.append({"file": file_name, "reason": str(e)})
+                    continue
+
+            return {
+                "status": "success",
+                "message": (
+                    f"Ingested {total_chunks} chunks from {len(processed_files)} SharePoint files. "
+                    f"Skipped {len(skipped_files)} unchanged files. "
+                    f"Failed {len(failed_files)} files."
+                ),
+                "files": processed_files,
+                "skipped": skipped_files,
+                "failed": failed_files,
+            }
+        
 ingestion_service = IngestionService()
