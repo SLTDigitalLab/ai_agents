@@ -15,7 +15,7 @@ Neo4j:
 
 import json
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Any
 
 import httpx
 from langchain_core.tools import tool
@@ -29,6 +29,96 @@ from core.llm import get_embedding_model
 log = logging.getLogger(__name__)
 
 _sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+
+# Per-thread evidence cache.
+# rag_tools.py collects image/table evidence from retrieved Qdrant chunks.
+# chat.py will consume this cache after the final answer is generated.
+_THREAD_EVIDENCE_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+def clear_thread_evidence(thread_id: str | None) -> None:
+    """Clear evidence collected for a thread before a new chat request starts."""
+    if thread_id:
+        _THREAD_EVIDENCE_CACHE.pop(thread_id, None)
+
+
+def _evidence_key(item: dict[str, Any]) -> tuple:
+    """Stable key used for deduplicating evidence items."""
+    return (
+        item.get("type"),
+        item.get("source"),
+        item.get("page"),
+        item.get("url"),
+        (item.get("content") or "")[:200],
+    )
+
+
+def _dedupe_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove duplicate evidence items while preserving order."""
+    seen = set()
+    unique: list[dict[str, Any]] = []
+
+    for item in items:
+        key = _evidence_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+
+    return unique
+
+
+def consume_thread_evidence(thread_id: str | None, max_items: int | None = None) -> list[dict[str, Any]]:
+    """Return and clear collected evidence for this thread."""
+    if not thread_id:
+        return []
+
+    items = _THREAD_EVIDENCE_CACHE.pop(thread_id, [])
+    items = _dedupe_evidence(items)
+
+    if max_items is not None:
+        return items[:max_items]
+
+    return items
+
+
+def _add_thread_evidence(
+    thread_id: str | None,
+    evidence_items: Any,
+    source: str,
+    link: str,
+) -> None:
+    """Add valid evidence metadata from retrieved Qdrant chunks."""
+    if not thread_id or not evidence_items:
+        return
+
+    if not isinstance(evidence_items, list):
+        return
+
+    cleaned_items: list[dict[str, Any]] = []
+
+    for raw_item in evidence_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        evidence_type = item.get("type")
+
+        if evidence_type not in ("image", "table"):
+            continue
+
+        if evidence_type == "image" and not item.get("url"):
+            continue
+
+        if evidence_type == "table" and not item.get("content"):
+            continue
+
+        item.setdefault("source", source)
+        item.setdefault("link", link)
+        cleaned_items.append(item)
+
+    if cleaned_items:
+        _THREAD_EVIDENCE_CACHE.setdefault(thread_id, []).extend(cleaned_items)
 
 try:
     from neo4j import GraphDatabase
@@ -137,6 +227,7 @@ async def _search_qdrant_knowledge_base(
     query: str,
     agent_id: str,
     k: int = 12,
+    thread_id: str | None = None,
 ) -> str:
     """Search the Qdrant knowledge base for documents relevant to the user's query.
 
@@ -227,6 +318,19 @@ async def _search_qdrant_knowledge_base(
             )
 
             title = doc.metadata.get("title") or "Untitled"
+
+            evidence_items = (
+                doc.metadata.get("evidence")
+                or doc.metadata.get("evidence_items")
+                or []
+            )
+
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=evidence_items,
+                source=source,
+                link=link,
+            )
 
             context_parts.append(
                 f"[Vector Source: {source} | Link: {link} | Title: {title}]\n"
@@ -502,6 +606,7 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
 async def search_knowledge_base(
     query: str,
     agent_id: Annotated[str, InjectedState("agent_id")],
+    thread_id: Annotated[str | None, InjectedState("thread_id")] = None,
 ) -> str:
     """
     Search knowledge base.
@@ -516,6 +621,7 @@ async def search_knowledge_base(
         query=query,
         agent_id=agent_id,
         k=12,
+        thread_id=thread_id,
     )
 
     if not _is_lifestore_agent(agent_id):

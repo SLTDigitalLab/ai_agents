@@ -535,7 +535,7 @@ const IngestionPanel = () => {
                 token,
             };
 
-            const res = await fetch(`${API_BASE}/ingest/onedrive`, {
+            const res = await fetch(`${API_BASE}/ingest-onedrive`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...payload, user_email: userEmail }),
