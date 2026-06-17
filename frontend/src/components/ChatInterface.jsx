@@ -7,6 +7,7 @@ import EnterpriseForm from './forms/EnterpriseForm';
 import embryoLogo from '../assets/embryo-removebg.png';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import Buttons from './Buttons';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -1019,6 +1020,14 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                         <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 dark:bg-gray-300/70 ml-0.5 rounded-sm animate-pulse" />
                                                     )}
                                                     <SourcesSection sources={sources} color={agentConfig.color} />
+                                                    
+                                                    {/* Standalone HITL Buttons Component */}
+                                                    <Buttons
+                                                        message={msg}
+                                                        isLast={isLastMsg}
+                                                        onSend={(text) => sendMessage(text)}
+                                                    />
+
                                                     {msg.formType === 'lifestore' && <LifestoreForm />}
                                                     {msg.formType === 'enterprise' && <EnterpriseForm />}
                                                 </div>

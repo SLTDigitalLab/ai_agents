@@ -15,7 +15,9 @@ from core.checkpointer import get_postgres_checkpointer, get_async_postgres_chec
 from domain.registry import get_agent_builder
 from domain.guardrails import classify_intent
 from schemas.chat import ChatRequest
-from langchain_core.tracers.context import tracing_v2_enabled
+
+# --- 1. Import Langfuse CallbackHandler ---
+from langfuse.langchain import CallbackHandler
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
@@ -87,8 +89,19 @@ async def chat(request: ChatRequest):
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            # Thread config enables LangGraph memory/checkpointing per conversation
-            config = {"configurable": {"thread_id": request.thread_id}}
+            # --- 2. Initialize Langfuse Handler (Empty in v3+) ---
+            langfuse_handler = CallbackHandler()
+
+            # --- 3. Inject callbacks and Langfuse metadata into the config ---
+            config = {
+                "configurable": {"thread_id": request.thread_id},
+                "callbacks": [langfuse_handler],
+                "metadata": {
+                    "langfuse_session_id": request.thread_id,
+                    "langfuse_user_id": request.user_id,
+                    "langfuse_tags": [request.agent_id, "prod"]
+                }
+            }
 
             # ── Run guardrail classifier FIRST ──────────────────────────
             # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
@@ -142,90 +155,89 @@ async def chat(request: ChatRequest):
 
                 streamed_any_text = False
 
-                project_name = f"Ask SLT - {request.agent_id.upper()}"
-                with tracing_v2_enabled(project_name=project_name):
-                    # We use astream_events (v2) for fine-grained streaming.
-                    #
-                    # Nodes whose token stream must be SUPPRESSED — these fan
-                    # out multiple concurrent LLM calls whose tokens would
-                    # otherwise interleave in the HTTP stream and render as
-                    # garbled text on the client. The final merged reply from
-                    # the downstream synthesis node still streams cleanly.
-                    #
-                    # Specialists invoked inside multi_delegate run as compiled
-                    # subgraphs, so their LLM events bubble up with the subgraph's
-                    # internal node name ("agent") rather than the parent node.
-                    # We must also match on ``langgraph_checkpoint_ns`` (a
-                    # namespace string like "multi_delegate:<hash>|agent:<hash>")
-                    # to suppress nested events too.
-                    SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
-                    logged_metadata_sample = False
+                # We use astream_events (v2) for fine-grained streaming.
+                #
+                # Nodes whose token stream must be SUPPRESSED — these fan
+                # out multiple concurrent LLM calls whose tokens would
+                # otherwise interleave in the HTTP stream and render as
+                # garbled text on the client. The final merged reply from
+                # the downstream synthesis node still streams cleanly.
+                #
+                # Specialists invoked inside multi_delegate run as compiled
+                # subgraphs, so their LLM events bubble up with the subgraph's
+                # internal node name ("agent") rather than the parent node.
+                # We must also match on ``langgraph_checkpoint_ns`` (a
+                # namespace string like "multi_delegate:<hash>|agent:<hash>")
+                # to suppress nested events too.
+                SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
+                logged_metadata_sample = False
 
-                    # ── DeepSeek-R1 <think> stripper ─────────────
-                    # The internal SLM (deepseek-r1) prefixes its output
-                    # with <think>...</think> reasoning tokens. We hide
-                    # those from the user but let the final answer stream.
-                    strip_think = request.agent_id == "askhrslm"
-                    think_buffer = ""
-                    in_think_block = False
-                    think_done = False
+                # ── DeepSeek-R1 <think> stripper ─────────────
+                # The internal SLM (deepseek-r1) prefixes its output
+                # with <think>...</think> reasoning tokens. We hide
+                # those from the user but let the final answer stream.
+                strip_think = request.agent_id == "askhrslm"
+                think_buffer = ""
+                in_think_block = False
+                think_done = False
 
-                    async for event in graph.astream_events(state, config, version="v2"):
-                        # ── Extract tokens from stream events ────────
-                        kind = event["event"]
+                # --- 4. The `config` object here now contains the Langfuse callbacks ---
+                async for event in graph.astream_events(state, config, version="v2"):
+                    # ── Extract tokens from stream events ────────
+                    kind = event["event"]
 
-                        if kind == "on_chat_model_stream":
-                            metadata = event.get("metadata") or {}
+                    if kind == "on_chat_model_stream":
+                        metadata = event.get("metadata") or {}
 
-                            if not logged_metadata_sample:
-                                logger.info(
-                                    "Stream metadata sample | node=%r | checkpoint_ns=%r | tags=%r",
-                                    metadata.get("langgraph_node"),
-                                    metadata.get("langgraph_checkpoint_ns"),
-                                    event.get("tags"),
-                                )
-                                logged_metadata_sample = True
-
-                            node = metadata.get("langgraph_node")
-                            checkpoint_ns = metadata.get("langgraph_checkpoint_ns") or ""
-                            suppressed = (
-                                node in SUPPRESS_STREAM_NODES
-                                or any(
-                                    suppressed_node in checkpoint_ns
-                                    for suppressed_node in SUPPRESS_STREAM_NODES
-                                )
+                        if not logged_metadata_sample:
+                            logger.info(
+                                "Stream metadata sample | node=%r | checkpoint_ns=%r | tags=%r",
+                                metadata.get("langgraph_node"),
+                                metadata.get("langgraph_checkpoint_ns"),
+                                event.get("tags"),
                             )
-                            if suppressed:
-                                continue
+                            logged_metadata_sample = True
 
-                            content = event["data"]["chunk"].content
-                            text = _message_content_to_text(content, strip=False)
+                        node = metadata.get("langgraph_node")
+                        checkpoint_ns = metadata.get("langgraph_checkpoint_ns") or ""
+                        suppressed = (
+                            node in SUPPRESS_STREAM_NODES
+                            or any(
+                                suppressed_node in checkpoint_ns
+                                for suppressed_node in SUPPRESS_STREAM_NODES
+                            )
+                        )
+                        if suppressed:
+                            continue
 
-                            if text and strip_think and not think_done:
-                                think_buffer += text
-                                if not in_think_block and "<think>" in think_buffer:
-                                    in_think_block = True
-                                    think_buffer = think_buffer.split("<think>", 1)[1]
-                                    text = ""
-                                if in_think_block:
-                                    if "</think>" in think_buffer:
-                                        # Drop everything up to and including </think>;
-                                        # whatever follows is the real answer.
-                                        text = think_buffer.split("</think>", 1)[1].lstrip()
-                                        in_think_block = False
-                                        think_done = True
-                                        think_buffer = ""
-                                    else:
-                                        text = ""  # still inside think block
-                                elif "<think>" not in think_buffer:
-                                    # No think tag at all — flush buffer as normal output.
-                                    text = think_buffer
-                                    think_buffer = ""
+                        content = event["data"]["chunk"].content
+                        text = _message_content_to_text(content, strip=False)
+
+                        if text and strip_think and not think_done:
+                            think_buffer += text
+                            if not in_think_block and "<think>" in think_buffer:
+                                in_think_block = True
+                                think_buffer = think_buffer.split("<think>", 1)[1]
+                                text = ""
+                            if in_think_block:
+                                if "</think>" in think_buffer:
+                                    # Drop everything up to and including </think>;
+                                    # whatever follows is the real answer.
+                                    text = think_buffer.split("</think>", 1)[1].lstrip()
+                                    in_think_block = False
                                     think_done = True
+                                    think_buffer = ""
+                                else:
+                                    text = ""  # still inside think block
+                            elif "<think>" not in think_buffer:
+                                # No think tag at all — flush buffer as normal output.
+                                text = think_buffer
+                                think_buffer = ""
+                                think_done = True
 
-                            if text:
-                                streamed_any_text = True
-                                yield text
+                        if text:
+                            streamed_any_text = True
+                            yield text
 
                 # Fallback: if the graph responded without streaming tokens,
                 # fetch the latest AI message from final graph state.
@@ -306,3 +318,5 @@ async def get_history(agent_id: str, thread_id: str):
     except Exception as exc:
         logger.error(f"Error fetching history: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
+    
+    
