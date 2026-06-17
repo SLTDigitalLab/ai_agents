@@ -497,7 +497,7 @@ const CodeBlock = ({ children, ...props }) => {
 };
 
 // ── Feedback Buttons Component ──────────────────────────────────────
-const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRating, onFeedback }) => {
+const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, existingRating, onFeedback }) => {
     const [rating, setRating] = useState(existingRating || null);
     const [submitting, setSubmitting] = useState(false);
 
@@ -541,6 +541,7 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                         message_index: messageIndex,
                         rating: finalRating,
                         user_id: userId,
+                        user_name: userName || null,
                     }),
                 });
                 if (res.ok) {
@@ -919,6 +920,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     message: maskedText,
                     agent_id: agentConfig.id,
                     user_id: user.username || "anonymous",
+                    user_name: user.name || null,
                     thread_id: threadId
                 }),
                 signal: controller.signal,
@@ -1322,6 +1324,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                             agentId={agentConfig.id}
                                                             threadId={threadId}
                                                             userId={user.username || "anonymous"}
+                                                            userName={user.name || null}
                                                             existingRating={feedbackMap[index] || null}
                                                             onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
                                                         />

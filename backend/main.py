@@ -11,6 +11,7 @@ logging.basicConfig(
 )
 
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -18,12 +19,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
 from services.ingestion import router as ingestion_router
 from core.config import settings
+from core.checkpointer import close_sync_pools, aclose_async_pools
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage shared resources for the app's lifetime.
+
+    Checkpointer connection pools are created lazily on first use (per agent)
+    and live for the whole process; we close them cleanly on shutdown.
+    """
+    yield
+    await aclose_async_pools()
+    close_sync_pools()
+
 
 app = FastAPI(
     title="Ask SLT API",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    lifespan=lifespan,
 )
 
 # --- Evidence image storage ---
