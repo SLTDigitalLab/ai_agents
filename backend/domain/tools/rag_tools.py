@@ -128,10 +128,47 @@ def _add_thread_evidence(
     if cleaned_items:
         _THREAD_EVIDENCE_CACHE.setdefault(thread_id, []).extend(cleaned_items)
 
-async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
+
+def _absolutize_remote_evidence(evidence_items: Any, base_url: str) -> list[dict[str, Any]]:
+    """Rewrite relative evidence image URLs to absolute URLs on the remote host.
+
+    Evidence PNG crops live on the remote (prod VM) under EVIDENCE_URL_PREFIX
+    and are stored as relative URLs. A local dev reading prod vectors must
+    point <img> at the remote host, so we prefix relative urls with base_url.
+    """
+    if not isinstance(evidence_items, list):
+        return []
+
+    base = (base_url or "").rstrip("/")
+    rewritten: list[dict[str, Any]] = []
+
+    for raw_item in evidence_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        url = item.get("url")
+
+        if url and isinstance(url, str) and not url.startswith(("http://", "https://")):
+            item["url"] = f"{base}{url}" if url.startswith("/") else f"{base}/{url}"
+
+        rewritten.append(item)
+
+    return rewritten
+
+
+async def _search_remote(
+    agent_id: str,
+    query: str,
+    k: int = 10,
+    thread_id: str | None = None,
+) -> str:
     """Proxy retrieval to a remote Ask SLT instance's /api/v1/kb endpoint.
 
     Used by local dev environments to skip ingestion and read prod vectors.
+    Also collects any visual/table evidence returned by the remote so devs
+    pointing at prod can see diagrams (with image URLs rewritten to the
+    remote host where the crops are actually served).
     """
     base = settings.KB_REMOTE_URL.rstrip("/")
     url = f"{base}/api/v1/kb/{agent_id}/retrieve"
@@ -145,6 +182,16 @@ async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
 
     if not chunks:
         return "No relevant documents found."
+
+    for c in chunks:
+        evidence = c.get("evidence")
+        if evidence:
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=_absolutize_remote_evidence(evidence, base),
+                source=c.get("source", "Unknown Source"),
+                link=c.get("link", "#"),
+            )
 
     return "\n\n---\n\n".join(
         f"[Source: {c.get('source', 'Unknown Source')} | Link: {c.get('link', '#')}]\n{c.get('text', '')}"
@@ -251,7 +298,7 @@ async def _search_qdrant_knowledge_base(
 
     if settings.KB_REMOTE_URL:
         try:
-            return await _search_remote(agent_id, query, k=10)
+            return await _search_remote(agent_id, query, k=10, thread_id=thread_id)
         except Exception as e:
             log.exception(
                 f"Remote KB retrieval failed for agent='{agent_id}' "
