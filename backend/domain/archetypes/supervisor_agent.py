@@ -28,6 +28,11 @@ from domain.archetypes.kb_api_agent import build_kb_api_workflow
 from domain.archetypes.kb_form_agent import build_kb_form_workflow
 from domain.config.supervisor_routing import (
     CLARIFICATION_CHOICE_ALIASES,
+    EVIDENTIAL_PROBE_DECISIVE_MARGIN,
+    EVIDENTIAL_PROBE_ENABLED,
+    EVIDENTIAL_PROBE_MAX_CANDIDATES,
+    EVIDENTIAL_PROBE_MIN_SCORE,
+    EVIDENTIAL_PROBE_TOP_K,
     FOLLOW_UP_PATTERNS,
     FOLLOW_UP_STICKINESS_BOOST,
     GENERAL_HELP_PATTERNS,
@@ -43,6 +48,7 @@ from domain.config.supervisor_routing import (
     VAGUE_SPECIALIST_PATTERNS,
 )
 from domain.state import AgentState
+from domain.tools.rag_tools import probe_agent_relevance
 
 logger = logging.getLogger(__name__)
 llm = get_chat_model()
@@ -447,6 +453,93 @@ async def route_request(state: AgentState) -> dict:
             "clarification_options": [],
             "original_query": "",
         }
+
+    # Evidential probing — ambiguous zone only.
+    #
+    # Execution only reaches here when OUT_OF_SCOPE_THRESHOLD <= top_score <
+    # STRONG_ROUTE_THRESHOLD: the profile-embedding signal is too weak to trust but
+    # not weak enough to reject. This is exactly where description-embedding routing
+    # misfires — the agent that OWNS the answer can rank outside the top two because
+    # its profile text is diluted, even though its KB clearly contains the answer.
+    #
+    # So instead of guessing from profile similarity, search the actual candidate KB
+    # collections and route on real retrieval evidence. Probe results override the
+    # embedding-based decision ONLY when conclusive; otherwise we fall through to the
+    # existing embedding-based handling below, leaving prior behaviour unchanged.
+    if EVIDENTIAL_PROBE_ENABLED:
+        probe_candidates = [aid for aid, _ in scored[:EVIDENTIAL_PROBE_MAX_CANDIDATES]]
+        probe_scores = await probe_agent_relevance(
+            query, probe_candidates, k=EVIDENTIAL_PROBE_TOP_K
+        )
+        ranked_probe = sorted(
+            ((aid, s) for aid, s in probe_scores.items() if s is not None),
+            key=lambda item: item[1],
+            reverse=True,
+        )
+
+        if ranked_probe:
+            rounded_probe = {aid: round(s, 4) for aid, s in ranked_probe}
+            logger.info(
+                "Supervisor evidential probe | scores=%s | query=%r",
+                rounded_probe,
+                query[:200],
+            )
+
+            probe_top_agent, probe_top_score = ranked_probe[0]
+            probe_second_score = (
+                ranked_probe[1][1] if len(ranked_probe) > 1 else float("-inf")
+            )
+
+            if probe_top_score >= EVIDENTIAL_PROBE_MIN_SCORE:
+                decisive = (
+                    len(ranked_probe) == 1
+                    or (probe_top_score - probe_second_score)
+                    >= EVIDENTIAL_PROBE_DECISIVE_MARGIN
+                )
+
+                if decisive:
+                    logger.info(
+                        "Supervisor route | action=delegate | reason=evidential_probe | target=%s | probe_top=%.4f | probe_second=%.4f | query=%r",
+                        probe_top_agent,
+                        probe_top_score,
+                        probe_second_score,
+                        query[:200],
+                    )
+                    return {
+                        "routing_action": "delegate",
+                        "routed_agent_id": probe_top_agent,
+                        "routing_reason": f"evidential_probe:{probe_top_agent}",
+                        "routing_scores": rounded_probe,
+                        "delegation_query": query,
+                        "pending_clarification": False,
+                        "clarification_options": [],
+                        "original_query": "",
+                    }
+
+                probe_second_agent = ranked_probe[1][0]
+                if probe_second_score >= EVIDENTIAL_PROBE_MIN_SCORE:
+                    fan_out_targets = [probe_top_agent, probe_second_agent][
+                        :MULTI_DELEGATE_MAX_AGENTS
+                    ]
+                    logger.info(
+                        "Supervisor route | action=multi_delegate | reason=evidential_probe_fanout | targets=%s | probe_top=%s %.4f | probe_second=%s %.4f | query=%r",
+                        fan_out_targets,
+                        probe_top_agent,
+                        probe_top_score,
+                        probe_second_agent,
+                        probe_second_score,
+                        query[:200],
+                    )
+                    return {
+                        "routing_action": "multi_delegate",
+                        "routed_agent_ids": fan_out_targets,
+                        "routing_reason": f"evidential_probe_fanout:{'+'.join(fan_out_targets)}",
+                        "routing_scores": rounded_probe,
+                        "delegation_query": query,
+                        "pending_clarification": False,
+                        "clarification_options": [],
+                        "original_query": "",
+                    }
 
     # Medium-confidence single winner — delegate directly instead of asking the user
     # to confirm a single option. Only kicks in when runner-up isn't plausible enough

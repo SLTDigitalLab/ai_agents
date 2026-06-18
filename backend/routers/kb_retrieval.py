@@ -26,6 +26,11 @@ logger = logging.getLogger(__name__)
 class RetrieveRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     top_k: int = Field(10, ge=1, le=25)
+    # "hybrid" (default) preserves existing retrieval behaviour for normal callers.
+    # "dense" returns pure dense-cosine scores, which the supervisor's evidential
+    # probe needs because those scores are comparable across collections (hybrid
+    # RRF fusion scores are rank-quantized and cannot be compared between KBs).
+    retrieval_mode: str = Field("hybrid", pattern=r"^(hybrid|dense)$")
 
 
 class Chunk(BaseModel):
@@ -83,15 +88,24 @@ async def retrieve(
 
     embedding = get_slm_embedding_model() if agent_id == "askhrslm" else get_embedding_model()
 
-    vector_store = QdrantVectorStore(
-        client=client,
-        collection_name=collection_name,
-        embedding=embedding,
-        sparse_embedding=_sparse_embeddings,
-        retrieval_mode=RetrievalMode.HYBRID,
-        vector_name="dense",
-        sparse_vector_name="sparse",
-    )
+    if req.retrieval_mode == "dense":
+        vector_store = QdrantVectorStore(
+            client=client,
+            collection_name=collection_name,
+            embedding=embedding,
+            retrieval_mode=RetrievalMode.DENSE,
+            vector_name="dense",
+        )
+    else:
+        vector_store = QdrantVectorStore(
+            client=client,
+            collection_name=collection_name,
+            embedding=embedding,
+            sparse_embedding=_sparse_embeddings,
+            retrieval_mode=RetrievalMode.HYBRID,
+            vector_name="dense",
+            sparse_vector_name="sparse",
+        )
 
     try:
         results = await vector_store.asimilarity_search_with_score(query=req.query, k=req.top_k)

@@ -13,6 +13,7 @@ Neo4j:
   category, product_type, URL, and graph relationships.
 """
 
+import asyncio
 import json
 import logging
 from typing import Annotated, Any, Optional
@@ -244,6 +245,113 @@ def _resolve_collection_name(agent_id: str) -> str:
         return f"{base_collection}_docs"
 
     return f"{agent_id}_docs"
+
+
+# ── Evidential probing ──────────────────────────────────────────────────
+# The supervisor uses this in its ambiguous routing zone: instead of routing
+# on profile-description similarity alone, it searches the actual candidate KB
+# collections with the user's query and routes on real retrieval relevance.
+# This corrects cases where the owning specialist's profile embedding is diluted
+# but its KB clearly contains the answer (e.g. a Digital Media Policy question
+# scoring low against HR's leave/loan-heavy profile yet sitting squarely in
+# hr_docs).
+
+
+async def _probe_remote(query: str, agent_ids: list[str], k: int) -> dict[str, Optional[float]]:
+    """Probe candidate collections via the remote /retrieve endpoint (dev path).
+
+    Requests dense-cosine scores (retrieval_mode="dense") so the per-collection top
+    scores are comparable across KBs, matching the local-Qdrant probe path. Any agent
+    whose collection is missing/unauthorized/errored resolves to None and is ignored
+    by the caller.
+    """
+    base = settings.KB_REMOTE_URL.rstrip("/")
+    headers = {"X-API-Key": settings.KB_REMOTE_API_KEY or ""}
+
+    async with httpx.AsyncClient(timeout=30.0) as client:
+
+        async def _one(agent_id: str) -> tuple[str, Optional[float]]:
+            url = f"{base}/api/v1/kb/{agent_id}/retrieve"
+            try:
+                resp = await client.post(
+                    url,
+                    json={"query": query, "top_k": k, "retrieval_mode": "dense"},
+                    headers=headers,
+                )
+                if resp.status_code != 200:
+                    return agent_id, None
+                chunks = resp.json().get("chunks", [])
+                scores = [c["score"] for c in chunks if c.get("score") is not None]
+                return agent_id, (max(scores) if scores else None)
+            except Exception:
+                return agent_id, None
+
+        results = await asyncio.gather(*[_one(a) for a in agent_ids])
+
+    return dict(results)
+
+
+async def _probe_direct(query: str, agent_ids: list[str], k: int) -> dict[str, Optional[float]]:
+    """Probe candidate collections against the local Qdrant (prod path).
+
+    Embeds the query ONCE with the KB embedding model and runs a dense-only
+    nearest search per collection so the top scores are cosine-comparable across
+    collections. Returns the best (top-1) score per agent, or None if its
+    collection is absent/empty/errored.
+    """
+    embeddings = get_embedding_model()
+    vector = await asyncio.to_thread(embeddings.embed_query, query)
+    client = QdrantClient(url=settings.QDRANT_URL)
+
+    def _one(agent_id: str) -> tuple[str, Optional[float]]:
+        collection = _resolve_collection_name(agent_id)
+        try:
+            resp = client.query_points(
+                collection_name=collection,
+                query=vector,
+                using="dense",
+                limit=k,
+                with_payload=False,
+                with_vectors=False,
+            )
+            scores = [p.score for p in resp.points if p.score is not None]
+            return agent_id, (max(scores) if scores else None)
+        except Exception as exc:
+            log.warning(
+                "Evidential probe failed agent='%s' collection='%s': %s: %s",
+                agent_id,
+                collection,
+                type(exc).__name__,
+                exc,
+            )
+            return agent_id, None
+
+    results = await asyncio.gather(*[asyncio.to_thread(_one, a) for a in agent_ids])
+    return dict(results)
+
+
+async def probe_agent_relevance(
+    query: str,
+    agent_ids: list[str],
+    k: int = 5,
+) -> dict[str, Optional[float]]:
+    """Return {agent_id: top relevance score} by searching each agent's KB.
+
+    Used by the supervisor for evidential probing. Score scale depends on the
+    deployment path (dense cosine for local Qdrant, hybrid fusion for the remote
+    proxy), so callers must compare scores relatively rather than against a fixed
+    absolute threshold. Returns an empty dict if probing can't run at all.
+    """
+    if not query or not agent_ids:
+        return {}
+
+    try:
+        if settings.KB_REMOTE_URL:
+            return await _probe_remote(query, agent_ids, k)
+        return await _probe_direct(query, agent_ids, k)
+    except Exception:
+        log.exception("Evidential probe failed entirely")
+        return {}
 
 
 def _get_neo4j_driver():

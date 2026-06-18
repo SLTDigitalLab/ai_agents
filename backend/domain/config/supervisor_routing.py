@@ -848,3 +848,26 @@ MULTI_DELEGATE_MAX_AGENTS = 2
 # score. This corrects for profile-embedding dilution on short queries where the
 # semantic model under-scores an obvious keyword hit.
 KEYWORD_MATCH_BOOST = 0.12
+
+# Evidential probing: in the ambiguous routing zone (top profile-embedding score
+# below STRONG_ROUTE_THRESHOLD but at/above OUT_OF_SCOPE_THRESHOLD), the supervisor
+# searches the actual candidate KB collections with the user's query and routes on
+# real retrieval relevance instead of profile-description similarity. This fixes the
+# class of failure where the owning specialist's profile is diluted but its KB
+# clearly contains the answer. Strong and out-of-scope routes skip probing entirely.
+EVIDENTIAL_PROBE_ENABLED = True
+# How many of the top embedding-ranked specialists to probe. Bounds the number of
+# parallel KB searches while still reaching past the top-2 that embedding routing
+# would have fanned out to (the owning agent is typically just outside that pair).
+EVIDENTIAL_PROBE_MAX_CANDIDATES = 6
+# Chunks retrieved per collection when probing; the top-1 score is used as the
+# per-collection relevance signal.
+EVIDENTIAL_PROBE_TOP_K = 5
+# A probed collection must reach this top score before it can win a route. The
+# probe score scale is deployment-dependent (dense cosine vs hybrid fusion), so this
+# defaults to 0.0 (decide purely on relative dominance) and can be raised once real
+# probe scores are observed in the logs.
+EVIDENTIAL_PROBE_MIN_SCORE = 0.0
+# The top-probed collection must beat the runner-up by this margin to win a single
+# route; otherwise the top two are fanned out together for synthesis.
+EVIDENTIAL_PROBE_DECISIVE_MARGIN = 0.05
