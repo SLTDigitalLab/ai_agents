@@ -63,11 +63,11 @@ function extractAnswerFromText(responseText) {
 
     return String(
       data.answer ||
-        data.response ||
-        data.message ||
-        data.content ||
-        data.output ||
-        ""
+      data.response ||
+      data.message ||
+      data.content ||
+      data.output ||
+      ""
     ).trim();
   } catch {
     // Continue to SSE/plain text handling.
@@ -377,14 +377,45 @@ function RequestSuccessCard({ isLifeStore, referenceNumber }) {
   );
 }
 
+function InvalidIframeRoute() {
+  return (
+    <main className="iframe-chat">
+      <header className="iframe-chat__header">
+        <h1>Invalid iframe link</h1>
+      </header>
+
+      <section className="iframe-chat__body">
+        <div className="iframe-chat__messages">
+          <article className="iframe-chat__message iframe-chat__message--assistant">
+            <div className="iframe-chat__bubble">
+              <div className="iframe-chat__content">
+                <p className="iframe-chat__md-p">
+                  This iframe link is not available. Please use one of these:
+                </p>
+
+                <ul className="iframe-chat__md-ul">
+                  <li className="iframe-chat__md-li">/asklifestore/iframe</li>
+                  <li className="iframe-chat__md-li">/askenterprise/iframe</li>
+                </ul>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 export default function IframeChatPage() {
   const { agentKey } = useParams();
 
   const config = useMemo(() => {
-    return AGENT_CONFIG[agentKey] || AGENT_CONFIG.askenterprise;
+    return AGENT_CONFIG[agentKey] || null;
   }, [agentKey]);
 
-  const [threadId] = useState(() => createThreadId(config.agentId));
+  const [threadId, setThreadId] = useState(() =>
+    createThreadId(AGENT_CONFIG[agentKey]?.agentId || "invalid")
+  );
   const [userId] = useState(() => "iframe-user");
   const [messages, setMessages] = useState([
     {
@@ -402,8 +433,26 @@ export default function IframeChatPage() {
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
-  const isLifeStore = config.agentId === "lifestore";
-  const isEnterprise = config.agentId === "enterprise";
+  useEffect(() => {
+    if (!config) return;
+
+    setThreadId(createThreadId(config.agentId));
+    setMessages([
+      {
+        role: "assistant",
+        content: "How can I assist you today?",
+        timestamp: new Date(),
+      },
+    ]);
+    setInput("");
+    setIsLoading(false);
+    setShowRequestForm(false);
+    setSuccessInfo(null);
+    setFeedbackMap({});
+  }, [config]);
+
+  const isLifeStore = config?.agentId === "lifestore";
+  const isEnterprise = config?.agentId === "enterprise";
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -432,6 +481,8 @@ export default function IframeChatPage() {
 
   async function sendMessage(event) {
     event?.preventDefault();
+
+    if (!config) return;
 
     const userMessage = input.trim();
 
@@ -509,6 +560,10 @@ export default function IframeChatPage() {
     }
   }
 
+  if (!config) {
+    return <InvalidIframeRoute />;
+  }
+
   return (
     <main className="iframe-chat">
       <header className="iframe-chat__header">
@@ -520,9 +575,8 @@ export default function IframeChatPage() {
           {messages.map((message, index) => (
             <article
               key={`${message.role}-${index}`}
-              className={`iframe-chat__message iframe-chat__message--${message.role} ${
-                message.isError ? "iframe-chat__message--error" : ""
-              }`}
+              className={`iframe-chat__message iframe-chat__message--${message.role} ${message.isError ? "iframe-chat__message--error" : ""
+                }`}
             >
               <div className="iframe-chat__bubble">
                 <MarkdownMessage content={message.content} />
