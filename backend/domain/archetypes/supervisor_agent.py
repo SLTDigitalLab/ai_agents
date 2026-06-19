@@ -854,14 +854,19 @@ async def multi_delegate(state: AgentState) -> dict:
     fallback_query = state.get("delegation_query") or _latest_user_query(state)
     specialist_queries = state.get("specialist_queries") or {}
 
-    # If the decomposer assigned a sub-question to at least one specialist, trust
-    # its judgment and only invoke the specialists it picked. Skipping the others
-    # avoids hallucinated answers from specialists the decomposer correctly
-    # excluded (e.g. HR being pulled into a vehicle-category question).
+    # Honor the decomposer's selective invocation ONLY when it produced a genuine
+    # compound split — i.e. it assigned sub-questions to 2+ distinct specialists.
+    # In that case, skipping the unassigned specialists avoids hallucinated answers
+    # from a specialist the decomposer correctly excluded (e.g. HR being pulled into
+    # a vehicle-category question).
     #
-    # Fall back to "full query for every routed specialist" only when decomposition
-    # produced nothing at all — i.e. a genuine decomposer failure, not a deliberate
-    # exclusion.
+    # If the decomposer collapsed everything onto a SINGLE specialist (or produced
+    # nothing), the query was not actually compound — the router fanned out because
+    # it was AMBIGUOUS (near-tied, low scores). Trusting a single-specialist
+    # decomposition here would silently drop the router's other candidate (including
+    # its top pick) and defeat the fan-out safety net. So fall back to running ALL
+    # fanned-out specialists with the full query and let synthesis keep the useful
+    # answer and discard the declines.
     assigned = {
         aid: (q or "").strip()
         for aid, q in specialist_queries.items()
@@ -869,7 +874,7 @@ async def multi_delegate(state: AgentState) -> dict:
     }
 
     invocations: list[tuple[str, str]] = []
-    if assigned:
+    if len(assigned) >= 2:
         for agent_id in agent_ids:
             if agent_id in assigned:
                 invocations.append((agent_id, assigned[agent_id]))
@@ -880,6 +885,12 @@ async def multi_delegate(state: AgentState) -> dict:
                 skipped,
             )
     else:
+        if assigned:
+            logger.info(
+                "Supervisor multi_delegate | single_specialist_decomposition=%s | "
+                "running full fan-out to preserve ambiguity safety net",
+                list(assigned.keys()),
+            )
         for agent_id in agent_ids:
             invocations.append((agent_id, fallback_query))
 
