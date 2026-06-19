@@ -30,3 +30,4 @@ pytesseract==0.3.13
 neo4j==6.0.3
 langchain-ollama==1.0.1
 langfuse>=3.0.0
+PyMuPDF>=1.24.0

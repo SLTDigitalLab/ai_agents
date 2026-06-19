@@ -15,7 +15,7 @@ Neo4j:
 
 import json
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import httpx
 from langchain_core.tools import tool
@@ -35,10 +35,140 @@ try:
 except Exception:
     GraphDatabase = None
 
-async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
+# ── Per-thread evidence cache ───────────────────────────────────────────
+# search_knowledge_base collects image/table evidence from retrieved Qdrant
+# chunks (attached at ingestion time as doc.metadata["evidence"]). chat.py
+# consumes this cache after the final answer is generated and streams the
+# best matching evidence to the frontend.
+_THREAD_EVIDENCE_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+def clear_thread_evidence(thread_id: str | None) -> None:
+    """Clear evidence collected for a thread before a new chat request starts."""
+    if thread_id:
+        _THREAD_EVIDENCE_CACHE.pop(thread_id, None)
+
+
+def _evidence_key(item: dict[str, Any]) -> tuple:
+    """Stable key used for deduplicating evidence items."""
+    return (
+        item.get("type"),
+        item.get("source"),
+        item.get("page"),
+        item.get("url"),
+        (item.get("content") or "")[:200],
+    )
+
+
+def _dedupe_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove duplicate evidence items while preserving order."""
+    seen = set()
+    unique: list[dict[str, Any]] = []
+
+    for item in items:
+        key = _evidence_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+
+    return unique
+
+
+def consume_thread_evidence(thread_id: str | None, max_items: int | None = None) -> list[dict[str, Any]]:
+    """Return and clear collected evidence for this thread."""
+    if not thread_id:
+        return []
+
+    items = _THREAD_EVIDENCE_CACHE.pop(thread_id, [])
+    items = _dedupe_evidence(items)
+
+    if max_items is not None:
+        return items[:max_items]
+
+    return items
+
+
+def _add_thread_evidence(
+    thread_id: str | None,
+    evidence_items: Any,
+    source: str,
+    link: str,
+) -> None:
+    """Add valid evidence metadata from retrieved Qdrant chunks."""
+    if not thread_id or not evidence_items:
+        return
+
+    if not isinstance(evidence_items, list):
+        return
+
+    cleaned_items: list[dict[str, Any]] = []
+
+    for raw_item in evidence_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        evidence_type = item.get("type")
+
+        if evidence_type not in ("image", "table"):
+            continue
+
+        # Image evidence must have a URL. Table evidence must have content.
+        if evidence_type == "image" and not item.get("url"):
+            continue
+
+        if evidence_type == "table" and not item.get("content"):
+            continue
+
+        item.setdefault("source", source)
+        item.setdefault("link", link)
+        cleaned_items.append(item)
+
+    if cleaned_items:
+        _THREAD_EVIDENCE_CACHE.setdefault(thread_id, []).extend(cleaned_items)
+
+
+def _absolutize_remote_evidence(evidence_items: Any, base_url: str) -> list[dict[str, Any]]:
+    """Rewrite relative evidence image URLs to absolute URLs on the remote host.
+
+    Evidence PNG crops live on the remote (prod VM) under EVIDENCE_URL_PREFIX
+    and are stored as relative URLs. A local dev reading prod vectors must
+    point <img> at the remote host, so we prefix relative urls with base_url.
+    """
+    if not isinstance(evidence_items, list):
+        return []
+
+    base = (base_url or "").rstrip("/")
+    rewritten: list[dict[str, Any]] = []
+
+    for raw_item in evidence_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        url = item.get("url")
+
+        if url and isinstance(url, str) and not url.startswith(("http://", "https://")):
+            item["url"] = f"{base}{url}" if url.startswith("/") else f"{base}/{url}"
+
+        rewritten.append(item)
+
+    return rewritten
+
+
+async def _search_remote(
+    agent_id: str,
+    query: str,
+    k: int = 10,
+    thread_id: str | None = None,
+) -> str:
     """Proxy retrieval to a remote Ask SLT instance's /api/v1/kb endpoint.
 
     Used by local dev environments to skip ingestion and read prod vectors.
+    Also collects any visual/table evidence returned by the remote so devs
+    pointing at prod can see diagrams (with image URLs rewritten to the
+    remote host where the crops are actually served).
     """
     base = settings.KB_REMOTE_URL.rstrip("/")
     url = f"{base}/api/v1/kb/{agent_id}/retrieve"
@@ -52,6 +182,16 @@ async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
 
     if not chunks:
         return "No relevant documents found."
+
+    for c in chunks:
+        evidence = c.get("evidence")
+        if evidence:
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=_absolutize_remote_evidence(evidence, base),
+                source=c.get("source", "Unknown Source"),
+                link=c.get("link", "#"),
+            )
 
     return "\n\n---\n\n".join(
         f"[Source: {c.get('source', 'Unknown Source')} | Link: {c.get('link', '#')}]\n{c.get('text', '')}"
@@ -137,6 +277,7 @@ async def _search_qdrant_knowledge_base(
     query: str,
     agent_id: str,
     k: int = 12,
+    thread_id: str | None = None,
 ) -> str:
     """Search the Qdrant knowledge base for documents relevant to the user's query.
 
@@ -157,7 +298,7 @@ async def _search_qdrant_knowledge_base(
 
     if settings.KB_REMOTE_URL:
         try:
-            return await _search_remote(agent_id, query, k=10)
+            return await _search_remote(agent_id, query, k=10, thread_id=thread_id)
         except Exception as e:
             log.exception(
                 f"Remote KB retrieval failed for agent='{agent_id}' "
@@ -227,6 +368,15 @@ async def _search_qdrant_knowledge_base(
             )
 
             title = doc.metadata.get("title") or "Untitled"
+
+            # Collect any visual/table evidence attached to this chunk at
+            # ingestion time so chat.py can stream it to the frontend.
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=doc.metadata.get("evidence") or [],
+                source=source,
+                link=link,
+            )
 
             context_parts.append(
                 f"[Vector Source: {source} | Link: {link} | Title: {title}]\n"
@@ -502,6 +652,7 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
 async def search_knowledge_base(
     query: str,
     agent_id: Annotated[str, InjectedState("agent_id")],
+    thread_id: Annotated[str | None, InjectedState("thread_id")] = None,
 ) -> str:
     """
     Search knowledge base.
@@ -516,6 +667,7 @@ async def search_knowledge_base(
         query=query,
         agent_id=agent_id,
         k=12,
+        thread_id=thread_id,
     )
 
     if not _is_lifestore_agent(agent_id):

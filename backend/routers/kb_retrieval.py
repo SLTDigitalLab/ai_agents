@@ -33,6 +33,10 @@ class Chunk(BaseModel):
     source: str
     link: str
     score: Optional[float] = None
+    # Visual/table evidence (cropped PDF previews) attached at ingestion time.
+    # Image URLs are relative to this host (EVIDENCE_URL_PREFIX); the remote
+    # caller rewrites them to absolute URLs against KB_REMOTE_URL.
+    evidence: Optional[List[dict]] = None
 
 
 class RetrieveResponse(BaseModel):
@@ -101,6 +105,7 @@ async def retrieve(
             source=doc.metadata.get("source", "Unknown Source"),
             link=doc.metadata.get("link", "#"),
             score=float(score) if score is not None else None,
+            evidence=doc.metadata.get("evidence") or None,
         )
         for doc, score in results
     ]
