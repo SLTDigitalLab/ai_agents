@@ -43,3 +43,4 @@ backend/service-account.json
 data/
 CLAUDE.md
 GEMINI.md
+backend/storage

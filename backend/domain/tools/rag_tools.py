@@ -23,7 +23,7 @@ from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langgraph.prebuilt import InjectedState
 from qdrant_client import QdrantClient
 
-from core.config import settings
+from core.config import settings, agent_collection_name, collection_suffix
 from core.llm import get_embedding_model
 
 log = logging.getLogger(__name__)
@@ -220,6 +220,8 @@ def _resolve_collection_name(agent_id: str) -> str:
     - Retrieval must search the real Qdrant collection, not the base name.
     """
     if _is_lifestore_agent(agent_id):
+        # Explicit overrides are used verbatim — the operator names the exact
+        # collection (including any provider suffix) themselves.
         explicit_search_collection = _get_setting(
             "LIFESTORE_QDRANT_SEARCH_COLLECTION",
             None,
@@ -238,12 +240,13 @@ def _resolve_collection_name(agent_id: str) -> str:
 
         base_collection = _get_setting("LIFESTORE_QDRANT_COLLECTION", "lifestore")
 
-        if base_collection.endswith("_docs"):
-            return base_collection
+        if not base_collection.endswith("_docs"):
+            base_collection = f"{base_collection}_docs"
 
-        return f"{base_collection}_docs"
+        # Namespace by embedding provider so gemini/openai collections coexist.
+        return f"{base_collection}{collection_suffix()}"
 
-    return f"{agent_id}_docs"
+    return agent_collection_name(agent_id)
 
 
 def _get_neo4j_driver():

@@ -23,6 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 
 from core.llm import get_chat_model, get_routing_embedding_model
+from domain.prompts import LANGUAGE_RULE
 from domain.archetypes.kb_agent import build_kb_workflow
 from domain.archetypes.kb_api_agent import build_kb_api_workflow
 from domain.archetypes.kb_form_agent import build_kb_form_workflow
@@ -601,6 +602,8 @@ Rules:
 7. Do not end with a closing question.
 """
 
+    system_prompt += f"\n\n{LANGUAGE_RULE}"
+
     trimmed = trim_messages(
         state["messages"],
         max_tokens=8,
@@ -1126,7 +1129,8 @@ async def synthesize_multi_answer(state: AgentState) -> dict:
         "information' when BASE gave a real answer.\n"
         "- Do not mention routing, multiple specialists, different departments, or that "
         "two sources were consulted. The user sees one unified assistant.\n"
-        "- Do not add a closing question."
+        "- Do not add a closing question.\n\n"
+        + LANGUAGE_RULE
     )
 
     user_prompt = (

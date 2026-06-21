@@ -25,7 +25,7 @@ if sys.platform == "win32":
 
 from qdrant_client import QdrantClient, models
 
-from core.config import settings
+from core.config import settings, agent_collection_name
 
 log = logging.getLogger(__name__)
 
@@ -142,8 +142,8 @@ class IngestionService:
                     doc.page_content = f"[Section: {breadcrumb}]\n{doc.page_content}"
             doc.metadata["link"] = url
 
-        # Define Collection Name
-        collection_name = f"{agent_name}_docs"
+        # Define Collection Name (namespaced by embedding provider)
+        collection_name = agent_collection_name(agent_name)
 
         # Create collection manually first
         self._ensure_collection_exists(collection_name)
@@ -1405,8 +1405,8 @@ class IngestionService:
             total_chunks = 0
             processed_files = []
 
-            # Define Collection Name
-            collection_name = f"{agent_name}_docs"
+            # Define Collection Name (namespaced by embedding provider)
+            collection_name = agent_collection_name(agent_name)
             self._ensure_collection_exists(collection_name)
 
             # Initialize Vector Store once (hybrid: dense + sparse)

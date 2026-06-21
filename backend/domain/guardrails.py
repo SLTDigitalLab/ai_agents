@@ -10,6 +10,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from core.config import settings
 from core.llm import get_guardrail_model
 
 log = logging.getLogger(__name__)
@@ -206,6 +207,14 @@ async def classify_intent(message: str) -> GuardrailResult:
             f"sentiment={rule_result.sentiment} reason={rule_result.reason}"
         )
         return rule_result
+
+    # Model-based guardrail disabled: rely on the deterministic pre-check only.
+    if not settings.GUARDRAIL_MODEL_ENABLED:
+        return GuardrailResult(
+            action="PASS",
+            reason="model_guardrail_disabled",
+            sentiment="neutral",
+        )
 
     try:
         classifier = _get_classifier()

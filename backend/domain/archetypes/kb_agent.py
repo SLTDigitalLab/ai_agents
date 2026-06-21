@@ -13,6 +13,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from core.config import settings
 from core.llm import get_chat_model
+from domain.prompts import LANGUAGE_RULE
 from domain.state import AgentState
 from domain.tools.rag_tools import search_knowledge_base
 
@@ -95,6 +96,9 @@ CITATIONS:
 
 TONE ADJUSTMENT:
 The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledge their frustration before answering. Use a warm, understanding tone."""
+
+    # ── Answer in the user's language ─────────────────────────────────
+    system_prompt += f"\n\n{LANGUAGE_RULE}"
 
     # Trim to the last 5 messages + system prompt for the LLM window,
     # but the full history stays in state for the checkpointer to persist.

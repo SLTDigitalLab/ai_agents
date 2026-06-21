@@ -14,7 +14,7 @@ from langchain_qdrant import QdrantVectorStore, RetrievalMode
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
-from core.config import settings
+from core.config import settings, agent_collection_name
 from core.llm import get_embedding_model
 from core.llm_slm import get_slm_embedding_model
 from domain.tools.rag_tools import _sparse_embeddings
@@ -71,7 +71,11 @@ async def retrieve(
     if agent_id not in _allowlist():
         raise HTTPException(status_code=404, detail="Unknown agent")
 
-    collection_name = f"{agent_id}_docs"
+    # The Ollama SLM agent always uses its own "askhrslm_docs" collection,
+    # independent of the main embedding provider. All other agents are
+    # namespaced by provider (e.g. "hr_docs" / "hr_docs_gemini").
+    is_slm = agent_id == "askhrslm"
+    collection_name = f"{agent_id}_docs" if is_slm else agent_collection_name(agent_id)
     client = QdrantClient(url=settings.QDRANT_URL)
 
     try:
@@ -83,7 +87,7 @@ async def retrieve(
         logger.exception(f"Qdrant probe failed: {type(e).__name__}: {e}")
         raise HTTPException(status_code=502, detail="Vector store unavailable")
 
-    embedding = get_slm_embedding_model() if agent_id == "askhrslm" else get_embedding_model()
+    embedding = get_slm_embedding_model() if is_slm else get_embedding_model()
 
     vector_store = QdrantVectorStore(
         client=client,

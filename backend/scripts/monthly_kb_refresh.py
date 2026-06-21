@@ -87,10 +87,21 @@ SLT_ENTERPRISE_AGENT_NAME = os.getenv(
 
 
 # ---------------------------------------------------------------------
+# Embedding-provider collection suffix
+# ---------------------------------------------------------------------
+# Mirrors core.config.collection_suffix(): the backend ingestion layer
+# namespaces collections by embedding provider, creating <name>_docs (openai)
+# or <name>_docs_gemini (gemini/vertex). The delete targets below must match
+# whichever provider this refresh run is configured for.
+_EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "openai").lower().strip()
+COLLECTION_SUFFIX = "_gemini" if _EMBEDDING_PROVIDER in ("gemini", "vertex") else ""
+
+
+# ---------------------------------------------------------------------
 # Qdrant collection names
 # ---------------------------------------------------------------------
 # These are the names we send to /ingest-url.
-# Your backend/ingestion service may internally create <name>_docs.
+# Your backend/ingestion service may internally create <name>_docs<suffix>.
 LIFESTORE_COLLECTION_NAME = os.getenv(
     "LIFESTORE_QDRANT_COLLECTION",
     "lifestore",
@@ -106,12 +117,12 @@ ENTERPRISE_COLLECTION_NAME = os.getenv(
 # lifestore_docs and enterprise_docs.
 LIFESTORE_DELETE_COLLECTION_NAME = os.getenv(
     "LIFESTORE_QDRANT_DELETE_COLLECTION",
-    f"{LIFESTORE_COLLECTION_NAME}_docs",
+    f"{LIFESTORE_COLLECTION_NAME}_docs{COLLECTION_SUFFIX}",
 )
 
 ENTERPRISE_DELETE_COLLECTION_NAME = os.getenv(
     "ENTERPRISE_QDRANT_DELETE_COLLECTION",
-    f"{ENTERPRISE_COLLECTION_NAME}_docs",
+    f"{ENTERPRISE_COLLECTION_NAME}_docs{COLLECTION_SUFFIX}",
 )
 
 # Optional safety: also delete the base collection if it exists.
