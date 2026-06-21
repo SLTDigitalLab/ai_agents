@@ -367,7 +367,9 @@ async def _search_qdrant_knowledge_base(
                 or "#"
             )
 
-            title = doc.metadata.get("title") or "Untitled"
+            # Prefer the section heading captured at ingestion; fall back to
+            # the filename so citations never read "Untitled".
+            title = doc.metadata.get("title") or source or "Untitled"
 
             # Collect any visual/table evidence attached to this chunk at
             # ingestion time so chat.py can stream it to the frontend.

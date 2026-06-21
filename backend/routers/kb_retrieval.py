@@ -32,6 +32,8 @@ class Chunk(BaseModel):
     text: str
     source: str
     link: str
+    # Section heading captured at ingestion (None when no heading was derived).
+    title: Optional[str] = None
     score: Optional[float] = None
     # Visual/table evidence (cropped PDF previews) attached at ingestion time.
     # Image URLs are relative to this host (EVIDENCE_URL_PREFIX); the remote
@@ -104,6 +106,7 @@ async def retrieve(
             text=doc.page_content,
             source=doc.metadata.get("source", "Unknown Source"),
             link=doc.metadata.get("link", "#"),
+            title=doc.metadata.get("title"),
             score=float(score) if score is not None else None,
             evidence=doc.metadata.get("evidence") or None,
         )
