@@ -205,6 +205,10 @@ def get_routing_embedding_model():
         )
     elif provider == "vertex":
         # Symmetric similarity format (routing is profile/query similarity).
+        # NOTE: 'task: classification' was measured and did NOT separate
+        # departments better (it pushed finance to 4th on a tenders query), so
+        # we keep sentence-similarity. The weak separation is driven by overly
+        # broad profile texts, not the task prefix.
         log.info(f"Initialized routing embedding model (Vertex AI): {model_name}")
         return _make_vertex_embeddings(
             model_name,

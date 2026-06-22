@@ -36,6 +36,7 @@ from domain.config.supervisor_routing import (
     LOW_CONFIDENCE_THRESHOLD,
     MIN_ROUTE_MARGIN,
     MULTI_DELEGATE_MAX_AGENTS,
+    MULTI_DELEGATE_MAX_GAP,
     MULTI_DELEGATE_SECONDARY_THRESHOLD,
     OUT_OF_SCOPE_THRESHOLD,
     SHORT_FOLLOW_UP_MAX_WORDS,
@@ -385,10 +386,17 @@ async def route_request(state: AgentState) -> dict:
     score_gap = top_score - second_score
     rounded_scores = {agent_id: round(score, 4) for agent_id, score in scored}
 
-    # Both specialists are strongly scored → cross-department compound query, fan out.
-    # Checked before the single-winner path so a keyword boost on one topic doesn't
-    # suppress a legitimately strong second department.
-    if top_score >= STRONG_ROUTE_THRESHOLD and second_score >= STRONG_ROUTE_THRESHOLD:
+    # Both specialists are strongly scored AND close together → genuine
+    # cross-department / ambiguous query, fan out. The gap check stops a clear
+    # winner from fanning out when the runner-up only looks "strong" because the
+    # embedding model (e.g. gemini-embedding-2) compresses all scores into a high
+    # band. Checked before the single-winner path so a keyword boost on one topic
+    # doesn't suppress a legitimately strong, close second department.
+    if (
+        top_score >= STRONG_ROUTE_THRESHOLD
+        and second_score >= STRONG_ROUTE_THRESHOLD
+        and score_gap <= MULTI_DELEGATE_MAX_GAP
+    ):
         fan_out_targets = [top_agent, second_agent][:MULTI_DELEGATE_MAX_AGENTS]
         logger.info(
             "Supervisor route | action=multi_delegate | reason=both_strongly_scored | targets=%s | top=%s %.4f | second=%s %.4f | query=%r",
@@ -894,6 +902,33 @@ async def multi_delegate(state: AgentState) -> dict:
     )
 
     specialist_answers = {agent_id: answer for agent_id, answer in results}
+
+    # Fallback for decomposer mis-assignment: if the decomposer pruned some
+    # routed agents (skipped) and NONE of the agents it kept produced a usable
+    # answer, it likely sent the query to the wrong specialist. Consult the
+    # skipped routed candidate(s) with the full query before giving up, so a
+    # correct-but-pruned specialist still gets a chance to answer.
+    invoked_ids = {aid for aid, _ in invocations}
+    skipped_routed = [aid for aid in agent_ids if aid not in invoked_ids]
+    assigned_all_declined = bool(specialist_answers) and not any(
+        ans and not _looks_like_decline(ans) for ans in specialist_answers.values()
+    )
+    if skipped_routed and assigned_all_declined:
+        logger.info(
+            "Supervisor multi_delegate | assigned agents all declined; "
+            "falling back to skipped routed agents=%s",
+            skipped_routed,
+        )
+        fallback_results = await asyncio.gather(
+            *[
+                _invoke_specialist_for_fan_out(agent_id, state, fallback_query)
+                for agent_id in skipped_routed
+            ]
+        )
+        for agent_id, answer in fallback_results:
+            specialist_answers[agent_id] = answer
+            invocations.append((agent_id, fallback_query))
+
     logger.info(
         "Supervisor multi_delegate | agents=%s | answer_lengths=%s | per_specialist_queries=%s",
         agent_ids,
