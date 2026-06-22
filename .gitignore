@@ -40,6 +40,7 @@ yarn-error.log*
 backend/temp_files/
 backend/o365_token.txt
 backend/service-account.json
+backend/storage/
 data/
 CLAUDE.md
 GEMINI.md
