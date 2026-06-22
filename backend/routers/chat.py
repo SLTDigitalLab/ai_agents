@@ -32,6 +32,39 @@ logger = logging.getLogger(__name__)
 
 BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
 
+# Shown when the underlying LLM provider is out of quota / rate-limited
+# (Gemini ResourceExhausted, OpenAI insufficient_quota / 429, etc.) so the
+# user never sees a raw provider error.
+BUSY_MESSAGE = (
+    "I'm a little busy right now and can't respond at the moment. "
+    "Please try again in a few minutes."
+)
+
+# Generic fallback for any other unexpected failure.
+GENERIC_ERROR_MESSAGE = (
+    "Sorry, something went wrong on my end. Please try again."
+)
+
+# Substrings that indicate the LLM provider rejected the call due to
+# quota/rate limits rather than a real application bug.
+_QUOTA_ERROR_MARKERS = (
+    "quota",
+    "rate limit",
+    "ratelimit",
+    "429",
+    "resourceexhausted",
+    "resource_exhausted",
+    "insufficient_quota",
+    "too many requests",
+    "exceeded your current quota",
+)
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """True if the exception looks like a provider quota / rate-limit error."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in text for marker in _QUOTA_ERROR_MARKERS)
+
 # Product agents skip query PII masking: model/SKU numbers in product
 # searches would otherwise be mangled (e.g. masked as [PHONE]/[CARD_NUMBER])
 # and degrade retrieval. These agents are owned/managed separately.
@@ -402,6 +435,9 @@ async def chat(request: ChatRequest):
             safe_user_message = request.message
         else:
             safe_user_message = mask_pii(request.message)
+        # Tracked outside the try so the error handler can tell whether a
+        # partial answer was already streamed before the failure.
+        streamed_any_text = False
         try:
             # --- 2. Initialize Langfuse Handler (Empty in v3+) ---
             langfuse_handler = CallbackHandler()
@@ -475,7 +511,6 @@ async def chat(request: ChatRequest):
             # Reuse the cached, pre-compiled graph bound to a long-lived pool.
             graph = await get_compiled_async_graph(request.agent_id)
 
-            streamed_any_text = False
             streamed_response_text = ""
 
             # We use astream_events (v2) for fine-grained streaming.
@@ -600,7 +635,18 @@ async def chat(request: ChatRequest):
             import traceback
             error_details = traceback.format_exc()
             logger.error(f"Streaming error: {exc}\n{error_details}")
-            yield f"\n\n[ERROR]: {str(exc)}"
+
+            # Show a friendly message instead of leaking raw provider errors
+            # (quota exhausted, rate limits, etc.) to the user.
+            if _is_quota_error(exc):
+                user_message = BUSY_MESSAGE
+            else:
+                user_message = GENERIC_ERROR_MESSAGE
+
+            # If we already streamed part of an answer, separate the notice.
+            if streamed_any_text:
+                yield "\n\n"
+            yield user_message
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
