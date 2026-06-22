@@ -132,6 +132,19 @@ if settings.GOOGLE_APPLICATION_CREDENTIALS:
     if not _cred_path.is_absolute():
         _cred_path = ROOT_DIR / _cred_path
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(_cred_path)
+    # Also write the resolved absolute path back to settings so any code that
+    # reads settings.GOOGLE_APPLICATION_CREDENTIALS directly (e.g. the voice
+    # agent in routers/voice_agent) gets the correct path regardless of CWD.
+    settings.GOOGLE_APPLICATION_CREDENTIALS = str(_cred_path)
+
+
+# The voice agent reads PROJECT_ID; the rest of the app uses VERTEX_PROJECT_ID.
+# They are the same GCP project, so fall back to VERTEX_PROJECT_ID when PROJECT_ID
+# is not set explicitly — avoids having to duplicate the value in .env.
+# (LOCATION is intentionally NOT shared: VERTEX_LOCATION may be "global" for
+# embeddings, while the Gemini Live voice endpoint needs a region, e.g. us-central1.)
+if not settings.PROJECT_ID and settings.VERTEX_PROJECT_ID:
+    settings.PROJECT_ID = settings.VERTEX_PROJECT_ID
 
 
 # ── Qdrant collection naming ────────────────────────────────────────────
