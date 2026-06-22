@@ -34,6 +34,10 @@ async def lifespan(app: FastAPI):
     close_sync_pools()
 
 
+from routers import voice
+from routers.voice_agent import realtime
+
+
 app = FastAPI(
     title="Ask SLT API",
     docs_url="/api/docs",
@@ -76,6 +80,8 @@ app.include_router(feedback.router)
 app.include_router(finance.router)  
 app.include_router(kb_retrieval.router)  
 app.include_router(ingestion_router)
+app.include_router(voice.router)  # Include the voice router
+app.include_router(realtime.router)   # Live voice agent Realtime API ( new feature for live voice agent)
 
 @app.get("/")
 def read_root():

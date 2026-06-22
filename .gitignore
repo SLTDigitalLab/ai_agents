@@ -44,3 +44,5 @@ data/
 CLAUDE.md
 GEMINI.md
 backend/storage
+backend/routers/service-account.json
+service-account.json

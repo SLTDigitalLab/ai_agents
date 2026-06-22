@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 import embryoLogo from './assets/embryo-removebg.png';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
+import VoiceAgentPage from './pages/VoiceAgentPage';
 
 // Initialize MSAL outside the components
 const msalInstance = new PublicClientApplication(msalConfig);
@@ -633,6 +634,9 @@ function App() {
             <Route path="/admin/ingestion" element={<IngestionPanel />} />
             <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
+
+          {/* Public live voice agent (no Microsoft auth, as originally built) */}
+          <Route path="/voice" element={<VoiceAgentPage />} />
 
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
