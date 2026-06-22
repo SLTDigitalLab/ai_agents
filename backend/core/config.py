@@ -75,9 +75,14 @@ class Settings(BaseSettings):
     # Use ["*"] to grant access to all agents. Example:
     #   ADMIN_AGENT_MAP={"hr.admin@slt.com.lk":["hr"],"super@slt.com.lk":["*"]}
     ADMIN_AGENT_MAP: str = "{}"
+     
+    #  Google Cloud credentials for any tools that use GCP services for >>  live voice agent feature (gemini-3.5-flash)
+    GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
+    PROJECT_ID: Optional[str] = None
+    LOCATION: str = "us-central1"
 
     # Email / SMTP (used by fastapi-mail)
-    MAIL_USERNAME: Optional[str] = None
+    MAIL_USERNAME: Optional[str] = None 
     MAIL_PASSWORD: Optional[str] = None
     MAIL_FROM: Optional[str] = None
     MAIL_PORT: int = 587
