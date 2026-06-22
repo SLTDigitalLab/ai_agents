@@ -454,8 +454,8 @@ const CopyMessageButton = ({ text }) => {
             disabled={copied}
             title={copied ? "Copied" : "Copy message"}
             className={`p-1.5 rounded-md transition-all duration-200 ${copied
-                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
+                ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
                 }`}
         >
             {copied ? (
@@ -483,8 +483,8 @@ const CodeBlock = ({ children, ...props }) => {
                 onClick={() => copy(text)}
                 title={copied ? "Copied" : "Copy code"}
                 className={`absolute top-2 right-2 px-2 py-1 rounded-md text-[0.7rem] font-medium transition-all duration-200 opacity-0 group-hover/code:opacity-100 ${copied
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
                     }`}
             >
                 {copied ? 'Copied' : 'Copy'}
@@ -562,8 +562,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, ex
                 onClick={() => handleFeedback('up')}
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'up'
-                        ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                        : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
+                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                    : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
                     }`}
                 title="Helpful"
             >
@@ -575,8 +575,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, ex
                 onClick={() => handleFeedback('down')}
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'down'
-                        ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
-                        : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
+                    ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
+                    : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
                     }`}
                 title="Not helpful"
             >
@@ -1168,7 +1168,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, delay: 0.12 }}
-                        className="text-base sm:text-lg text-gray-500 dark:text-gray-400 mt-3 font-light text-center text-balance max-w-2xl mx-auto"
+                        className={`${agentConfig.id === 'supervisor' ? 'text-lg sm:text-xl mt-6' : 'text-lg sm:text-2xl mt-3'} text-slate-600 dark:text-slate-300 text-center max-w-5xl mx-auto leading-relaxed`}
                     >
                         {agentConfig.idlePrompt || "How can I help you today?"}
                     </motion.p>
@@ -1302,7 +1302,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                         onImageClick={setPreviewImage}
                                                     />
                                                     <SourcesSection sources={sources} color={agentConfig.color} />
-                                                    
+
                                                     {/* Standalone HITL Buttons Component */}
                                                     <Buttons
                                                         message={msg}
