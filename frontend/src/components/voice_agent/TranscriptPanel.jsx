@@ -15,16 +15,16 @@ const TranscriptPanel = ({ transcript, onClear }) => {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.98 }}
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="mt-8 w-full max-w-lg rounded-2xl border border-white/[0.07] bg-white/[0.025] overflow-hidden flex flex-col"
+            className="mt-8 w-full max-w-lg rounded-2xl border border-gray-200 dark:border-white/[0.07] bg-white dark:bg-white/[0.025] shadow-sm dark:shadow-none overflow-hidden flex flex-col"
             style={{ maxHeight: 200 }}
         >
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/[0.05] shrink-0">
-                <span className="text-[0.58rem] uppercase tracking-[0.16em] font-bold text-gray-600">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100 dark:border-white/[0.05] shrink-0">
+                <span className="text-[0.58rem] uppercase tracking-[0.16em] font-bold text-gray-400 dark:text-gray-600">
                     Transcript
                 </span>
                 <button
                     onClick={onClear}
-                    className="text-[0.65rem] text-gray-600 hover:text-gray-400 transition-colors"
+                    className="text-[0.65rem] text-gray-400 hover:text-gray-600 dark:text-gray-600 dark:hover:text-gray-400 transition-colors"
                 >
                     Clear
                 </button>

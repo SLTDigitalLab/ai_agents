@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import sltLogo    from '../assets/slt-mobitel-logo.png';
 import embryoLogo from '../assets/embryo-removebg.png';
 import { loginRequest } from '../authConfig';
+import { useTheme } from '../contexts/ThemeContext';
 
 import { PHASE, API_URL, WS_URL, SYSTEM_PROMPT } from '../components/voice_agent/constants';
 import { float32ToPcm16Base64, pcm16Base64ToFloat32 } from '../components/voice_agent/AudioHelpers';
@@ -36,6 +37,7 @@ import UserMenu       from '../components/voice_agent/UserMenu';
 const VoiceAgentPage = () => {
     const { accounts, instance } = useMsal();
     const navigate  = useNavigate();
+    const { theme, toggleTheme } = useTheme();
     const user      = accounts[0] || {};
     const firstName = (user.name || 'User').split(' ')[0];
     const initials  = (user.name || 'U').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
@@ -75,8 +77,18 @@ const VoiceAgentPage = () => {
             .catch(() => setProvider('openai'));
     }, []);
 
-    //  Cleanup on unmount 
+    //  Cleanup on unmount
     useEffect(() => { return () => cleanupAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Apply the global theme by toggling the `dark` class on <html>. This route
+    // lives outside AgentWrapper, so it manages the class itself (Tailwind's
+    // class strategy). Cleaned up on unmount so the destination page re-applies.
+    useEffect(() => {
+        const root = document.documentElement;
+        if (theme === 'dark') root.classList.add('dark');
+        else root.classList.remove('dark');
+        return () => { root.classList.remove('dark'); };
+    }, [theme]);
 
     //  Cleanup helpers 
     const cleanupOpenAI = useCallback(() => {
@@ -450,15 +462,15 @@ const VoiceAgentPage = () => {
 
     // ────────
     return (
-        <div className="h-screen flex bg-[#111318] text-gray-100 overflow-hidden">
+        <div className="h-screen flex bg-[#fafafa] dark:bg-[#111318] text-gray-900 dark:text-gray-100 overflow-hidden">
 
             {/* ── Slim left sidebar ── */}
-            <div className="w-14 flex-shrink-0 flex flex-col items-center py-4 gap-2 border-r border-white/[0.06] bg-[#0d0f14]">
+            <div className="w-14 flex-shrink-0 flex flex-col items-center py-4 gap-2 border-r border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#0d0f14]">
                 {/* Back to chat */}
                 <button
                     onClick={() => { endConversation(); navigate('/workmateai'); }}
                     title="Back to chat"
-                    className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-600 hover:text-gray-300 hover:bg-white/[0.07] transition-all duration-200"
+                    className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-all duration-200"
                 >
                     <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
                         <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
@@ -466,6 +478,23 @@ const VoiceAgentPage = () => {
                 </button>
 
                 <div className="flex-1" />
+
+                {/* Theme toggle */}
+                <button
+                    onClick={toggleTheme}
+                    title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                    className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-all duration-200"
+                >
+                    {theme === 'dark' ? (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                            <path d="M10 2a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 2zM10 15a.75.75 0 01.75.75v1.5a.75.75 0 01-1.5 0v-1.5A.75.75 0 0110 15zM10 7a3 3 0 100 6 3 3 0 000-6zM15.657 5.404a.75.75 0 10-1.06-1.06l-1.061 1.06a.75.75 0 001.06 1.06l1.06-1.06zM6.464 14.596a.75.75 0 10-1.06-1.06l-1.06 1.06a.75.75 0 001.06 1.06l1.06-1.06zM18 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 0118 10zM5 10a.75.75 0 01-.75.75h-1.5a.75.75 0 010-1.5h1.5A.75.75 0 015 10zM14.596 15.657a.75.75 0 001.06-1.06l-1.06-1.061a.75.75 0 10-1.06 1.06l1.06 1.061zM5.404 6.464a.75.75 0 001.06-1.06l-1.06-1.06a.75.75 0 10-1.06 1.06l1.06 1.06z" />
+                        </svg>
+                    ) : (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                            <path fillRule="evenodd" d="M7.455 2.004a.75.75 0 01.26.77 7 7 0 009.958 7.967.75.75 0 011.067.853A8.5 8.5 0 116.647 1.921a.75.75 0 01.808.083z" clipRule="evenodd" />
+                        </svg>
+                    )}
+                </button>
 
                 <UserMenu
                     user={user}
@@ -480,15 +509,11 @@ const VoiceAgentPage = () => {
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
                 {/* Top bar */}
-                <div className="flex items-center justify-between px-6 py-3 border-b border-white/[0.06] shrink-0">
+                <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-white/[0.06] shrink-0">
                     <div className="flex items-center gap-3">
-                        
-                            
-                          
-                        
-                        <h1 className="text-[1.0rem] font-semibold text-gray-400">Voice Agent</h1>
+                        <h1 className="text-[1.0rem] font-semibold text-gray-500 dark:text-gray-400">Voice Agent</h1>
                     </div>
-                    <img src={sltLogo} alt="SLTMobitel" className="h-7 w-auto opacity-80" />
+                    <img src={sltLogo} alt="SLTMobitel" className="h-7 w-auto opacity-90 dark:opacity-80" />
                 </div>
 
                 {/* ── Centre stage ── */}
@@ -504,14 +529,14 @@ const VoiceAgentPage = () => {
                                 transition={{ duration: 0.3 }}
                                 className="mb-6 text-center"
                             >
-                                <p className="text-[0.75rem] uppercase tracking-[0.18em] font-semibold text-gray-600 mb-1">Welcome back</p>
-                                <p className="text-xl font-semibold text-gray-200">{firstName}</p>
+                                <p className="text-[0.75rem] uppercase tracking-[0.18em] font-semibold text-gray-400 dark:text-gray-600 mb-1">Welcome back</p>
+                                <p className="text-xl font-semibold text-gray-800 dark:text-gray-200">{firstName}</p>
                             </motion.div>
                         )}
                     </AnimatePresence>
 
                     {/* Orb */}
-                    <VoiceOrb phase={phase} isSpeaking={isSpeaking} isListening={isListening} />
+                    <VoiceOrb phase={phase} isSpeaking={isSpeaking} isListening={isListening} theme={theme} />
 
                     {/* Wave */}
                     <div className="mt-4 h-6 flex items-center justify-center">
@@ -529,12 +554,12 @@ const VoiceAgentPage = () => {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.2 }}
                         className={`mt-2 text-[0.78rem] font-medium tracking-wide ${
-                            phase === PHASE.ERROR   ? 'text-red-400'
-                            : isListening          ? 'text-teal-400'
-                            : isSpeaking           ? 'text-cyan-400'
+                            phase === PHASE.ERROR   ? 'text-red-500 dark:text-red-400'
+                            : isListening          ? 'text-teal-600 dark:text-teal-400'
+                            : isSpeaking           ? 'text-cyan-600 dark:text-cyan-400'
                             : phase === PHASE.CONNECTING ? 'text-gray-500'
-                            : phase === PHASE.CONNECTED  ? 'text-gray-400'
-                            : 'text-gray-600'
+                            : phase === PHASE.CONNECTED  ? 'text-gray-500 dark:text-gray-400'
+                            : 'text-gray-400 dark:text-gray-600'
                         }`}
                     >
                         {displayStatus}
@@ -543,7 +568,7 @@ const VoiceAgentPage = () => {
                     {phase === PHASE.ERROR && errorMessage && (
                         <motion.p
                             initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                            className="mt-2 text-xs text-red-400/60 text-center max-w-xs leading-relaxed"
+                            className="mt-2 text-xs text-red-500/70 dark:text-red-400/60 text-center max-w-xs leading-relaxed"
                         >
                             {errorMessage}
                         </motion.p>
@@ -566,8 +591,8 @@ const VoiceAgentPage = () => {
 
                     {/* Powered by */}
                     <div className="mt-8 flex items-center gap-1.5 select-none pointer-events-none">
-                        <span className="text-[0.58rem] uppercase tracking-widest font-semibold text-gray-400">Powered by</span>
-                        <img src={embryoLogo} alt="Embryo" className="h-[20px] w-auto object-contain opacity-80" />
+                        <span className="text-[0.58rem] uppercase tracking-widest font-semibold text-gray-400 dark:text-gray-500">Powered by</span>
+                        <img src={embryoLogo} alt="Embryo" className="h-[20px] w-auto object-contain opacity-90 dark:opacity-80" />
                     </div>
                 </div>
             </div>

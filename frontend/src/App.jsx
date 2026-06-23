@@ -385,8 +385,28 @@ const AgentWrapper = () => {
             )}
           </div>
 
-          {/* Right cluster: SLT logo + mobile avatar for internal authenticated agents */}
-          <div className="flex items-center gap-2 sm:gap-0 shrink-0">
+          {/* Right cluster: Voice Agent + SLT logo + mobile avatar for internal authenticated agents */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* Voice Agent entry: internal authenticated agents only */}
+            {!isPublicAgent && (
+              <AuthenticatedTemplate>
+                <motion.button
+                  type="button"
+                  onClick={() => { window.location.href = '/voice'; }}
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  title="Voice Agent"
+                  className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium shadow-sm transition-colors shrink-0"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                    <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
+                    <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
+                  </svg>
+                  <span className="hidden sm:inline">Voice Agent</span>
+                </motion.button>
+              </AuthenticatedTemplate>
+            )}
+
             <img
               src={sltLogo}
               alt="SLTMobitel"

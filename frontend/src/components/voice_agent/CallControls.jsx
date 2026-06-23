@@ -22,7 +22,7 @@ const CallControls = ({ phase, onStart, onEnd }) => {
 
     if (phase === PHASE.CONNECTING) {
         return (
-            <div className="flex items-center gap-2.5 px-8 py-3.5 rounded-full bg-white/[0.05] border border-white/[0.07] text-gray-500 text-sm cursor-default">
+            <div className="flex items-center gap-2.5 px-8 py-3.5 rounded-full bg-gray-100 dark:bg-white/[0.05] border border-gray-200 dark:border-white/[0.07] text-gray-500 text-sm cursor-default">
                 <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                     <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2.5" />
                     <path className="opacity-60" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />

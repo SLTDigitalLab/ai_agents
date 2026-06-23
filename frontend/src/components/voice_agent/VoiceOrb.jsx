@@ -2,9 +2,10 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { PHASE } from './constants';
 
-const VoiceOrb = ({ phase, isSpeaking, isListening }) => {
+const VoiceOrb = ({ phase, isSpeaking, isListening, theme = 'dark' }) => {
     const isActive = phase === PHASE.CONNECTED;
     const isError = phase === PHASE.ERROR;
+    const isDark = theme !== 'light';
 
     return (
         <div className="relative flex items-center justify-center" style={{ width: 220, height: 220 }}>
@@ -69,21 +70,27 @@ const VoiceOrb = ({ phase, isSpeaking, isListening }) => {
                         ? isSpeaking
                             ? 'radial-gradient(circle at 35% 35%, rgba(45,212,191,0.3), rgba(6,182,212,0.15))'
                             : 'radial-gradient(circle at 35% 35%, rgba(45,212,191,0.18), rgba(6,182,212,0.08))'
-                        : 'radial-gradient(circle at 35% 35%, rgba(255,255,255,0.06), rgba(255,255,255,0.02))',
+                        : isDark
+                        ? 'radial-gradient(circle at 35% 35%, rgba(255,255,255,0.06), rgba(255,255,255,0.02))'
+                        : 'radial-gradient(circle at 35% 35%, rgba(0,0,0,0.06), rgba(0,0,0,0.02))',
                     border: isError
                         ? '1px solid rgba(239,68,68,0.25)'
                         : isActive
                         ? isSpeaking
                             ? '1px solid rgba(45,212,191,0.35)'
                             : '1px solid rgba(45,212,191,0.2)'
-                        : '1px solid rgba(255,255,255,0.08)',
+                        : isDark
+                        ? '1px solid rgba(255,255,255,0.08)'
+                        : '1px solid rgba(0,0,0,0.10)',
                     boxShadow: isActive
                         ? isSpeaking
                             ? '0 0 55px rgba(45,212,191,0.3), 0 0 110px rgba(45,212,191,0.1), inset 0 1px 0 rgba(255,255,255,0.08)'
                             : isListening
                             ? '0 0 45px rgba(6,182,212,0.28), inset 0 1px 0 rgba(255,255,255,0.06)'
                             : '0 0 30px rgba(45,212,191,0.14), inset 0 1px 0 rgba(255,255,255,0.06)'
-                        : 'inset 0 1px 0 rgba(255,255,255,0.04)',
+                        : isDark
+                        ? 'inset 0 1px 0 rgba(255,255,255,0.04)'
+                        : '0 6px 20px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6)',
                     transition: 'background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease',
                 }}
             >
@@ -109,7 +116,7 @@ const VoiceOrb = ({ phase, isSpeaking, isListening }) => {
                     </svg>
                 ) : (
                     <svg viewBox="0 0 24 24" fill="currentColor" className={`w-8 h-8 transition-colors duration-300 ${
-                        isActive ? (isSpeaking ? 'text-teal-300' : isListening ? 'text-cyan-300' : 'text-gray-400') : 'text-gray-600'
+                        isActive ? (isSpeaking ? 'text-teal-300' : isListening ? 'text-cyan-300' : 'text-gray-400') : 'text-gray-400 dark:text-gray-600'
                     }`}>
                         <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
                         <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />

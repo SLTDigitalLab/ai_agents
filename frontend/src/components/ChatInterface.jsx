@@ -1074,18 +1074,6 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     className="flex-1 bg-transparent text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-[0.9375rem] pl-3 pr-2 py-2 outline-none resize-none leading-relaxed max-h-[150px] overflow-y-auto chat-scrollbar"
                 />
                 <button
-                    type="button"
-                    onClick={() => { window.location.href = '/voice'; }}
-                    title="Voice Agent"
-                    aria-label="Voice Agent"
-                    className="relative p-2 rounded-full transition-all duration-300 flex items-center justify-center shrink-0 ml-1.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 hover:scale-105"
-                >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-[1.125rem] h-[1.125rem] sm:w-5 sm:h-5">
-                        <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
-                        <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
-                    </svg>
-                </button>
-                <button
                     type={isLoading ? "button" : "submit"}
                     onClick={isLoading ? handleStop : undefined}
                     disabled={!isLoading && (!input.trim() || !threadId || isLoadingHistory)}
