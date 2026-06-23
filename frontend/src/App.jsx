@@ -386,7 +386,7 @@ const AgentWrapper = () => {
           </div>
 
           {/* Right cluster: Voice Agent + SLT logo + mobile avatar for internal authenticated agents */}
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
             {/* Voice Agent entry: internal authenticated agents only */}
             {!isPublicAgent && (
               <AuthenticatedTemplate>
@@ -396,7 +396,7 @@ const AgentWrapper = () => {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   title="Voice Agent"
-                  className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 text-sm font-medium shadow-sm transition-colors shrink-0"
+                  className={`flex items-center gap-2 px-4 sm:px-5 py-2 sm:py-2.5 rounded-full bg-gradient-to-r ${agentConfig.color} text-white text-sm font-semibold shadow-md hover:shadow-lg ring-1 ring-black/5 transition-all shrink-0`}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
                     <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
@@ -404,13 +404,16 @@ const AgentWrapper = () => {
                   </svg>
                   <span className="hidden sm:inline">Voice Agent</span>
                 </motion.button>
+
+                {/* Divider keeps the button visually aligned with the logo */}
+                <span className="hidden sm:block w-px h-7 bg-gray-200 dark:bg-gray-700" />
               </AuthenticatedTemplate>
             )}
 
             <img
               src={sltLogo}
               alt="SLTMobitel"
-              className="h-7 sm:h-10 w-auto drop-shadow-sm"
+              className="h-7 sm:h-10 w-auto object-contain drop-shadow-sm shrink-0"
             />
 
             {!isPublicAgent && (
