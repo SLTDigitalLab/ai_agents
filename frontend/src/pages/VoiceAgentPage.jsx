@@ -602,11 +602,12 @@ const VoiceAgentPage = () => {
                         )}
                     </AnimatePresence>
 
-                    {/* Powered by */}
-                    <div className="mt-8 flex items-center gap-1.5 select-none pointer-events-none">
-                        <span className="text-[0.58rem] uppercase tracking-widest font-semibold text-gray-400 dark:text-gray-500">Powered by</span>
-                        <img src={embryoLogo} alt="Embryo" className="h-[20px] w-auto object-contain opacity-90 dark:opacity-80" />
-                    </div>
+                </div>
+
+                {/* Powered by — docked at the bottom, matching the chat interface */}
+                <div className="w-full flex items-center justify-center gap-1.5 pb-3 pt-1 shrink-0 select-none cursor-default">
+                    <span className="text-[0.65rem] uppercase tracking-wider font-semibold text-gray-500 dark:text-gray-400">Powered by</span>
+                    <img src={embryoLogo} alt="Embryo Logo" className="h-[20px] w-auto object-contain dark:brightness-110" />
                 </div>
             </div>
         </div>
