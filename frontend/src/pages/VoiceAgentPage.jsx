@@ -466,17 +466,6 @@ const VoiceAgentPage = () => {
 
             {/* ── Slim left sidebar ── */}
             <div className="w-14 flex-shrink-0 flex flex-col items-center py-4 gap-2 border-r border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#0d0f14]">
-                {/* Back to chat */}
-                <button
-                    onClick={() => { endConversation(); navigate('/workmateai'); }}
-                    title="Back to chat"
-                    className="w-9 h-9 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-700 dark:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/[0.07] transition-all duration-200"
-                >
-                    <svg viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                        <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
-                    </svg>
-                </button>
-
                 <div className="flex-1" />
 
                 {/* Theme toggle */}
@@ -509,11 +498,35 @@ const VoiceAgentPage = () => {
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
                 {/* Top bar */}
-                <div className="flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-white/[0.06] shrink-0">
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-[1.0rem] font-semibold text-gray-500 dark:text-gray-400">Voice Agent</h1>
-                    </div>
-                    <img src={sltLogo} alt="SLTMobitel" className="h-7 w-auto opacity-90 dark:opacity-80" />
+                <div className="relative flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-white/[0.06] shrink-0">
+                    {/* Back to Chat Agent — arrow slides left on hover */}
+                    <motion.button
+                        type="button"
+                        onClick={() => { endConversation(); navigate('/workmateai'); }}
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        title="Back to Chat Agent"
+                        className="group flex items-center gap-2 pl-3 pr-4 sm:pl-4 sm:pr-5 py-2 rounded-full bg-gradient-to-r from-cyan-900 to-cyan-600 text-white text-sm font-semibold shadow-md hover:shadow-lg ring-1 ring-black/5 transition-all shrink-0"
+                    >
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={2.2}
+                            stroke="currentColor"
+                            className="w-4 h-4 transition-transform duration-300 ease-out group-hover:-translate-x-1"
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+                        </svg>
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                            <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.68 3.348-3.97z" clipRule="evenodd" />
+                        </svg>
+                        <span className="hidden sm:inline">Chat Agent</span>
+                    </motion.button>
+
+                    <h1 className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-lg sm:text-xl font-bold tracking-tight text-gray-950 dark:text-gray-100">Voice Agent</h1>
+
+                    <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-10 w-auto object-contain opacity-90 dark:opacity-80" />
                 </div>
 
                 {/* ── Centre stage ── */}

@@ -9,7 +9,7 @@ const CallControls = ({ phase, onStart, onEnd }) => {
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={onStart}
-                className="flex items-center gap-2.5 px-8 py-3.5 rounded-full bg-gradient-to-r from-teal-500 to-cyan-500 text-white font-semibold text-sm shadow-lg shadow-teal-500/20 hover:shadow-teal-500/30 transition-shadow duration-300"
+                className="flex items-center gap-2.5 px-8 py-3.5 rounded-full bg-gradient-to-r from-cyan-900 to-cyan-600 text-white font-semibold text-sm shadow-lg shadow-cyan-900/20 hover:shadow-cyan-900/30 transition-shadow duration-300"
             >
                 <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
                     <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
