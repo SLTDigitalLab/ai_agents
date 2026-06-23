@@ -524,7 +524,7 @@ const VoiceAgentPage = () => {
                         <span className="hidden sm:inline">Chat Agent</span>
                     </motion.button>
 
-                    <h1 className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-lg sm:text-xl font-bold tracking-tight text-gray-950 dark:text-gray-100">Voice Agent</h1>
+                    <h1 className="absolute left-1/2 top-[calc(50%_+_3px)] -translate-x-1/2 -translate-y-1/2 text-lg sm:text-xl font-bold tracking-tight text-gray-950 dark:text-gray-100">Voice Agent</h1>
 
                     <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-10 w-auto object-contain opacity-90 dark:opacity-80" />
                 </div>
