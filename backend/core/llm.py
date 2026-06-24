@@ -11,6 +11,53 @@ from core.config import settings
 log = logging.getLogger(__name__)
 
 
+# gemini-embedding-2 ignores the `task_type` field; the task must instead be
+# given as a text-instruction prefix (Vertex docs). These are pure prefixes
+# (content is appended), so chunks containing '{' or '}' are safe — we do NOT
+# use str.format. The prefix only steers the embedding vector; langchain_qdrant
+# stores the original chunk text as the payload, so the text the LLM reads is
+# unchanged.
+#
+# Asymmetric retrieval (KB search): document side vs query side differ.
+_VERTEX_DOC_PREFIX = "title: none | text: "
+_VERTEX_QUERY_PREFIX = "task: search result | query: "
+# Symmetric similarity (supervisor routing): same prefix on both sides.
+_VERTEX_SIMILARITY_PREFIX = "task: sentence similarity | query: "
+
+
+def _make_vertex_embeddings(model_name: str, *, doc_prefix: str, query_prefix: str):
+    """Build a Vertex AI embedding model wrapper for gemini-embedding-*.
+
+    Two gemini-embedding-specific behaviors are handled here:
+
+    1. Single-input batches. These models accept only ONE input text per
+       request (unlike text-embedding-004/005). The langchain-google-genai
+       default batch size is 100, so a multi-text batch comes back as a single
+       embedding and hybrid ingestion fails with "Mismatched length between
+       dense and sparse embeddings". We force batch_size=1.
+
+    2. Task instructions. gemini-embedding-2 ignores `task_type`; the task is
+       encoded as a text prefix instead. We prepend `doc_prefix` to documents
+       and `query_prefix` to queries.
+    """
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+    class _VertexEmbeddings(GoogleGenerativeAIEmbeddings):
+        def embed_documents(self, texts, **kwargs):
+            kwargs.setdefault("batch_size", 1)
+            return super().embed_documents([doc_prefix + t for t in texts], **kwargs)
+
+        def embed_query(self, text, **kwargs):
+            return super().embed_query(query_prefix + text, **kwargs)
+
+    return _VertexEmbeddings(
+        model=model_name,
+        vertexai=True,
+        project=settings.VERTEX_PROJECT_ID,
+        location=settings.VERTEX_LOCATION,
+    )
+
+
 @lru_cache(maxsize=1)
 def get_chat_model():
     """
@@ -44,6 +91,24 @@ def get_chat_model():
         return ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=final_api_key,
+            streaming=True,
+            temperature=0,
+        )
+    elif provider == "vertex":
+        # Vertex AI via the unified google-genai SDK (langchain-google-genai),
+        # NOT langchain-google-vertexai (whose ChatVertexAI is deprecated).
+        # Auth is the service account in GOOGLE_APPLICATION_CREDENTIALS.
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        log.info(
+            f"Initialized Vertex AI chat model: {model_name} "
+            f"(project={settings.VERTEX_PROJECT_ID}, location={settings.VERTEX_LOCATION})"
+        )
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            vertexai=True,
+            project=settings.VERTEX_PROJECT_ID,
+            location=settings.VERTEX_LOCATION,
             streaming=True,
             temperature=0,
         )
@@ -87,6 +152,19 @@ def get_embedding_model():
             model=model_name,
             google_api_key=final_api_key,
         )
+    elif provider == "vertex":
+        # Vertex AI via the unified google-genai SDK (langchain-google-genai),
+        # NOT langchain-google-vertexai (whose VertexAIEmbeddings is deprecated).
+        # Asymmetric retrieval format (KB search); batch_size=1 (single-input).
+        log.info(
+            f"Initialized Vertex AI embedding model: {model_name} "
+            f"(project={settings.VERTEX_PROJECT_ID}, location={settings.VERTEX_LOCATION})"
+        )
+        return _make_vertex_embeddings(
+            model_name,
+            doc_prefix=_VERTEX_DOC_PREFIX,
+            query_prefix=_VERTEX_QUERY_PREFIX,
+        )
     else:
         raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {provider}")
 
@@ -125,6 +203,18 @@ def get_routing_embedding_model():
             model=model_name,
             google_api_key=final_api_key,
         )
+    elif provider == "vertex":
+        # Symmetric similarity format (routing is profile/query similarity).
+        # NOTE: 'task: classification' was measured and did NOT separate
+        # departments better (it pushed finance to 4th on a tenders query), so
+        # we keep sentence-similarity. The weak separation is driven by overly
+        # broad profile texts, not the task prefix.
+        log.info(f"Initialized routing embedding model (Vertex AI): {model_name}")
+        return _make_vertex_embeddings(
+            model_name,
+            doc_prefix=_VERTEX_SIMILARITY_PREFIX,
+            query_prefix=_VERTEX_SIMILARITY_PREFIX,
+        )
     else:
         raise ValueError(f"Unsupported ROUTING_EMBEDDING_PROVIDER: {provider}")
 
@@ -160,6 +250,17 @@ def get_guardrail_model():
         return ChatGoogleGenerativeAI(
             model=model_name,
             google_api_key=final_api_key,
+            temperature=0,
+        )
+    elif provider == "vertex":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        log.info(f"Initialized guardrail model (Vertex AI): {model_name}")
+        return ChatGoogleGenerativeAI(
+            model=model_name,
+            vertexai=True,
+            project=settings.VERTEX_PROJECT_ID,
+            location=settings.VERTEX_LOCATION,
             temperature=0,
         )
     else:

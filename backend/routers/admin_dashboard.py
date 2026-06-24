@@ -14,8 +14,8 @@ import psycopg
 from psycopg.rows import dict_row
 
 from core.config import settings
-from core.checkpointer import get_postgres_checkpointer
-from domain.registry import AGENT_BUILDERS, get_agent_builder
+from domain.registry import AGENT_BUILDERS, get_compiled_sync_graph
+from services.sessions import get_sessions_users
 
 router = APIRouter(prefix="/api/v1/admin/dashboard", tags=["Admin Dashboard"])
 
@@ -113,59 +113,57 @@ async def list_sessions(
         return {"sessions": [], "total": 0, "skip": skip, "limit": limit}
 
     # 2. For each thread, deserialize messages and optionally filter by search
+    #    The graph (and its connection pool) is built once and reused per thread.
     all_sessions = []
-    builder_fn = get_agent_builder(agent)
-    workflow = builder_fn()
+    graph = get_compiled_sync_graph(agent)
 
     for row in rows:
         thread_id = row["thread_id"]
         config = {"configurable": {"thread_id": thread_id}}
 
         try:
-            with get_postgres_checkpointer(agent) as checkpointer:
-                graph = workflow.compile(checkpointer=checkpointer)
-                snapshot = graph.get_state(config)
+            snapshot = graph.get_state(config)
 
-                if not snapshot.values:
-                    continue
+            if not snapshot.values:
+                continue
 
-                raw_messages = snapshot.values.get("messages", [])
-                messages = [m for m in raw_messages if m.type in ("human", "ai")]
-                message_count = len(messages)
+            raw_messages = snapshot.values.get("messages", [])
+            messages = [m for m in raw_messages if m.type in ("human", "ai")]
+            message_count = len(messages)
 
-                # Extract all message text for search matching
-                all_text_parts = []
-                preview_text = ""
-                for msg in messages:
-                    content = msg.content
-                    if isinstance(content, list):
-                        parts = []
-                        for block in content:
-                            if isinstance(block, str):
-                                parts.append(block)
-                            elif isinstance(block, dict) and "text" in block:
-                                parts.append(block["text"])
-                        content = " ".join(parts)
-                    else:
-                        content = str(content)
+            # Extract all message text for search matching
+            all_text_parts = []
+            preview_text = ""
+            for msg in messages:
+                content = msg.content
+                if isinstance(content, list):
+                    parts = []
+                    for block in content:
+                        if isinstance(block, str):
+                            parts.append(block)
+                        elif isinstance(block, dict) and "text" in block:
+                            parts.append(block["text"])
+                    content = " ".join(parts)
+                else:
+                    content = str(content)
 
-                    all_text_parts.append(content)
+                all_text_parts.append(content)
 
-                    # First human message = preview
-                    if not preview_text and msg.type == "human":
-                        preview_text = content[:120]
+                # First human message = preview
+                if not preview_text and msg.type == "human":
+                    preview_text = content[:120]
 
-                # If searching, check if ANY message matches
-                if search_term:
-                    combined_text = " ".join(all_text_parts).lower()
-                    if search_term not in combined_text:
-                        continue  # Skip this session — doesn't match
+            # If searching, check if ANY message matches
+            if search_term:
+                combined_text = " ".join(all_text_parts).lower()
+                if search_term not in combined_text:
+                    continue  # Skip this session — doesn't match
 
-                all_sessions.append({
-                    "session_id": thread_id,
-                    "message_count": message_count,
-                    "preview_text": preview_text or "(no messages)",
-                })
+            all_sessions.append({
+                "session_id": thread_id,
+                "message_count": message_count,
+                "preview_text": preview_text or "(no messages)",
+            })
 
         except Exception as exc:
             print(f"Warning: Failed to load session {thread_id}: {exc}")
@@ -183,6 +181,15 @@ async def list_sessions(
     else:
         total = db_total
         sessions = all_sessions
+
+    # 4. Attach the user identity (id + display name) for each returned session.
+    users_map = get_sessions_users(agent, [s["session_id"] for s in sessions])
+    for s in sessions:
+        info = users_map.get(s["session_id"]) or {}
+        s["user_id"] = info.get("user_id")
+        s["user_name"] = info.get("user_name")
+        last_active = info.get("last_active_at")
+        s["last_active_at"] = last_active.isoformat() if last_active else None
 
     return {
         "sessions": sessions,
@@ -202,51 +209,54 @@ async def get_session_detail(agent: str, session_id: str):
     """
     _validate_agent(agent)
 
-    try:
-        builder_fn = get_agent_builder(agent)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-
-    workflow = builder_fn()
     config = {"configurable": {"thread_id": session_id}}
 
     try:
-        with get_postgres_checkpointer(agent) as checkpointer:
-            graph = workflow.compile(checkpointer=checkpointer)
-            snapshot = graph.get_state(config)
+        graph = get_compiled_sync_graph(agent)
+        snapshot = graph.get_state(config)
 
-            if not snapshot.values:
-                return {"session_id": session_id, "agent": agent, "messages": []}
+        user_info = get_sessions_users(agent, [session_id]).get(session_id) or {}
 
-            # Extract and clean messages (same pattern as chat.py get_history)
-            messages = []
-            for msg in snapshot.values.get("messages", []):
-                if msg.type not in ("human", "ai"):
-                    continue
-
-                content = msg.content
-                if isinstance(content, list):
-                    text_parts = []
-                    for block in content:
-                        if isinstance(block, str):
-                            text_parts.append(block)
-                        elif isinstance(block, dict) and "text" in block:
-                            text_parts.append(block["text"])
-                    content = " ".join(text_parts).strip()
-                elif not isinstance(content, str):
-                    content = str(content).strip()
-
-                if content:
-                    messages.append({
-                        "type": msg.type,
-                        "content": content,
-                    })
-
+        if not snapshot.values:
             return {
                 "session_id": session_id,
                 "agent": agent,
-                "messages": messages,
+                "user_id": user_info.get("user_id"),
+                "user_name": user_info.get("user_name"),
+                "messages": [],
             }
+
+        # Extract and clean messages (same pattern as chat.py get_history)
+        messages = []
+        for msg in snapshot.values.get("messages", []):
+            if msg.type not in ("human", "ai"):
+                continue
+
+            content = msg.content
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, str):
+                        text_parts.append(block)
+                    elif isinstance(block, dict) and "text" in block:
+                        text_parts.append(block["text"])
+                content = " ".join(text_parts).strip()
+            elif not isinstance(content, str):
+                content = str(content).strip()
+
+            if content:
+                messages.append({
+                    "type": msg.type,
+                    "content": content,
+                })
+
+        return {
+            "session_id": session_id,
+            "agent": agent,
+            "user_id": user_info.get("user_id"),
+            "user_name": user_info.get("user_name"),
+            "messages": messages,
+        }
 
     except Exception as exc:
         import traceback

@@ -6,7 +6,7 @@ export const AGENTS = {
         subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
         color: "from-cyan-900 to-cyan-600",
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
-        idlePrompt: "Ask me about HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
+        idlePrompt: "Ask me about policies and procedures of HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
         disclaimer: "Workmate AI provides internal workplace information. Please verify critical details with the relevant department."
     },
 
@@ -164,5 +164,16 @@ export const AGENTS = {
         buttonColor: "bg-green-600 hover:bg-green-700",
         idlePrompt: "Ask about home broadband, mobile plans, or consumer promotions.",
         disclaimer: "If you need any further clarifications, please reach out to the Consumer Business team."
+    },
+
+    // 13. Rainbow Pages
+    askrainbowpages: {
+        id: "rainbowpages",
+        title: "Rainbowpages",
+        subtitle: "Search SLTMobitel's Rainbow Pages business directory — company listings, contact details, and service categories.",
+        color: "from-red-900 to-red-600",
+        buttonColor: "bg-red-600 hover:bg-red-700",
+        idlePrompt: "Ask about a business listing, contact, or service category.",
+        disclaimer: "If you need any further clarifications, please reach out to the Rainbow Pages team."
     }
 };
