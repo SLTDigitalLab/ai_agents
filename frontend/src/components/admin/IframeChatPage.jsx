@@ -7,7 +7,7 @@ import LifestoreForm from "../forms/LifestoreForm";
 import "./IframeChatPage.css";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+  import.meta.env.VITE_API_BASE_URL || "";
 
 const API_URL = import.meta.env.VITE_API_URL || API_BASE_URL;
 
@@ -24,6 +24,12 @@ const AGENT_CONFIG = {
     placeholder: "Ask about Enterprise services...",
     formToken: "[RENDER_ENTERPRISE_FORM]",
   },
+  workmateai: {
+    agentId: "supervisor",
+    title: "Welcome to Workmate AI",
+    placeholder: "Ask about HR, Finance, IT, Admin, Network...",
+    formToken: null,
+  },
 };
 
 function createThreadId(agentId) {
@@ -33,7 +39,9 @@ function createThreadId(agentId) {
 }
 
 function cleanBotMessage(text, formToken) {
-  return String(text || "").replace(formToken, "").trim();
+  const value = String(text || "");
+  if (!formToken) return value.trim();
+  return value.replace(formToken, "").trim();
 }
 
 function sanitizeMarkdownBold(text) {
@@ -524,7 +532,7 @@ export default function IframeChatPage() {
       const responseText = await response.text();
       const rawAnswer = extractAnswerFromText(responseText);
 
-      const hasFormToken = rawAnswer.includes(config.formToken);
+      const hasFormToken = Boolean(config.formToken) && rawAnswer.includes(config.formToken);
       const cleanedAnswer = cleanBotMessage(rawAnswer, config.formToken);
 
       if (hasFormToken) {

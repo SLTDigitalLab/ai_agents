@@ -13,18 +13,68 @@ from qdrant_client import QdrantClient
 # ---------------------------------------------------------------------
 # Paths + .env
 # ---------------------------------------------------------------------
-ROOT_DIR = Path(__file__).resolve().parents[2]
+CURRENT_FILE = Path(__file__).resolve()
+
+
+def detect_project_root() -> Path:
+    """
+    Supports both layouts:
+
+    Local/server repo layout:
+      /opt/Ask_SLT/backend/scripts/monthly_kb_refresh.py
+      /opt/Ask_SLT/backend/scripts/build_lifestore_graph.py
+      /opt/Ask_SLT/.env
+
+    Docker backend layout:
+      /app/scripts/monthly_kb_refresh.py
+      /app/scripts/build_lifestore_graph.py
+    """
+    candidates: list[Path] = []
+
+    possible_paths = [
+        Path.cwd(),
+        CURRENT_FILE.parent,
+        *CURRENT_FILE.parents,
+    ]
+
+    for path in possible_paths:
+        if path not in candidates:
+            candidates.append(path)
+
+    for candidate in candidates:
+        if (
+            (candidate / ".env").exists()
+            or (candidate / "docker-compose.yml").exists()
+            or (candidate / "scripts" / "build_lifestore_graph.py").exists()
+            or (candidate / "backend" / "scripts" / "build_lifestore_graph.py").exists()
+        ):
+            return candidate
+
+    # Fallback:
+    # If this file is /app/scripts/monthly_kb_refresh.py,
+    # project root should be /app.
+    if CURRENT_FILE.parent.name == "scripts":
+        return CURRENT_FILE.parent.parent
+
+    # Final fallback.
+    return Path.cwd()
+
+
+ROOT_DIR = detect_project_root()
 load_dotenv(ROOT_DIR / ".env")
 
 
 # ---------------------------------------------------------------------
 # Backend/Admin config
 # ---------------------------------------------------------------------
-# If running local uvicorn:
+# If running inside Docker backend container:
 # ADMIN_BASE_URL=http://127.0.0.1:8000
 #
-# If using Docker backend exposed as 127.0.0.1:8100->8000:
+# If running from server host:
 # ADMIN_BASE_URL=http://127.0.0.1:8100
+#
+# If running local uvicorn:
+# ADMIN_BASE_URL=http://127.0.0.1:8000
 ADMIN_BASE_URL = os.getenv("ADMIN_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 
 ADMIN_USER_EMAIL = os.getenv("ADMIN_USER_EMAIL")
@@ -35,11 +85,23 @@ SLT_ENTERPRISE_AGENT_NAME = os.getenv(
     "ask_slt_enterprise",
 )
 
+
+# ---------------------------------------------------------------------
+# Embedding-provider collection suffix
+# ---------------------------------------------------------------------
+# Mirrors core.config.collection_suffix(): the backend ingestion layer
+# namespaces collections by embedding provider, creating <name>_docs (openai)
+# or <name>_docs_gemini (gemini/vertex). The delete targets below must match
+# whichever provider this refresh run is configured for.
+_EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "openai").lower().strip()
+COLLECTION_SUFFIX = "_gemini" if _EMBEDDING_PROVIDER in ("gemini", "vertex") else ""
+
+
 # ---------------------------------------------------------------------
 # Qdrant collection names
 # ---------------------------------------------------------------------
 # These are the names we send to /ingest-url.
-# Your backend/ingestion service may internally create <name>_docs.
+# Your backend/ingestion service may internally create <name>_docs<suffix>.
 LIFESTORE_COLLECTION_NAME = os.getenv(
     "LIFESTORE_QDRANT_COLLECTION",
     "lifestore",
@@ -52,15 +114,15 @@ ENTERPRISE_COLLECTION_NAME = os.getenv(
 
 # These are the actual Qdrant collections to delete before monthly refresh.
 # Since your backend auto-adds "_docs", these default to:
-# lifestore_docs and enterprise_docs
+# lifestore_docs and enterprise_docs.
 LIFESTORE_DELETE_COLLECTION_NAME = os.getenv(
     "LIFESTORE_QDRANT_DELETE_COLLECTION",
-    f"{LIFESTORE_COLLECTION_NAME}_docs",
+    f"{LIFESTORE_COLLECTION_NAME}_docs{COLLECTION_SUFFIX}",
 )
 
 ENTERPRISE_DELETE_COLLECTION_NAME = os.getenv(
     "ENTERPRISE_QDRANT_DELETE_COLLECTION",
-    f"{ENTERPRISE_COLLECTION_NAME}_docs",
+    f"{ENTERPRISE_COLLECTION_NAME}_docs{COLLECTION_SUFFIX}",
 )
 
 # Optional safety: also delete the base collection if it exists.
@@ -379,14 +441,46 @@ def run_slt_enterprise_ingestion():
 def rebuild_lifestore_neo4j_graph():
     print_section("Rebuilding LifeStore Neo4j graph")
 
-    script_path = ROOT_DIR / "backend" / "scripts" / "build_lifestore_graph.py"
+    script_candidates = [
+        # Docker backend container path:
+        # /app/scripts/build_lifestore_graph.py
+        CURRENT_FILE.parent / "build_lifestore_graph.py",
 
-    if not script_path.exists():
-        raise RuntimeError(f"Neo4j graph script not found: {script_path}")
+        # Docker/project-root path:
+        # /app/scripts/build_lifestore_graph.py
+        ROOT_DIR / "scripts" / "build_lifestore_graph.py",
+
+        # Local/server repo path:
+        # /opt/Ask_SLT/backend/scripts/build_lifestore_graph.py
+        ROOT_DIR / "backend" / "scripts" / "build_lifestore_graph.py",
+    ]
+
+    # Remove duplicates while keeping order.
+    unique_candidates: list[Path] = []
+    for candidate in script_candidates:
+        if candidate not in unique_candidates:
+            unique_candidates.append(candidate)
+
+    script_path = None
+
+    for candidate in unique_candidates:
+        if candidate.exists():
+            script_path = candidate
+            break
+
+    if script_path is None:
+        checked_paths = "\n".join(str(path) for path in unique_candidates)
+        raise RuntimeError(
+            "Neo4j graph script not found. Checked paths:\n"
+            f"{checked_paths}"
+        )
+
+    print(f"Using Neo4j graph script: {script_path}")
+    print(f"Project root: {ROOT_DIR}")
 
     result = subprocess.run(
         [sys.executable, str(script_path)],
-        cwd=ROOT_DIR,
+        cwd=str(ROOT_DIR),
         check=False,
     )
 
@@ -406,6 +500,8 @@ def main():
 
     print_section("Monthly KB refresh started")
 
+    print(f"Current file: {CURRENT_FILE}")
+    print(f"Detected project root: {ROOT_DIR}")
     print(f"Admin base URL: {ADMIN_BASE_URL}")
 
     print(f"LifeStore agent: {LIFESTORE_AGENT_NAME}")
