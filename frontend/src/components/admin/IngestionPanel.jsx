@@ -231,6 +231,18 @@ const formatElapsed = (startedAt) => {
     return `${m}m ${s}s`;
 };
 
+const formatKbDate = (value) => {
+    if (!value) return '—';
+
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+        return value;
+    }
+
+    return date.toLocaleString();
+};
+
 const ALL_AGENTS = Object.values(AGENTS).map(cfg => ({
     id: cfg.id,
     title: cfg.title,
@@ -327,6 +339,214 @@ const StatusToast = ({ status, onClose }) => {
     );
 };
 
+const ConfirmDialog = ({ dialog, onClose }) => {
+    if (!dialog) return null;
+
+    return createPortal(
+        <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[99998] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm"
+        >
+            <motion.div
+                initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 18, scale: 0.96 }}
+                transition={{ duration: 0.2 }}
+                className="w-full max-w-lg rounded-[28px] border border-white/[0.10] bg-slate-950 p-6 text-white shadow-2xl shadow-black/50"
+            >
+                <div className="flex items-start gap-4">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-red-500/15 text-red-300 border border-red-500/25">
+                        <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={2}
+                            stroke="currentColor"
+                            className="h-5 w-5"
+                        >
+                            <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                d="M12 9v3.75m0 3.75h.007v.008H12v-.008zM10.29 3.86L1.82 18a1.5 1.5 0 001.29 2.25h17.78A1.5 1.5 0 0022.18 18L13.71 3.86a1.5 1.5 0 00-2.42 0z"
+                            />
+                        </svg>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                        <h3 className="text-lg font-extrabold text-white">
+                            {dialog.title}
+                        </h3>
+
+                        <p className="mt-2 text-sm leading-relaxed text-white/65">
+                            {dialog.message}
+                        </p>
+
+                        {dialog.documentName && (
+                            <div className="mt-4 rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4">
+                                <p className="text-xs font-bold uppercase tracking-wider text-white/35">
+                                    Selected document
+                                </p>
+                                <p className="mt-1 break-words text-sm font-semibold text-white/85">
+                                    {dialog.documentName}
+                                </p>
+                            </div>
+                        )}
+
+                        {dialog.warning && (
+                            <p className="mt-3 rounded-2xl border border-red-500/20 bg-red-500/10 p-3 text-xs font-medium leading-relaxed text-red-100/80">
+                                {dialog.warning}
+                            </p>
+                        )}
+                    </div>
+                </div>
+
+                <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="rounded-2xl border border-white/[0.10] bg-white/[0.04] px-5 py-3 text-sm font-bold text-white/70 transition-all hover:bg-white/[0.08] hover:text-white"
+                    >
+                        Cancel
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={dialog.onConfirm}
+                        className="rounded-2xl bg-red-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-red-950/30 transition-all hover:bg-red-700"
+                    >
+                        {dialog.confirmLabel || 'Delete'}
+                    </button>
+                </div>
+            </motion.div>
+        </motion.div>,
+        document.body
+    );
+};
+
+const ChunkViewerDialog = ({
+    dialog,
+    loading,
+    actionLoading,
+    onClose,
+    onDeleteChunk,
+}) => {
+    if (!dialog) return null;
+
+    const chunks = dialog.chunks || [];
+    const doc = dialog.doc || {};
+
+    return createPortal(
+        <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[99997] flex items-center justify-center bg-slate-950/70 px-4 backdrop-blur-sm"
+        >
+            <motion.div
+                initial={{ opacity: 0, y: 18, scale: 0.96 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 18, scale: 0.96 }}
+                transition={{ duration: 0.2 }}
+                className="w-full max-w-5xl max-h-[85vh] overflow-hidden rounded-[28px] border border-white/[0.10] bg-slate-950 text-white shadow-2xl shadow-black/50 flex flex-col"
+            >
+                <div className="flex items-start justify-between gap-4 border-b border-white/[0.08] p-6">
+                    <div className="min-w-0">
+                        <h3 className="text-lg font-extrabold text-white">
+                            Document Chunks
+                        </h3>
+
+                        <p className="mt-1 truncate text-sm font-semibold text-cyan-200">
+                            {doc.source || 'Unknown document'}
+                        </p>
+
+                        <p className="mt-1 text-xs text-white/35">
+                            {loading
+                                ? 'Loading chunks...'
+                                : `${chunks.length} chunk(s) available`}
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={onClose}
+                        className="rounded-xl p-2 text-white/55 transition-all hover:bg-white/[0.08] hover:text-white"
+                        aria-label="Close chunks popup"
+                    >
+                        ✕
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6">
+                    {loading ? (
+                        <div className="flex items-center justify-center py-16">
+                            <div className="flex items-center gap-3">
+                                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" />
+                                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce [animation-delay:150ms]" />
+                                <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce [animation-delay:300ms]" />
+                            </div>
+                        </div>
+                    ) : chunks.length === 0 ? (
+                        <div className="py-16 text-center">
+                            <p className="text-white/45 text-sm font-semibold">
+                                No chunks found for this document.
+                            </p>
+                            <p className="text-white/25 text-xs mt-1">
+                                This document may already be fully removed from the KB.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {chunks.map((chunk) => (
+                                <div
+                                    key={chunk.point_id}
+                                    className="rounded-3xl border border-white/[0.08] bg-white/[0.035] p-5"
+                                >
+                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                        <div className="min-w-0">
+                                            <p className="text-sm font-extrabold text-white">
+                                                Chunk {chunk.chunk_number}
+                                            </p>
+
+                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                <span className="rounded-full bg-cyan-400/10 border border-cyan-400/20 px-2.5 py-1 text-[11px] font-bold text-cyan-200">
+                                                    Page {chunk.page || 'N/A'}
+                                                </span>
+
+                                                <span className="rounded-full bg-white/[0.04] border border-white/[0.08] px-2.5 py-1 text-[11px] font-bold text-white/55">
+                                                    {chunk.source_type || 'unknown'}
+                                                </span>
+                                            </div>
+
+                                            <p className="mt-2 break-all text-[11px] text-white/25">
+                                                Point ID: {chunk.point_id}
+                                            </p>
+                                        </div>
+
+                                        <button
+                                            type="button"
+                                            onClick={() => onDeleteChunk(chunk)}
+                                            disabled={actionLoading}
+                                            className="rounded-xl bg-red-500/15 border border-red-500/30 px-4 py-2 text-xs font-bold text-red-200 hover:bg-red-500/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                        >
+                                            Delete Chunk
+                                        </button>
+                                    </div>
+
+                                    <div className="mt-4 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-2xl border border-white/[0.08] bg-black/20 p-4 text-sm leading-relaxed text-white/75">
+                                        {chunk.content || 'No content available for this chunk.'}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </motion.div>
+        </motion.div>,
+        document.body
+    );
+};
 
 // ── Main Ingestion Panel ──────────────────────────────────────────────
 const IngestionPanel = () => {
@@ -342,6 +562,10 @@ const IngestionPanel = () => {
 
     const [activeTab, setActiveTab] = useState('url');
     const [status, setStatus] = useState(null);
+    const [confirmDialog, setConfirmDialog] = useState(null);
+    const [chunkDialog, setChunkDialog] = useState(null);
+    const [chunkLoading, setChunkLoading] = useState(false);
+    const [chunkActionLoading, setChunkActionLoading] = useState(false);
 
     const defaultAgent = AGENT_LIST[0]?.id || '';
     const financeAgent = AGENT_LIST.find(a => a.id === 'finance')?.id || defaultAgent;
@@ -364,6 +588,14 @@ const IngestionPanel = () => {
         force: false,
     });
     const [spLoading, setSpLoading] = useState(false);
+
+    // KB Management state
+    const [kbForm, setKbForm] = useState({ agent_name: defaultAgent });
+    const [kbDocuments, setKbDocuments] = useState([]);
+    const [kbLoadedAgent, setKbLoadedAgent] = useState('');
+    const [kbLoading, setKbLoading] = useState(false);
+    const [kbActionLoading, setKbActionLoading] = useState(false);
+    const [kbSearch, setKbSearch] = useState('');
 
     // Server-tracked ingestion status (survives page refresh)
     const [serverStatus, setServerStatus] = useState(null);
@@ -667,6 +899,323 @@ const IngestionPanel = () => {
         }
     };
 
+    // ── KB Management Handlers ──
+    const handleLoadKbDocuments = async (showToast = true) => {
+        if (!kbForm.agent_name) {
+            setStatus({
+                type: 'error',
+                title: 'Agent Required',
+                message: 'Please select an agent first.',
+            });
+            return;
+        }
+
+        setKbLoading(true);
+        setKbSearch('');
+
+        if (showToast) {
+            setStatus(null);
+        }
+
+        try {
+            const res = await fetch(`${API_BASE}/kb-documents`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_name: kbForm.agent_name,
+                    user_email: userEmail,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+            }
+
+            setKbDocuments(data.documents || []);
+            setKbLoadedAgent(data.agent_name || kbForm.agent_name);
+
+            if (showToast) {
+                setStatus({
+                    type: 'success',
+                    title: 'Documents Loaded',
+                    message: `Found ${data.total_documents || 0} document(s) in ${AGENT_TITLE[kbForm.agent_name] || kbForm.agent_name} KB.`,
+                });
+            }
+        } catch (err) {
+            setKbDocuments([]);
+            setKbLoadedAgent('');
+
+            setStatus({
+                type: 'error',
+                title: 'Failed to Load Documents',
+                message: err.message || 'Could not load KB documents.',
+            });
+        } finally {
+            setKbLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (activeTab !== 'kb' || !kbForm.agent_name) return;
+
+        handleLoadKbDocuments(false);
+    }, [activeTab, kbForm.agent_name]);
+
+    const executeDeleteKbDocument = async (doc) => {
+        setKbActionLoading(true);
+
+        try {
+            const res = await fetch(`${API_BASE}/delete-kb-document`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_name: kbForm.agent_name,
+                    document_id: doc.document_id,
+                    source: doc.source,
+                    user_email: userEmail,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+            }
+
+            setStatus({
+                type: data.status === 'success' ? 'success' : 'warning',
+                title: data.status === 'success' ? 'Document Deleted' : 'Delete Warning',
+                message: data.message || `Deleted ${doc.source} from KB.`,
+            });
+
+            await handleLoadKbDocuments(false);
+        } catch (err) {
+            setStatus({
+                type: 'error',
+                title: 'Delete Failed',
+                message: err.message || 'Could not delete this document from KB.',
+            });
+        } finally {
+            setKbActionLoading(false);
+        }
+    };
+
+    const handleDeleteKbDocument = (doc) => {
+        const agentTitle = AGENT_TITLE[kbForm.agent_name] || kbForm.agent_name;
+
+        setConfirmDialog({
+            title: 'Delete document from KB?',
+            documentName: doc.source,
+            message: `This will remove this document only from ${agentTitle} knowledge base.`,
+            warning: 'After deleting, the chat will not answer from this document. Other documents in this agent KB will remain available.',
+            confirmLabel: 'Delete Document',
+            onConfirm: () => {
+                setConfirmDialog(null);
+                executeDeleteKbDocument(doc);
+            },
+        });
+    };
+
+    const executeDeleteFullAgentKb = async () => {
+        setKbActionLoading(true);
+
+        try {
+            const res = await fetch(`${API_BASE}/delete-agent-kb`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_name: kbForm.agent_name,
+                    user_email: userEmail,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+            }
+
+            setKbDocuments([]);
+            setKbLoadedAgent(kbForm.agent_name);
+            setKbSearch('');
+
+            setStatus({
+                type: data.status === 'success' ? 'success' : 'warning',
+                title: data.status === 'success' ? 'Agent KB Deleted' : 'Delete Warning',
+                message: data.message || `Deleted full KB for ${AGENT_TITLE[kbForm.agent_name] || kbForm.agent_name}.`,
+            });
+        } catch (err) {
+            setStatus({
+                type: 'error',
+                title: 'Delete Failed',
+                message: err.message || 'Could not delete full agent KB.',
+            });
+        } finally {
+            setKbActionLoading(false);
+        }
+    };
+
+    const handleDeleteFullAgentKb = () => {
+        const agentTitle = AGENT_TITLE[kbForm.agent_name] || kbForm.agent_name;
+        const collectionName = `${kbForm.agent_name}_docs`;
+
+        setConfirmDialog({
+            title: 'Delete full agent KB?',
+            message: `This will delete only the ${agentTitle} knowledge base collection.`,
+            warning: `Collection to delete: ${collectionName}. This will not delete other agents' KB collections. Chat will stop answering from this agent KB until you ingest documents again.`,
+            confirmLabel: `Delete ${agentTitle} KB`,
+            onConfirm: () => {
+                setConfirmDialog(null);
+                executeDeleteFullAgentKb();
+            },
+        });
+    };
+
+    const fetchKbDocumentChunks = async (doc) => {
+        const res = await fetch(`${API_BASE}/kb-document-chunks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                agent_name: kbForm.agent_name,
+                document_id: doc.document_id,
+                source: doc.source,
+                user_email: userEmail,
+            }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+        }
+
+        return data.chunks || [];
+    };
+
+    const handleOpenChunks = async (doc) => {
+        setChunkDialog({
+            doc,
+            chunks: [],
+        });
+
+        setChunkLoading(true);
+        setStatus(null);
+
+        try {
+            const chunks = await fetchKbDocumentChunks(doc);
+
+            setChunkDialog({
+                doc,
+                chunks,
+            });
+        } catch (err) {
+            setStatus({
+                type: 'error',
+                title: 'Failed to Load Chunks',
+                message: err.message || 'Could not load chunks for this document.',
+            });
+
+            setChunkDialog(null);
+        } finally {
+            setChunkLoading(false);
+        }
+    };
+
+    const executeDeleteKbChunk = async (chunk) => {
+        const currentDoc = chunkDialog?.doc;
+
+        if (!currentDoc) return;
+
+        setChunkActionLoading(true);
+
+        try {
+            const res = await fetch(`${API_BASE}/delete-kb-chunk`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_name: kbForm.agent_name,
+                    point_id: chunk.point_id,
+                    user_email: userEmail,
+                }),
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+                throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+            }
+
+            const remainingChunks = await fetchKbDocumentChunks(currentDoc);
+
+            await handleLoadKbDocuments(false);
+
+            if (remainingChunks.length === 0) {
+                setChunkDialog(null);
+
+                setStatus({
+                    type: 'success',
+                    title: 'Chunk Deleted',
+                    message: 'The last chunk was deleted, so this document is now removed from the KB.',
+                });
+            } else {
+                setChunkDialog({
+                    doc: currentDoc,
+                    chunks: remainingChunks,
+                });
+
+                setStatus({
+                    type: 'success',
+                    title: 'Chunk Deleted',
+                    message: `Deleted selected chunk. ${remainingChunks.length} chunk(s) still remain for this document.`,
+                });
+            }
+        } catch (err) {
+            setStatus({
+                type: 'error',
+                title: 'Chunk Delete Failed',
+                message: err.message || 'Could not delete selected chunk.',
+            });
+        } finally {
+            setChunkActionLoading(false);
+        }
+    };
+
+    const handleDeleteKbChunk = (chunk) => {
+        setConfirmDialog({
+            title: 'Delete this chunk?',
+            message: `This will remove only Chunk ${chunk.chunk_number} from the selected document.`,
+            warning: 'Other chunks in the same document will remain. If this is the last chunk, the document will disappear from the KB list.',
+            confirmLabel: 'Delete Chunk',
+            onConfirm: () => {
+                setConfirmDialog(null);
+                executeDeleteKbChunk(chunk);
+            },
+        });
+    };
+
+    const normalizedKbSearch = kbSearch.trim().toLowerCase();
+
+    const filteredKbDocuments = normalizedKbSearch
+        ? kbDocuments.filter((doc) => {
+            const searchableText = [
+                doc.source,
+                doc.source_type,
+                doc.document_id,
+                doc.document_key,
+                doc.source_folder,
+                doc.last_modified,
+                doc.link,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+
+            return searchableText.includes(normalizedKbSearch);
+        })
+        : kbDocuments;
+
     const websiteUrlError = getWebsiteUrlError(urlForm.url);
     const sharePointSiteUrlError = getSharePointSiteUrlError(spForm.site_url);
     const sharePointFolderPathError = getSharePointFolderPathError(spForm.folder_path);
@@ -698,10 +1247,17 @@ const IngestionPanel = () => {
     const primaryButtonClass =
         'w-full flex items-center justify-center gap-2 bg-[#4c1d95] hover:bg-[#5b21b6] text-white font-bold py-3.5 rounded-2xl transition-all disabled:bg-[#4c1d95]/70 disabled:text-white/45 disabled:cursor-not-allowed shadow-lg shadow-purple-900/30';
 
+    const secondaryButtonClass =
+        'w-full flex items-center justify-center gap-2 bg-white/[0.06] hover:bg-white/[0.10] text-white font-bold py-3.5 rounded-2xl transition-all disabled:bg-white/[0.03] disabled:text-white/35 disabled:cursor-not-allowed border border-white/[0.10]';
+
+    const dangerButtonClass =
+        'w-full flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 rounded-2xl transition-all disabled:bg-red-600/50 disabled:text-white/45 disabled:cursor-not-allowed shadow-lg shadow-red-950/30';    
+
     const tabs = [
         { key: 'url', label: 'URL Ingestion', icon: '🌐' },
         { key: 'onedrive', label: 'OneDrive Sync', icon: '☁️' },
         { key: 'sharepoint', label: 'SharePoint Sync', icon: '🟦' },
+        { key: 'kb', label: 'KB Management', icon: '🗂️' },
     ];
 
     return (
@@ -743,7 +1299,7 @@ const IngestionPanel = () => {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6 rounded-3xl border border-white/[0.08] bg-white/[0.03] p-2 shadow-xl shadow-slate-950/25 backdrop-blur-sm"
+                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6 rounded-3xl border border-white/[0.08] bg-white/[0.03] p-2 shadow-xl shadow-slate-950/25 backdrop-blur-sm"
                 >
                     {tabs.map(tab => (
                         <button
@@ -1150,12 +1706,261 @@ const IngestionPanel = () => {
                             </form>
                         </motion.div>
                     )}
+
+                    {/* ── KB Management ────────────────── */}
+                    {activeTab === 'kb' && (
+                        <motion.div
+                            key="kb"
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 20 }}
+                            transition={{ duration: 0.2 }}
+                            className="rounded-[28px] border border-white/[0.08] bg-white/[0.03] p-6 sm:p-8 space-y-6 shadow-2xl shadow-slate-950/25 text-white backdrop-blur-sm"
+                        >
+                            <div>
+                                <h2 className="text-white font-bold text-xl mb-1">KB Management</h2>
+                                <p className="text-white/45 text-sm">
+                                    View documents in an agent knowledge base, delete selected documents, or remove the full agent KB.
+                                </p>
+                            </div>
+
+                            {/* Agent Select */}
+                            <div>
+                                <label htmlFor="kb-agent" className="block text-white/45 text-xs uppercase tracking-wider font-bold mb-2">
+                                    Target Agent
+                                </label>
+
+                                <select
+                                    id="kb-agent"
+                                    value={kbForm.agent_name}
+                                    onChange={(e) => {
+                                        setKbForm({ agent_name: e.target.value });
+                                        setKbDocuments([]);
+                                        setKbLoadedAgent('');
+                                        setKbSearch('');
+                                    }}
+                                    className={fieldClass}
+                                >
+                                    {AGENT_LIST.map(a => (
+                                        <option key={a.id} value={a.id} className="bg-slate-900 text-white">
+                                            {a.title}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {kbLoadedAgent && (
+                                <div>
+                                    <label htmlFor="kb-search" className="block text-white/45 text-xs uppercase tracking-wider font-bold mb-2">
+                                        Search Loaded Documents
+                                    </label>
+
+                                    <div className="relative">
+                                        <input
+                                            id="kb-search"
+                                            type="text"
+                                            value={kbSearch}
+                                            onChange={(e) => setKbSearch(e.target.value)}
+                                            placeholder="Search by document name, type, ID, folder, or link..."
+                                            disabled={kbLoading}
+                                            className={`${fieldClass} pr-10 disabled:opacity-45 disabled:cursor-not-allowed`}
+                                        />
+
+                                        {kbSearch && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setKbSearch('')}
+                                                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/35 hover:text-white/70 transition-colors"
+                                                aria-label="Clear KB search"
+                                            >
+                                                ✕
+                                            </button>
+                                        )}
+                                    </div>
+
+                                    <p className="text-white/35 text-xs mt-1.5">
+                                        Showing {filteredKbDocuments.length} of {kbDocuments.length} document(s).
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Document List */}
+                            <div className="rounded-3xl border border-white/[0.08] bg-white/[0.025] overflow-hidden">
+                                <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-white/[0.08]">
+                                    <div>
+                                        <p className="text-white font-bold text-sm">
+                                            Documents
+                                        </p>
+                                        <p className="text-white/35 text-xs mt-0.5">
+                                            {kbLoadedAgent
+                                                ? `${filteredKbDocuments.length} of ${kbDocuments.length} document(s) shown for ${AGENT_TITLE[kbLoadedAgent] || kbLoadedAgent}`
+                                                : 'Select an agent to view documents'}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                {kbLoading ? (
+                                    <div className="flex items-center justify-center py-12">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce" />
+                                            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce [animation-delay:150ms]" />
+                                            <div className="w-2 h-2 rounded-full bg-cyan-400 animate-bounce [animation-delay:300ms]" />
+                                        </div>
+                                    </div>
+                                ) : kbLoadedAgent && kbDocuments.length === 0 ? (
+                                    <div className="px-5 py-12 text-center">
+                                        <p className="text-white/45 text-sm font-semibold">
+                                            No documents found in this agent KB.
+                                        </p>
+                                        <p className="text-white/25 text-xs mt-1">
+                                            Ingest OneDrive, SharePoint, or URL content first.
+                                        </p>
+                                    </div>
+                                ) : kbLoadedAgent && kbDocuments.length > 0 && filteredKbDocuments.length === 0 ? (
+                                    <div className="px-5 py-12 text-center">
+                                        <p className="text-white/45 text-sm font-semibold">
+                                            No matching documents found.
+                                        </p>
+                                        <p className="text-white/25 text-xs mt-1">
+                                            Try a different document name, type, ID, or folder keyword.
+                                        </p>
+                                    </div>
+                                ) : filteredKbDocuments.length > 0 ? (
+                                    <div className="divide-y divide-white/[0.06]">
+                                        {filteredKbDocuments.map((doc) => (
+                                            <div
+                                                key={doc.document_key || `${doc.source}-${doc.document_id}`}
+                                                className="grid grid-cols-1 lg:grid-cols-12 gap-4 px-5 py-4 hover:bg-white/[0.035] transition-colors"
+                                            >
+                                                <div className="lg:col-span-6 min-w-0">
+                                                    <p className="text-white/85 text-sm font-bold truncate">
+                                                        {doc.source || 'Unknown document'}
+                                                    </p>
+
+                                                    <p className="text-white/35 text-xs mt-1 truncate">
+                                                        {doc.link && doc.link !== '#'
+                                                            ? doc.link
+                                                            : 'No source link available'}
+                                                    </p>
+
+                                                    <div className="flex flex-wrap gap-1.5 mt-2">
+                                                        <span className="rounded-full bg-cyan-400/10 border border-cyan-400/20 px-2.5 py-1 text-[11px] font-bold text-cyan-200">
+                                                            {doc.source_type || 'unknown'}
+                                                        </span>
+
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleOpenChunks(doc)}
+                                                            disabled={kbActionLoading || chunkLoading}
+                                                            className="rounded-full bg-white/[0.04] border border-white/[0.08] px-2.5 py-1 text-[11px] font-bold text-white/65 hover:bg-cyan-400/10 hover:border-cyan-400/25 hover:text-cyan-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                                            title="View document chunks"
+                                                        >
+                                                            {doc.chunk_count || 0} chunk(s)
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                <div className="lg:col-span-4">
+                                                    <p className="text-white/35 text-xs uppercase tracking-wider font-bold">
+                                                        Last Modified
+                                                    </p>
+
+                                                    <p className="text-white/65 text-xs mt-1">
+                                                        {formatKbDate(doc.last_modified)}
+                                                    </p>
+
+                                                    <p className="text-white/25 text-[11px] mt-2 break-all">
+                                                        ID: {doc.document_id || 'N/A'}
+                                                    </p>
+                                                </div>
+
+                                                <div className="lg:col-span-2 flex lg:justify-end items-center">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteKbDocument(doc)}
+                                                        disabled={kbActionLoading || serverStatus?.active}
+                                                        className="w-full lg:w-auto rounded-xl bg-red-500/15 border border-red-500/30 px-4 py-2 text-xs font-bold text-red-200 hover:bg-red-500/25 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    >
+                                                        Delete
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="px-5 py-12 text-center">
+                                        <p className="text-white/45 text-sm font-semibold">
+                                            No documents loaded for this agent.
+                                        </p>
+                                        <p className="text-white/25 text-xs mt-1">
+                                            Documents will load automatically when an agent is selected.
+                                        </p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Danger Zone */}
+                            <div className="rounded-3xl border border-red-500/25 bg-red-500/[0.06] p-5">
+                                <div className="mb-4">
+                                    <p className="text-red-200 font-bold text-sm">Danger Zone</p>
+                                    <p className="text-red-100/55 text-xs mt-1">
+                                        Delete the full knowledge base collection for this agent. After deleting, chat cannot answer from those documents until you ingest again.
+                                    </p>
+                                </div>
+
+                                <button
+                                    type="button"
+                                    onClick={handleDeleteFullAgentKb}
+                                    disabled={kbActionLoading || kbLoading || serverStatus?.active || !kbForm.agent_name}
+                                    className={dangerButtonClass}
+                                >
+                                    {kbActionLoading ? (
+                                        <>
+                                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                            Processing Delete...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673A2.25 2.25 0 0115.916 21.75H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                            </svg>
+                                            Delete Full Agent KB
+                                        </>
+                                    )}
+                                </button>
+
+                                {serverStatus?.active && (
+                                    <p className="text-red-100/45 text-xs mt-3">
+                                        Delete actions are disabled while ingestion is running.
+                                    </p>
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
                 </AnimatePresence>
             </div>
 
             {/* Status Toast */}
             <AnimatePresence>
                 <StatusToast status={status} onClose={() => setStatus(null)} />
+            </AnimatePresence>
+
+            {/* Confirm Dialog */}
+            <AnimatePresence>
+                <ConfirmDialog
+                    dialog={confirmDialog}
+                    onClose={() => setConfirmDialog(null)}
+                />
+            </AnimatePresence>
+
+            <AnimatePresence>
+                <ChunkViewerDialog
+                    dialog={chunkDialog}
+                    loading={chunkLoading}
+                    actionLoading={chunkActionLoading}
+                    onClose={() => setChunkDialog(null)}
+                    onDeleteChunk={handleDeleteKbChunk}
+                />
             </AnimatePresence>
         </AdminLayout>
     );

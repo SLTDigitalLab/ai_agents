@@ -161,8 +161,17 @@ async def list_sessions(
                     if search_term not in combined_text:
                         continue  # Skip this session — doesn't match
 
+                user_name = (
+                    snapshot.values.get("user_name")
+                    or snapshot.values.get("user_id")
+                    or "Unknown User"
+                )
+                user_id = snapshot.values.get("user_id") or ""
+                
                 all_sessions.append({
                     "session_id": thread_id,
+                    "user_name": user_name,
+                    "user_id": user_id,
                     "message_count": message_count,
                     "preview_text": preview_text or "(no messages)",
                 })
@@ -172,6 +181,8 @@ async def list_sessions(
             if not search_term:
                 all_sessions.append({
                     "session_id": thread_id,
+                    "user_name": "Unknown User",
+                    "user_id": "",
                     "message_count": 0,
                     "preview_text": "(failed to load)",
                 })
@@ -216,7 +227,13 @@ async def get_session_detail(agent: str, session_id: str):
             snapshot = graph.get_state(config)
 
             if not snapshot.values:
-                return {"session_id": session_id, "agent": agent, "messages": []}
+                return {
+                    "session_id": session_id,
+                    "agent": agent,
+                    "user_name": "Unknown User",
+                    "user_id": "",
+                    "messages": [],
+                }
 
             # Extract and clean messages (same pattern as chat.py get_history)
             messages = []
@@ -245,6 +262,8 @@ async def get_session_detail(agent: str, session_id: str):
             return {
                 "session_id": session_id,
                 "agent": agent,
+                "user_name": snapshot.values.get("user_name") or snapshot.values.get("user_id") or "Unknown User",
+                "user_id": snapshot.values.get("user_id") or "",
                 "messages": messages,
             }
 

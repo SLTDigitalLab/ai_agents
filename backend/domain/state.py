@@ -24,6 +24,7 @@ class AgentState(TypedDict):
 
     # Authenticated caller – passed through for API / DB lookups.
     user_id: str
+    user_name: NotRequired[str]
 
     # Current chat thread id. Used to collect retrieved evidence per request.
     thread_id: NotRequired[str]

@@ -1044,6 +1044,422 @@ class IngestionService:
         except Exception as e:
             log.warning(f"Could not delete old vectors for {file_name}: {e}")
 
+    def _agent_collection_name(self, agent_name: str) -> str:
+        """Return Qdrant collection name for an agent."""
+        return f"{agent_name}_docs"
+
+
+    def _collection_exists(self, collection_name: str) -> bool:
+        """Check whether a Qdrant collection exists."""
+        try:
+            return self.client.collection_exists(collection_name)
+        except Exception:
+            try:
+                self.client.get_collection(collection_name)
+                return True
+            except Exception:
+                return False
+
+
+    def list_kb_documents(self, agent_name: str) -> dict:
+        """
+        List unique documents currently stored in an agent KB collection.
+
+        Groups Qdrant chunks by metadata.onedrive_id when available.
+        Falls back to source/link for older URL or legacy ingestions.
+        """
+        collection_name = self._agent_collection_name(agent_name)
+
+        if not self._collection_exists(collection_name):
+            return {
+                "status": "success",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "documents": [],
+                "total_documents": 0,
+                "message": f"No KB collection found for agent '{agent_name}'.",
+            }
+
+        documents: dict[str, dict] = {}
+        next_page_offset = None
+
+        try:
+            while True:
+                points, next_page_offset = self.client.scroll(
+                    collection_name=collection_name,
+                    limit=256,
+                    offset=next_page_offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+
+                for point in points:
+                    payload = point.payload or {}
+                    metadata = payload.get("metadata") or {}
+
+                    source = metadata.get("source") or "Unknown Source"
+                    link = metadata.get("link") or "#"
+
+                    document_id = (
+                        metadata.get("onedrive_id")
+                        or metadata.get("sharepoint_item_id")
+                        or metadata.get("document_id")
+                        or metadata.get("source_id")
+                    )
+
+                    # Fallback for URL/legacy docs with no onedrive_id.
+                    stable_key = document_id or f"{source}|{link}"
+
+                    if stable_key not in documents:
+                        source_type = (
+                            metadata.get("source_type")
+                            or ("sharepoint" if metadata.get("sharepoint_item_id") else None)
+                            or ("onedrive" if metadata.get("onedrive_id") else None)
+                            or "url"
+                        )
+
+                        documents[stable_key] = {
+                            "document_key": stable_key,
+                            "document_id": document_id,
+                            "source": source,
+                            "source_type": source_type,
+                            "link": link,
+                            "source_folder": metadata.get("source_folder") or "",
+                            "last_modified": metadata.get("last_modified") or "",
+                            "sharepoint_site_url": metadata.get("sharepoint_site_url") or "",
+                            "sharepoint_folder_path": metadata.get("sharepoint_folder_path") or "",
+                            "chunk_count": 0,
+                        }
+
+                    documents[stable_key]["chunk_count"] += 1
+
+                if next_page_offset is None:
+                    break
+
+            document_list = sorted(
+                documents.values(),
+                key=lambda item: (item.get("source_type", ""), item.get("source", "")),
+            )
+
+            return {
+                "status": "success",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "documents": document_list,
+                "total_documents": len(document_list),
+            }
+
+        except Exception as e:
+            log.exception(f"Failed to list KB documents for agent={agent_name}: {e}")
+            return {
+                "status": "error",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "message": f"Failed to list KB documents: {e}",
+                "documents": [],
+                "total_documents": 0,
+            }
+
+
+    def delete_agent_kb(self, agent_name: str) -> dict:
+        """Delete the full KB collection for one agent."""
+        collection_name = self._agent_collection_name(agent_name)
+
+        if not self._collection_exists(collection_name):
+            return {
+                "status": "warning",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "message": f"No KB collection found for agent '{agent_name}'.",
+            }
+
+        try:
+            self.client.delete_collection(collection_name=collection_name)
+
+            return {
+                "status": "success",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "message": f"Deleted full KB collection for agent '{agent_name}'.",
+            }
+
+        except Exception as e:
+            log.exception(f"Failed to delete KB collection {collection_name}: {e}")
+            return {
+                "status": "error",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "message": f"Failed to delete KB collection: {e}",
+            }
+
+
+    def delete_kb_document(
+        self,
+        agent_name: str,
+        document_id: str | None = None,
+        source: str | None = None,
+    ) -> dict:
+        """
+        Delete one document from an agent KB.
+
+        Prefer document_id because OneDrive and SharePoint ingestion stores it
+        in metadata.onedrive_id. For older URL/legacy docs, fallback to source.
+        """
+        collection_name = self._agent_collection_name(agent_name)
+
+        if not self._collection_exists(collection_name):
+            return {
+                "status": "warning",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "message": f"No KB collection found for agent '{agent_name}'.",
+            }
+
+        if not document_id and not source:
+            return {
+                "status": "error",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "message": "Either document_id or source is required.",
+            }
+
+        must_conditions = []
+
+        if document_id:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="metadata.onedrive_id",
+                    match=models.MatchValue(value=document_id),
+                )
+            )
+        else:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="metadata.source",
+                    match=models.MatchValue(value=source),
+                )
+            )
+
+        delete_filter = models.Filter(must=must_conditions)
+
+        try:
+            # Count matching chunks before delete so the admin sees useful feedback.
+            points, _ = self.client.scroll(
+                collection_name=collection_name,
+                scroll_filter=delete_filter,
+                limit=1,
+                with_payload=False,
+                with_vectors=False,
+            )
+
+            if not points:
+                return {
+                    "status": "warning",
+                    "agent_name": agent_name,
+                    "collection_name": collection_name,
+                    "document_id": document_id,
+                    "source": source,
+                    "deleted_chunks": 0,
+                    "message": "No matching document chunks found to delete.",
+                }
+
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=models.FilterSelector(filter=delete_filter),
+            )
+
+            return {
+                "status": "success",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "document_id": document_id,
+                "source": source,
+                "message": f"Deleted document from KB for agent '{agent_name}'.",
+            }
+
+        except Exception as e:
+            log.exception(
+                f"Failed to delete KB document agent={agent_name} "
+                f"document_id={document_id} source={source}: {e}"
+            )
+            return {
+                "status": "error",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "document_id": document_id,
+                "source": source,
+                "message": f"Failed to delete KB document: {e}",
+            } 
+
+    def list_kb_document_chunks(
+        self,
+        agent_name: str,
+        document_id: str | None = None,
+        source: str | None = None,
+    ) -> dict:
+        """
+        List all chunks for one document in an agent KB.
+        Each chunk is one Qdrant point.
+        """
+        collection_name = self._agent_collection_name(agent_name)
+
+        if not self._collection_exists(collection_name):
+            return {
+                "status": "warning",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "chunks": [],
+                "total_chunks": 0,
+                "message": f"No KB collection found for agent '{agent_name}'.",
+            }
+
+        if not document_id and not source:
+            return {
+                "status": "error",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "chunks": [],
+                "total_chunks": 0,
+                "message": "Either document_id or source is required.",
+            }
+
+        if document_id:
+            chunk_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="metadata.onedrive_id",
+                        match=models.MatchValue(value=document_id),
+                    )
+                ]
+            )
+        else:
+            chunk_filter = models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="metadata.source",
+                        match=models.MatchValue(value=source),
+                    )
+                ]
+            )
+
+        chunks = []
+        next_page_offset = None
+
+        try:
+            while True:
+                points, next_page_offset = self.client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=chunk_filter,
+                    limit=128,
+                    offset=next_page_offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+
+                for point in points:
+                    payload = point.payload or {}
+                    metadata = payload.get("metadata") or {}
+
+                    content = (
+                        payload.get("page_content")
+                        or payload.get("content")
+                        or payload.get("text")
+                        or ""
+                    )
+
+                    chunks.append({
+                        "point_id": str(point.id),
+                        "chunk_number": len(chunks) + 1,
+                        "source": metadata.get("source") or source or "Unknown document",
+                        "document_id": metadata.get("onedrive_id") or document_id,
+                        "source_type": metadata.get("source_type") or (
+                            "sharepoint" if metadata.get("sharepoint_item_id") else "onedrive"
+                        ),
+                        "page": metadata.get("page_number") or metadata.get("page") or "",
+                        "last_modified": metadata.get("last_modified") or "",
+                        "content": content,
+                        "content_preview": content[:300],
+                    })
+
+                if next_page_offset is None:
+                    break
+
+            return {
+                "status": "success",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "document_id": document_id,
+                "source": source,
+                "chunks": chunks,
+                "total_chunks": len(chunks),
+            }
+
+        except Exception as e:
+            log.exception(
+                f"Failed to list chunks agent={agent_name} document_id={document_id} source={source}: {e}"
+            )
+            return {
+                "status": "error",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "chunks": [],
+                "total_chunks": 0,
+                "message": f"Failed to list document chunks: {e}",
+            }
+
+
+    def delete_kb_chunk(self, agent_name: str, point_id: str) -> dict:
+        """
+        Delete one chunk from an agent KB.
+        This deletes only one Qdrant point.
+        """
+        collection_name = self._agent_collection_name(agent_name)
+
+        if not self._collection_exists(collection_name):
+            return {
+                "status": "warning",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "message": f"No KB collection found for agent '{agent_name}'.",
+            }
+
+        if not point_id:
+            return {
+                "status": "error",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "message": "point_id is required.",
+            }
+
+        try:
+            self.client.delete(
+                collection_name=collection_name,
+                points_selector=models.PointIdsList(
+                    points=[point_id],
+                ),
+                wait=True,
+            )
+
+            return {
+                "status": "success",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "point_id": point_id,
+                "message": "Deleted selected chunk from KB.",
+            }
+
+        except Exception as e:
+            log.exception(
+                f"Failed to delete KB chunk agent={agent_name} point_id={point_id}: {e}"
+            )
+            return {
+                "status": "error",
+                "agent_name": agent_name,
+                "collection_name": collection_name,
+                "point_id": point_id,
+                "message": f"Failed to delete KB chunk: {e}",
+            }           
+
     async def process_onedrive_ingestion(self, folder_id: str, access_token: str, agent_name: str, force: bool = False):
         """Async wrapper — offloads the blocking OneDrive ingestion to a thread.
 

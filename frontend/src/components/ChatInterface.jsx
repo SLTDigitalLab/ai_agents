@@ -657,9 +657,10 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: text,
+                    message: userMessage.text,
                     agent_id: agentConfig.id,
                     user_id: user.username || "anonymous",
+                    user_name: user.name || user.username || "Unknown User",
                     thread_id: threadId
                 }),
                 signal: controller.signal,

@@ -21,6 +21,7 @@ const SessionDetail = ({ session, agent, onClose }) => {
     const [feedback, setFeedback] = useState({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [sessionMeta, setSessionMeta] = useState(null);
 
     useEffect(() => {
         if (!session) return;
@@ -40,6 +41,7 @@ const SessionDetail = ({ session, agent, onClose }) => {
         ])
             .then(([msgData, fbData]) => {
                 setMessages(msgData.messages || []);
+                setSessionMeta(msgData);
                 // Flatten feedback: { index: "up" | "down" } (take the first user's rating)
                 const fbMap = {};
                 for (const [idx, users] of Object.entries(fbData.feedback || {})) {
@@ -80,9 +82,24 @@ const SessionDetail = ({ session, agent, onClose }) => {
                         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/80 backdrop-blur">
                             <div>
                                 <h3 className="text-white font-semibold text-lg">Session Detail</h3>
+
                                 <p className="text-white/40 text-xs font-mono mt-0.5 truncate max-w-md">
                                     {session.session_id}
                                 </p>
+
+                                <div className="mt-2">
+                                    <p className="text-cyan-300/90 text-sm font-semibold truncate max-w-md">
+                                        {sessionMeta?.user_name && sessionMeta.user_name !== sessionMeta?.user_id
+                                            ? sessionMeta.user_name
+                                            : session?.user_name && session.user_name !== session?.user_id
+                                                ? session.user_name
+                                                : 'Name not saved'}
+                                    </p>
+
+                                    <p className="text-white/35 text-xs truncate max-w-md">
+                                        {sessionMeta?.user_id || session?.user_id || 'Email not available'}
+                                    </p>
+                                </div>
                             </div>
                             <button
                                 onClick={onClose}
@@ -407,9 +424,10 @@ const ChatBrowser = () => {
                 >
                     <div className={tableHeaderClass}>
                         <div className="col-span-1">#</div>
-                        <div className="col-span-4">Session ID</div>
+                        <div className="col-span-2">User</div>
+                        <div className="col-span-3">Session ID</div>
                         <div className="col-span-2 text-center">Messages</div>
-                        <div className="col-span-5">Preview</div>
+                        <div className="col-span-4">Preview</div>
                     </div>
 
                     {loading && (
@@ -454,7 +472,19 @@ const ChatBrowser = () => {
                                 {skip + i + 1}
                             </div>
 
-                            <div className="col-span-4 text-white/70 text-sm font-mono truncate group-hover:text-cyan-300 transition-colors">
+                            <div className="col-span-2 min-w-0">
+                                <p className="text-white/75 text-sm font-semibold truncate">
+                                    {session.user_name && session.user_name !== session.user_id
+                                        ? session.user_name
+                                        : 'Name not saved'}
+                                </p>
+
+                                <p className="text-white/30 text-[11px] truncate">
+                                    {session.user_id || 'Email not available'}
+                                </p>
+                            </div>
+
+                            <div className="col-span-3 text-white/70 text-sm font-mono truncate group-hover:text-cyan-300 transition-colors">
                                 {session.session_id.substring(0, 20)}...
                             </div>
 
@@ -474,7 +504,7 @@ const ChatBrowser = () => {
                                 </span>
                             </div>
 
-                            <div className="col-span-5 text-white/50 text-sm truncate">
+                            <div className="col-span-4 text-white/50 text-sm truncate">
                                 {session.preview_text}
                             </div>
                         </motion.div>
