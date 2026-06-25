@@ -188,6 +188,7 @@ async def list_sessions(
         info = users_map.get(s["session_id"]) or {}
         s["user_id"] = info.get("user_id")
         s["user_name"] = info.get("user_name")
+        s["department"] = info.get("department")
         last_active = info.get("last_active_at")
         s["last_active_at"] = last_active.isoformat() if last_active else None
 
@@ -223,6 +224,7 @@ async def get_session_detail(agent: str, session_id: str):
                 "agent": agent,
                 "user_id": user_info.get("user_id"),
                 "user_name": user_info.get("user_name"),
+                "department": user_info.get("department"),
                 "messages": [],
             }
 
@@ -255,6 +257,7 @@ async def get_session_detail(agent: str, session_id: str):
             "agent": agent,
             "user_id": user_info.get("user_id"),
             "user_name": user_info.get("user_name"),
+            "department": user_info.get("department"),
             "messages": messages,
         }
 

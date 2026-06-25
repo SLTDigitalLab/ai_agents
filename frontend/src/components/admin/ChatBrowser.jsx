@@ -86,6 +86,11 @@ const SessionDetail = ({ session, agent, onClose }) => {
                                         {session.user_id}
                                     </p>
                                 )}
+                                {session.department && (
+                                    <span className="inline-block mt-1 bg-cyan-500/10 text-cyan-300/80 px-2 py-0.5 rounded text-xs font-medium">
+                                        {session.department}
+                                    </span>
+                                )}
                                 <p className="text-white/40 text-xs font-mono mt-0.5 truncate max-w-md">
                                     {session.session_id}
                                 </p>
@@ -369,8 +374,9 @@ const ChatBrowser = () => {
                     <div className="grid grid-cols-12 gap-4 px-6 py-3 border-b border-white/[0.06] bg-white/[0.02] text-white/40 text-xs uppercase tracking-wider font-semibold">
                         <div className="col-span-1">#</div>
                         <div className="col-span-3">User</div>
-                        <div className="col-span-3">Session ID</div>
-                        <div className="col-span-2 text-center">Messages</div>
+                        <div className="col-span-2">Department</div>
+                        <div className="col-span-2">Session ID</div>
+                        <div className="col-span-1 text-center">Msgs</div>
                         <div className="col-span-3">Preview</div>
                     </div>
 
@@ -431,11 +437,20 @@ const ChatBrowser = () => {
                                     </span>
                                 )}
                             </div>
-                            <div className="col-span-3 text-white/50 text-sm font-mono truncate">
-                                {session.session_id.substring(0, 18)}...
+                            <div className="col-span-2 truncate pr-2">
+                                {session.department ? (
+                                    <span className="inline-block max-w-full truncate bg-cyan-500/10 text-cyan-300/80 px-2 py-0.5 rounded text-xs font-medium align-middle">
+                                        {session.department}
+                                    </span>
+                                ) : (
+                                    <span className="text-white/20 text-xs">—</span>
+                                )}
                             </div>
-                            <div className="col-span-2 text-center">
-                                <span className="inline-flex items-center gap-1.5 bg-white/[0.06] text-white/60 px-2.5 py-1 rounded-full text-xs font-medium">
+                            <div className="col-span-2 text-white/50 text-sm font-mono truncate">
+                                {session.session_id.substring(0, 12)}...
+                            </div>
+                            <div className="col-span-1 text-center">
+                                <span className="inline-flex items-center gap-1 bg-white/[0.06] text-white/60 px-2 py-1 rounded-full text-xs font-medium">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
                                     </svg>
