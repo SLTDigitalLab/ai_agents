@@ -461,6 +461,7 @@ async def chat(request: ChatRequest):
                 user_id=request.user_id,
                 user_name=request.user_name,
                 department=request.department,
+                job_title=request.job_title,
             )
 
             # ── Run guardrail classifier FIRST ──────────────────────────

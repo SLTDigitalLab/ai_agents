@@ -12,6 +12,7 @@ MAX_AGENT_ID_CHARS = 40
 MAX_USER_ID_CHARS = 200
 MAX_USER_NAME_CHARS = 200
 MAX_DEPARTMENT_CHARS = 200
+MAX_JOB_TITLE_CHARS = 200
 
 CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")
 SAFE_AGENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -48,6 +49,11 @@ class ChatRequest(BaseModel):
         default=None,
         max_length=MAX_DEPARTMENT_CHARS,
         description="User's department from Azure AD, for admin attribution.",
+    )
+    job_title: Optional[str] = Field(
+        default=None,
+        max_length=MAX_JOB_TITLE_CHARS,
+        description="User's job title from Azure AD, for admin attribution.",
     )
     thread_id: Optional[str] = Field(
         default="default_thread",
@@ -113,6 +119,19 @@ class ChatRequest(BaseModel):
             return None
 
         # Strip control characters; keep the rest of the department name intact.
+        return CONTROL_CHAR_PATTERN.sub("", value)
+
+    @field_validator("job_title", mode="before")
+    @classmethod
+    def validate_job_title(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = str(value).strip()
+        if not value:
+            return None
+
+        # Strip control characters; keep the rest of the title intact.
         return CONTROL_CHAR_PATTERN.sub("", value)
 
     @field_validator("thread_id", mode="before")

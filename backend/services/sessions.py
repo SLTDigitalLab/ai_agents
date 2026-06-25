@@ -42,15 +42,20 @@ def ensure_sessions_table() -> None:
                         user_id        VARCHAR(255) NOT NULL,
                         user_name      VARCHAR(255),
                         department     VARCHAR(255),
+                        job_title      VARCHAR(255),
                         created_at     TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                         last_active_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                         PRIMARY KEY (agent_id, thread_id)
                     )
                 """)
-                # Migrate older deployments that predate the department column.
+                # Migrate older deployments that predate these columns.
                 cur.execute("""
                     ALTER TABLE public.chat_sessions
                     ADD COLUMN IF NOT EXISTS department VARCHAR(255)
+                """)
+                cur.execute("""
+                    ALTER TABLE public.chat_sessions
+                    ADD COLUMN IF NOT EXISTS job_title VARCHAR(255)
                 """)
                 cur.execute("""
                     CREATE INDEX IF NOT EXISTS idx_chat_sessions_user
@@ -67,12 +72,13 @@ def record_session(
     user_id: str,
     user_name: Optional[str] = None,
     department: Optional[str] = None,
+    job_title: Optional[str] = None,
 ) -> None:
     """Upsert the user identity for a session and bump its last-active time.
 
-    Safe to call on every chat turn. The display name and department are
-    preserved when a later turn omits them (COALESCE), so we never overwrite a
-    known value with NULL.
+    Safe to call on every chat turn. The display name, department and job title
+    are preserved when a later turn omits them (COALESCE), so we never overwrite
+    a known value with NULL.
     """
     if not thread_id or not user_id:
         return
@@ -84,14 +90,15 @@ def record_session(
             with conn.cursor() as cur:
                 cur.execute("""
                     INSERT INTO public.chat_sessions
-                        (agent_id, thread_id, user_id, user_name, department)
+                        (agent_id, thread_id, user_id, user_name, department, job_title)
                     VALUES
-                        (%(agent_id)s, %(thread_id)s, %(user_id)s, %(user_name)s, %(department)s)
+                        (%(agent_id)s, %(thread_id)s, %(user_id)s, %(user_name)s, %(department)s, %(job_title)s)
                     ON CONFLICT (agent_id, thread_id)
                     DO UPDATE SET
                         user_id        = EXCLUDED.user_id,
                         user_name      = COALESCE(EXCLUDED.user_name, public.chat_sessions.user_name),
                         department     = COALESCE(EXCLUDED.department, public.chat_sessions.department),
+                        job_title      = COALESCE(EXCLUDED.job_title, public.chat_sessions.job_title),
                         last_active_at = NOW()
                 """, {
                     "agent_id": agent_id,
@@ -99,6 +106,7 @@ def record_session(
                     "user_id": user_id,
                     "user_name": user_name or None,
                     "department": department or None,
+                    "job_title": job_title or None,
                 })
     except Exception as e:
         logger.warning(f"Failed to record session {agent_id}/{thread_id}: {e}")
@@ -118,7 +126,7 @@ def get_sessions_users(agent_id: str, thread_ids: list[str]) -> dict[str, dict]:
         with psycopg.connect(settings.POSTGRES_URL, autocommit=True) as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("""
-                    SELECT thread_id, user_id, user_name, department, created_at, last_active_at
+                    SELECT thread_id, user_id, user_name, department, job_title, created_at, last_active_at
                     FROM public.chat_sessions
                     WHERE agent_id = %(agent_id)s
                       AND thread_id = ANY(%(thread_ids)s)

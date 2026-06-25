@@ -8,7 +8,7 @@ import embryoLogo from '../assets/embryo-removebg.png';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Buttons from './Buttons';
-import { fetchUserDepartment } from '../userProfile';
+import { fetchUserProfile } from '../userProfile';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -637,18 +637,18 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const { instance, accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
 
-    // Department resolved from Azure AD (Graph /me). Best-effort: stays null
-    // if the directory has no department or the Graph call fails.
-    const [department, setDepartment] = useState(null);
+    // Department + job title resolved from Azure AD (Graph /me). Best-effort:
+    // stay null if the directory lacks them or the Graph call fails.
+    const [profile, setProfile] = useState({ department: null, jobTitle: null });
     useEffect(() => {
         let active = true;
         const account = accounts[0];
         if (!account) {
-            setDepartment(null);
+            setProfile({ department: null, jobTitle: null });
             return;
         }
-        fetchUserDepartment(instance, account).then((dept) => {
-            if (active) setDepartment(dept);
+        fetchUserProfile(instance, account).then((p) => {
+            if (active) setProfile(p);
         });
         return () => { active = false; };
     }, [instance, accounts]);
@@ -938,7 +938,8 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     agent_id: agentConfig.id,
                     user_id: user.username || "anonymous",
                     user_name: user.name || null,
-                    department: department || null,
+                    department: profile.department || null,
+                    job_title: profile.jobTitle || null,
                     thread_id: threadId
                 }),
                 signal: controller.signal,

@@ -86,10 +86,19 @@ const SessionDetail = ({ session, agent, onClose }) => {
                                         {session.user_id}
                                     </p>
                                 )}
-                                {session.department && (
-                                    <span className="inline-block mt-1 bg-cyan-500/10 text-cyan-300/80 px-2 py-0.5 rounded text-xs font-medium">
-                                        {session.department}
-                                    </span>
+                                {(session.department || session.job_title) && (
+                                    <p className="flex items-center gap-2 mt-1">
+                                        {session.department && (
+                                            <span className="inline-block bg-cyan-500/10 text-cyan-300/80 px-2 py-0.5 rounded text-xs font-medium">
+                                                {session.department}
+                                            </span>
+                                        )}
+                                        {session.job_title && (
+                                            <span className="text-white/40 text-xs">
+                                                {session.job_title}
+                                            </span>
+                                        )}
+                                    </p>
                                 )}
                                 <p className="text-white/40 text-xs font-mono mt-0.5 truncate max-w-md">
                                     {session.session_id}
@@ -444,6 +453,11 @@ const ChatBrowser = () => {
                                     </span>
                                 ) : (
                                     <span className="text-white/20 text-xs">—</span>
+                                )}
+                                {session.job_title && (
+                                    <span className="block text-white/30 text-xs truncate mt-0.5">
+                                        {session.job_title}
+                                    </span>
                                 )}
                             </div>
                             <div className="col-span-2 text-white/50 text-sm font-mono truncate">
