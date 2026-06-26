@@ -15,7 +15,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 import embryoLogo from './assets/embryo-removebg.png';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
-import VoiceAgentPage from './pages/VoiceAgentPage';
 
 // Initialize MSAL outside the components
 const msalInstance = new PublicClientApplication(msalConfig);
@@ -79,9 +78,6 @@ const COLOR_RGB = {
   teal:    '20, 184, 166',
   amber:   '245, 158, 11',
   pink:    '236, 72, 153',
-  violet:  '124, 58, 237',
-  green:   '22, 163, 74',
-  red:     '220, 38, 38',
 };
 const getAgentRGB = (colorStr) => {
   const m = colorStr?.match(/from-(\w+)-/);
@@ -385,46 +381,12 @@ const AgentWrapper = () => {
             )}
           </div>
 
-          {/* Right cluster: Voice Agent + SLT logo + mobile avatar for internal authenticated agents */}
-          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-            {/* Voice Agent entry: internal authenticated agents only */}
-            {!isPublicAgent && (
-              <AuthenticatedTemplate>
-                <motion.button
-                  type="button"
-                  onClick={() => { window.location.href = '/voice'; }}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  title="Voice Agent"
-                  className={`group flex items-center gap-2 pl-4 pr-3 sm:pl-5 sm:pr-4 py-2 sm:py-2.5 rounded-full bg-gradient-to-r ${agentConfig.color} text-white text-sm font-semibold shadow-md hover:shadow-lg ring-1 ring-black/5 transition-all shrink-0`}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                    <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
-                    <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
-                  </svg>
-                  <span className="hidden sm:inline">Voice Agent</span>
-                  {/* Arrow slides right on hover — hints the voice interface slides in */}
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    strokeWidth={2.2}
-                    stroke="currentColor"
-                    className="w-4 h-4 transition-transform duration-300 ease-out group-hover:translate-x-1"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
-                  </svg>
-                </motion.button>
-
-                {/* Divider keeps the button visually aligned with the logo */}
-                <span className="hidden sm:block w-px h-7 bg-gray-200 dark:bg-gray-700" />
-              </AuthenticatedTemplate>
-            )}
-
+          {/* Right cluster: SLT logo + mobile avatar for internal authenticated agents */}
+          <div className="flex items-center gap-2 sm:gap-0 shrink-0">
             <img
               src={sltLogo}
               alt="SLTMobitel"
-              className="h-7 sm:h-10 w-auto object-contain drop-shadow-sm shrink-0"
+              className="h-7 sm:h-10 w-auto drop-shadow-sm"
             />
 
             {!isPublicAgent && (
@@ -668,9 +630,6 @@ function App() {
             <Route path="/admin/ingestion" element={<IngestionPanel />} />
             <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
-
-          {/* Public live voice agent (no Microsoft auth, as originally built) */}
-          <Route path="/voice" element={<VoiceAgentPage />} />
 
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>

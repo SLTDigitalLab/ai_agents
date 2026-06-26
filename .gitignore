@@ -11,8 +11,6 @@ venv/
 .venv/
 env/
 .env
-.env.production
-env.production/
 
 # Node
 node_modules/
@@ -43,6 +41,3 @@ backend/service-account.json
 data/
 CLAUDE.md
 GEMINI.md
-backend/storage
-backend/routers/service-account.json
-service-account.json

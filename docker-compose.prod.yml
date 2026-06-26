@@ -50,7 +50,6 @@ services:
       - ./.env
     volumes:
       - ./backend:/app
-      - ./data/evidence:/app/storage/evidence
     restart: always
 
   frontend:

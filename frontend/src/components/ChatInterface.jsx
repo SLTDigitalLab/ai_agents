@@ -7,123 +7,552 @@ import EnterpriseForm from './forms/EnterpriseForm';
 import embryoLogo from '../assets/embryo-removebg.png';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import Buttons from './Buttons';
-import { fetchUserProfile } from '../userProfile';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+// All agents now use the normal LangGraph chat route.
+// LifeStore MCP tools are selected inside the backend LangGraph agent,
+// not forced from the frontend.
+const getChatEndpoint = () => `${API_URL}/api/v1/chat`;
+
+const HISTORY_TIMEOUT_MS = 8000;
+
+// Hidden backend metadata block used only by the frontend.
+// The backend can append this at the end of a streamed answer; the UI removes
+// it from visible text and renders proper product image cards instead.
+const PRODUCT_CARDS_START = '[LIFESTORE_PRODUCT_CARDS]';
+const PRODUCT_CARDS_END = '[/LIFESTORE_PRODUCT_CARDS]';
+const PRODUCT_CARD_MAX_ITEMS = 24;
+
+const getHistoryEndpoint = (agentId, threadId) => (
+    `${API_URL}/api/v1/chat/${agentId}/${threadId}`
+);
+
+const fetchWithTimeout = async (url, options = {}, timeoutMs = HISTORY_TIMEOUT_MS) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+        return await fetch(url, {
+            ...options,
+            signal: options.signal || controller.signal,
+        });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+};
+
+const localMessagesKey = (agentId, threadId) => `chat_messages_${agentId}_${threadId}`;
+
+const safeJsonParse = (value, fallback = null) => {
+    try {
+        return JSON.parse(value);
+    } catch {
+        return fallback;
+    }
+};
+
+const loadLocalMessages = (agentId, threadId) => {
+    const raw = localStorage.getItem(localMessagesKey(agentId, threadId));
+    const parsed = safeJsonParse(raw, []);
+    return Array.isArray(parsed) ? parsed : [];
+};
+
+const saveLocalMessages = (agentId, threadId, messages) => {
+    if (!agentId || !threadId || !Array.isArray(messages)) return;
+
+    const cleanMessages = messages
+        .filter((msg) => msg && (msg.type === 'user' || msg.text || msg.formType || (msg.productCards && msg.productCards.length)))
+        .map((msg) => ({
+            type: msg.type,
+            text: msg.text || '',
+            formType: msg.formType || null,
+            formData: msg.formData || null,
+            productCards: Array.isArray(msg.productCards) ? msg.productCards : [],
+            productCardDisplay: msg.productCardDisplay || null,
+            error: !!msg.error,
+            timestamp: msg.timestamp || Date.now(),
+        }));
+
+    localStorage.setItem(localMessagesKey(agentId, threadId), JSON.stringify(cleanMessages));
+};
+
+const localFeedbackKey = (agentId, threadId) => `chat_feedback_${agentId}_${threadId}`;
+
+const loadLocalFeedback = (agentId, threadId) => {
+    const raw = localStorage.getItem(localFeedbackKey(agentId, threadId));
+    const parsed = safeJsonParse(raw, {});
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+};
+
+const saveLocalFeedback = (agentId, threadId, feedbackMap) => {
+    if (!agentId || !threadId || !feedbackMap || typeof feedbackMap !== 'object') return;
+    localStorage.setItem(localFeedbackKey(agentId, threadId), JSON.stringify(feedbackMap));
+};
+
+const isBadLifeStoreImageUrl = (url) => {
+    const value = String(url || '').toLowerCase();
+
+    if (!value) return true;
+
+    const badHints = [
+        '970_90',
+        'inline-images/970_90',
+        'eteleshop',
+        'teleshop',
+        '/themes/shop/images/',
+        'union-pay',
+        'visa',
+        'master',
+        'american',
+        'payment',
+        'logo',
+        'sltmobitel',
+        'chat',
+        'footer',
+        'header',
+        'banner',
+        'sprite',
+        'loader',
+        'ajax-loader',
+        'placeholder',
+        'default-image',
+        'no-image',
+    ];
+
+    if (badHints.some((hint) => value.includes(hint))) return true;
+    if (value.startsWith('data:')) return true;
+    if (value.endsWith('.svg')) return true;
+
+    return false;
+};
+
+const isLikelyImageUrl = (url) => {
+    const value = String(url || '').toLowerCase();
+
+    if (!value.startsWith('http://') && !value.startsWith('https://')) return false;
+    if (isBadLifeStoreImageUrl(value)) return false;
+
+    return (
+        value.includes('/sites/default/files/') ||
+        value.match(/\.(jpg|jpeg|png|webp|gif)(\?|$)/)
+    );
+};
+
+const cleanProductText = (value) => {
+    if (value === null || value === undefined) return '';
+    return String(value).replace(/\s+/g, ' ').trim();
+};
+
+const normalizeProductCard = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const name = cleanProductText(
+        raw.name ||
+        raw.title ||
+        raw.product_name ||
+        raw.productName ||
+        raw.product ||
+        raw.item_name
+    );
+
+    const url = cleanProductText(
+        raw.url ||
+        raw.product_url ||
+        raw.productUrl ||
+        raw.link ||
+        raw.source_url
+    );
+
+    const imageUrl = cleanProductText(
+        raw.image_url ||
+        raw.imageUrl ||
+        raw.image ||
+        raw.thumbnail ||
+        raw.thumbnail_url ||
+        raw.photo
+    );
+
+    if (!name && !url && !imageUrl) return null;
+
+    return {
+        id: cleanProductText(raw.product_id || raw.id || raw.sku || url || name),
+        name: name || 'LifeStore product',
+        url,
+        image_url: isLikelyImageUrl(imageUrl) ? imageUrl : '',
+        price: cleanProductText(raw.price || raw.unit_price || raw.price_text),
+        price_value: raw.price_value ?? raw.unit_price_value ?? null,
+        currency: cleanProductText(raw.currency || 'LKR'),
+        stock_status: cleanProductText(raw.stock_status || raw.availability || raw.status),
+        category: cleanProductText(raw.category || raw.category_name),
+        product_type: cleanProductText(raw.product_type || raw.productType || raw.type),
+        brand: cleanProductText(raw.brand),
+        seller: cleanProductText(raw.seller || raw.sold_by),
+        description: cleanProductText(raw.short_description || raw.summary || raw.description),
+        key_details: Array.isArray(raw.key_details)
+            ? raw.key_details.map(cleanProductText).filter(Boolean).slice(0, 6)
+            : [],
+    };
+};
+
+const collectProductObjects = (value, output = [], depth = 0) => {
+    if (!value || depth > 5) return output;
+
+    if (Array.isArray(value)) {
+        value.forEach((item) => collectProductObjects(item, output, depth + 1));
+        return output;
+    }
+
+    if (typeof value !== 'object') return output;
+
+    const hasProductShape =
+        value.image_url ||
+        value.imageUrl ||
+        value.product_url ||
+        value.productUrl ||
+        value.price ||
+        value.price_value ||
+        value.stock_status ||
+        value.availability ||
+        value.category ||
+        value.brand;
+
+    const maybeCard = normalizeProductCard(value);
+    if (hasProductShape && maybeCard) {
+        output.push(maybeCard);
+    }
+
+    const likelyContainers = [
+        'products',
+        'items',
+        'results',
+        'matches',
+        'recommendations',
+        'data',
+        'product',
+        'tool_result',
+        'tool_results',
+        'metadata',
+    ];
+
+    for (const key of likelyContainers) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+            collectProductObjects(value[key], output, depth + 1);
+        }
+    }
+
+    return output;
+};
+
+const dedupeProductCards = (cards) => {
+    const seen = new Set();
+    const deduped = [];
+
+    for (const card of cards) {
+        if (!card) continue;
+        const key = card.url || card.id || card.name;
+        if (!key || seen.has(key)) continue;
+
+        seen.add(key);
+        deduped.push(card);
+    }
+
+    return deduped;
+};
+
+const hasRenderableProductImage = (product) => {
+    return !!product && isLikelyImageUrl(product.image_url);
+};
+
+const prepareProductCardsForDisplay = (cards, maxItems = PRODUCT_CARD_MAX_ITEMS) => {
+    const values = Array.isArray(cards) ? cards : [];
+    return dedupeProductCards(values)
+        .filter(hasRenderableProductImage)
+        .slice(0, maxItems);
+};
+
+const normalizeProductDisplay = (display, productCount = 0) => {
+    const value = String(display || '').toLowerCase().trim();
+
+    if (['comparison', 'compare', 'comparison_grid', 'comparison-image-grid', 'comparison_image_grid'].includes(value)) {
+        return 'comparison';
+    }
+
+    if (['carousel', 'slideshow', 'slider', 'multi', 'multiple'].includes(value)) {
+        return 'carousel';
+    }
+
+    if (['single', 'card', 'product'].includes(value)) {
+        return 'single';
+    }
+
+    if (productCount > 1) return 'carousel';
+    if (productCount === 1) return 'single';
+    return null;
+};
+
+const mergeProductDisplay = (...displays) => {
+    const normalized = displays
+        .map((display) => normalizeProductDisplay(display))
+        .filter(Boolean);
+
+    if (normalized.includes('comparison')) return 'comparison';
+    if (normalized.includes('carousel')) return 'carousel';
+    if (normalized.includes('single')) return 'single';
+    return null;
+};
+
+const inferProductDisplayFromJsonResponse = (data, cardCount = 0) => {
+    if (!data || typeof data !== 'object') {
+        return normalizeProductDisplay(null, cardCount);
+    }
+
+    const frontendContract = data.frontend_contract || data.frontendContract || {};
+    const renderAs = String(frontendContract.render_as || data.render_as || data.renderAs || '').toLowerCase();
+    const display = data.display || data.card_display || data.productCardDisplay || frontendContract.display;
+
+    if (renderAs.includes('comparison')) {
+        return 'comparison';
+    }
+
+    return normalizeProductDisplay(display, cardCount);
+};
+
+const extractProductCardPayloadFromJsonResponse = (data) => {
+    if (!data || typeof data !== 'object') {
+        return { cards: [], display: null };
+    }
+
+    const explicitProducts = data.product_cards || data.cards || data.products;
+    let cards = [];
+
+    if (explicitProducts) {
+        const values = Array.isArray(explicitProducts) ? explicitProducts : [explicitProducts];
+        cards = prepareProductCardsForDisplay(values.map(normalizeProductCard).filter(Boolean));
+    } else {
+        cards = prepareProductCardsForDisplay(collectProductObjects(data));
+    }
+
+    return {
+        cards,
+        display: inferProductDisplayFromJsonResponse(data, cards.length),
+    };
+};
+
+const extractProductCardsFromJsonResponse = (data) => {
+    return extractProductCardPayloadFromJsonResponse(data).cards;
+};
+
+const removeBadImageUrlLines = (text) => {
+    if (!text) return '';
+
+    return String(text)
+        .split('\n')
+        .filter((line) => {
+            const low = line.toLowerCase();
+            const hasDirectImageUrl = /https?:\/\/\S+\.(jpg|jpeg|png|webp|gif)(\?\S*)?/i.test(line);
+            const looksLikeImageField = /(^|\b)(image[_\s-]*url|image url|thumbnail[_\s-]*url)(\b|\s*:)/i.test(line);
+
+            // Keep normal product links, but remove raw image URL lines.
+            if (looksLikeImageField) return false;
+            if (hasDirectImageUrl && low.includes('image')) return false;
+            if (isBadLifeStoreImageUrl(low)) return false;
+
+            return true;
+        })
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
+
+const extractEmbeddedProductCardsFromText = (text) => {
+    const sourceText = String(text || '');
+    let cleanText = sourceText;
+    const extractedCards = [];
+    let extractedDisplay = null;
+
+    while (true) {
+        const startIdx = cleanText.indexOf(PRODUCT_CARDS_START);
+        if (startIdx === -1) break;
+
+        const payloadStart = startIdx + PRODUCT_CARDS_START.length;
+        const endIdx = cleanText.indexOf(PRODUCT_CARDS_END, payloadStart);
+
+        // Hide an incomplete metadata block while the stream is still arriving.
+        if (endIdx === -1) {
+            cleanText = cleanText.slice(0, startIdx).trimEnd();
+            break;
+        }
+
+        const rawPayload = cleanText.slice(payloadStart, endIdx).trim();
+        const before = cleanText.slice(0, startIdx);
+        const after = cleanText.slice(endIdx + PRODUCT_CARDS_END.length);
+
+        try {
+            const parsed = JSON.parse(rawPayload);
+            const payload = extractProductCardPayloadFromJsonResponse(parsed);
+            extractedCards.push(...payload.cards);
+            extractedDisplay = mergeProductDisplay(extractedDisplay, payload.display);
+        } catch (error) {
+            console.warn('Failed to parse LifeStore product cards payload:', error);
+        }
+
+        cleanText = `${before}${after}`;
+    }
+
+    const productCards = prepareProductCardsForDisplay(extractedCards);
+
+    return {
+        text: removeBadImageUrlLines(cleanText).trim(),
+        productCards,
+        productCardDisplay: mergeProductDisplay(extractedDisplay, normalizeProductDisplay(null, productCards.length)),
+    };
+};
+
+const tryParseJsonPayload = (text) => {
+    if (!text || typeof text !== 'string') return null;
+
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+
+    try {
+        return JSON.parse(trimmed);
+    } catch {
+        // Continue below.
+    }
+
+    // Supports simple SSE-style streams: data: { ... }
+    const dataLines = trimmed
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trim())
+        .filter((line) => line && line !== '[DONE]');
+
+    for (let i = dataLines.length - 1; i >= 0; i -= 1) {
+        try {
+            return JSON.parse(dataLines[i]);
+        } catch {
+            // Keep checking earlier lines.
+        }
+    }
+
+    return null;
+};
+
+const extractTextFromJsonResponse = (data) => {
+    if (!data) return '';
+
+    let text =
+        data.reply ||
+        data.response ||
+        data.answer ||
+        data.message ||
+        data.content ||
+        data.text ||
+        '';
+
+    if (typeof text !== 'string') {
+        text = JSON.stringify(text, null, 2);
+    }
+
+    text = removeBadImageUrlLines(text);
+
+    const sources = data.sources || data.source_documents || data.references || [];
+    if (Array.isArray(sources) && sources.length > 0) {
+        const renderedSources = sources
+            .map((src, index) => {
+                const name = src.name || src.title || src.source || src.url || `Source ${index + 1}`;
+                const url = src.url || src.link || src.source_url;
+                return url ? `[${name}](${url})` : null;
+            })
+            .filter(Boolean);
+
+        if (renderedSources.length > 0) {
+            text += `\n\nSources:\n${renderedSources.join('\n')}`;
+        }
+    }
+
+    return text;
+};
+
+const buildBotMessageFromJsonResponse = (data) => {
+    const directPayload = extractProductCardPayloadFromJsonResponse(data);
+    let text = extractTextFromJsonResponse(data);
+    const embedded = extractEmbeddedProductCardsFromText(text);
+    text = embedded.text;
+
+    let formType = null;
+
+    for (const [token, type] of Object.entries(FORM_TOKENS)) {
+        if (text.includes(token)) {
+            formType = type;
+            text = text.replace(token, '').trim();
+            break;
+        }
+    }
+
+    const productCards = prepareProductCardsForDisplay([...directPayload.cards, ...embedded.productCards]);
+
+    return {
+        type: 'bot',
+        text,
+        productCards,
+        productCardDisplay: mergeProductDisplay(
+            directPayload.display,
+            embedded.productCardDisplay,
+            normalizeProductDisplay(null, productCards.length),
+        ),
+        formType,
+        formData: data.form_payload || data.formData || null,
+        timestamp: Date.now(),
+    };
+};
+
+const mapHistoryMessage = (msg) => {
+    let text = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '');
+    let formType = null;
+
+    for (const [token, type] of Object.entries(FORM_TOKENS)) {
+        if (text.includes(token)) {
+            formType = type;
+            text = text.replace(token, '').trim();
+            break;
+        }
+    }
+
+    const embedded = extractEmbeddedProductCardsFromText(text);
+    text = embedded.text;
+
+    const directPayload = extractProductCardPayloadFromJsonResponse(msg);
+    const productCards = prepareProductCardsForDisplay([
+        ...directPayload.cards,
+        ...embedded.productCards,
+    ]);
+
+    return {
+        type: msg.type === 'human' || msg.role === 'user' ? 'user' : 'bot',
+        text: removeBadImageUrlLines(text),
+        formType,
+        formData: msg.formData || msg.form_payload || null,
+        productCards,
+        productCardDisplay: mergeProductDisplay(
+            msg.productCardDisplay,
+            directPayload.display,
+            embedded.productCardDisplay,
+            normalizeProductDisplay(null, productCards.length),
+        ),
+        timestamp: msg.timestamp || Date.now(),
+    };
+};
+
+
 
 // Generative UI trigger tokens emitted by the backend
 const FORM_TOKENS = {
     '[RENDER_LIFESTORE_FORM]': 'lifestore',
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
-};
-
-// ── Visual/table evidence emitted by the backend ────────────────────────
-const EVIDENCE_OPEN = '[[EVIDENCE_JSON]]';
-const EVIDENCE_CLOSE = '[[/EVIDENCE_JSON]]';
-
-// Product agents skip client-side PII masking so SKU/model numbers in
-// queries are not corrupted. Mirrors PII_MASK_EXEMPT_AGENTS in the backend.
-const PII_MASK_EXEMPT_AGENTS = ['lifestore', 'enterprise'];
-
-const maskPII = (text = '') => {
-    return text
-        // Email addresses
-        .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[EMAIL]')
-
-        // Sri Lankan mobile numbers: +947XXXXXXXX / 947XXXXXXXX / 07XXXXXXXX
-        .replace(/\b(?:\+?94|0)?7\d{8}\b/g, '[PHONE]')
-
-        // Sri Lankan NIC: old 123456789V / new 12 digits
-        .replace(/\b(?:\d{9}[VXvx]|\d{12})\b/g, '[NIC]')
-
-        // Credit/debit-card-like long numbers
-        .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[CARD_NUMBER]')
-
-        // Common API keys / JWT / bearer-token-like secrets
-        .replace(
-            /\b(?:bearer\s+)?(eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,})\b/gi,
-            '[SECRET]'
-        );
-};
-
-const parseEvidencePayload = (text = '') => {
-    const openIndex = text.indexOf(EVIDENCE_OPEN);
-
-    if (openIndex === -1) {
-        return { text, evidence: null };
-    }
-
-    const closeIndex = text.indexOf(EVIDENCE_CLOSE, openIndex + EVIDENCE_OPEN.length);
-
-    // If evidence JSON is still streaming, hide the partial block from UI
-    if (closeIndex === -1) {
-        return {
-            text: text.slice(0, openIndex).trimEnd(),
-            evidence: null,
-        };
-    }
-
-    const before = text.slice(0, openIndex);
-    const jsonText = text.slice(openIndex + EVIDENCE_OPEN.length, closeIndex);
-    const after = text.slice(closeIndex + EVIDENCE_CLOSE.length);
-
-    try {
-        const payload = JSON.parse(jsonText);
-        const evidence = Array.isArray(payload?.items) ? payload.items : [];
-
-        return {
-            text: `${before}${after}`.trimEnd(),
-            evidence,
-        };
-    } catch (error) {
-        console.error('Failed to parse evidence payload:', error);
-        return {
-            text: `${before}${after}`.trimEnd(),
-            evidence: null,
-        };
-    }
-};
-
-const resolveEvidenceUrl = (url) => {
-    if (!url) return '';
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-
-    const normalizedPath = url.startsWith('/') ? url : `/${url}`;
-    return `${API_URL}${normalizedPath}`;
-};
-
-const ImagePreviewModal = ({ image, onClose }) => {
-    if (!image) return null;
-
-    return (
-        <div
-            className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-            onClick={onClose}
-        >
-            <button
-                type="button"
-                onClick={onClose}
-                className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 text-gray-700 text-2xl leading-none shadow-lg hover:bg-white"
-                aria-label="Close image preview"
-            >
-                ×
-            </button>
-
-            <motion.div
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="max-w-[95vw] max-h-[92vh]"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <img
-                    src={image.url}
-                    alt={image.alt || 'Evidence preview'}
-                    className="max-w-[95vw] max-h-[92vh] object-contain rounded-2xl bg-white shadow-2xl"
-                />
-            </motion.div>
-        </div>
-    );
 };
 
 // Greeting pool for the idle landing screen.
@@ -164,6 +593,29 @@ const sanitizeMarkdownBold = (text) => {
     if (positions.length % 2 === 0) return text;
     const last = positions[positions.length - 1];
     return text.slice(0, last) + text.slice(last + 2);
+};
+
+const normalizeAssistantMarkdown = (text) => {
+    if (!text) return text;
+
+    let output = String(text)
+        .replace(/\r/g, '')
+        .replace(/\s*\|\|\s*/g, '\n')
+        .replace(/Products found:\s*\*\*(\d+)\*\*\s*Products/gi, 'Products found: **$1**')
+        .replace(/Products found:\s*(\d+)\s*Products/gi, 'Products found: **$1**')
+        .replace(/(Products found:\s*\*\*\d+\*\*)\s*\|\s*Product\s*\|/gi, '$1\n\n**Products**\n\n| Product |')
+        .replace(/(Products found:\s*\d+)\s*\|\s*Product\s*\|/gi, '$1\n\n**Products**\n\n| Product |')
+        .replace(/\s+(\*\*(Overview|Products|Important notes|Key details|Best for|Summary|Key differences)\*\*)/g, '\n\n$1\n')
+        .replace(/(\|\s*Product\s*\|[^\n]*)\s+(\|\s*-{3,})/g, '$1\n$2')
+        .replace(/(\|\s*-{3,}[^\n]*)\s+(\|\s*\*\*)/g, '$1\n$2')
+        .replace(/\n{3,}/g, '\n\n');
+
+    // If the model accidentally streams a table row on the same line as prose,
+    // make ReactMarkdown/GFM see it as a real table instead of paragraph text.
+    output = output.replace(/([^\n])\s+(\|\s*Product\s*\|)/g, '$1\n\n$2');
+    output = output.replace(/([^\n])\s+(\|\s*Feature\s*\|)/g, '$1\n\n$2');
+
+    return output.trim();
 };
 
 // Utility function to append incoming text chunks to the current message text
@@ -285,147 +737,240 @@ const SourcesSection = ({ sources, color }) => {
     );
 };
 
-// ── Relevant Evidence (cropped PDF images / extracted tables) ───────────
-const EvidenceImageCard = ({ item, onImageClick }) => {
-    const imageUrl = resolveEvidenceUrl(item.url);
-    const imageAlt = item.title || item.source || 'Evidence image';
+
+const ProductImage = ({ src, name }) => {
+    const [failed, setFailed] = useState(false);
+
+    if (!src || failed || !isLikelyImageUrl(src)) {
+        return null;
+    }
+
+    return (
+        <img
+            src={src}
+            alt={name || "LifeStore product"}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setFailed(true)}
+            className="w-full h-full object-contain bg-white"
+        />
+    );
+};
+
+const ProductCard = ({ product, color, compact = false }) => {
+    const availability = product.stock_status || '';
+    const isInStock = availability.toLowerCase().includes('in_stock') || availability.toLowerCase().includes('in stock');
 
     return (
         <motion.div
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="overflow-hidden rounded-3xl border border-gray-200/80 dark:border-gray-700/80 bg-white/95 dark:bg-gray-900/80 shadow-[0_18px_60px_-28px_rgba(0,0,0,0.35)]"
         >
-            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
-                <p className="text-xs font-bold text-gray-700">
-                    {item.title || 'Image reference'}
-                </p>
-                <p className="text-[0.68rem] text-gray-400 mt-0.5">
-                    {item.source}
-                    {item.page ? ` — Page ${item.page}` : ''}
-                </p>
+            <div className={`${compact ? 'h-48' : 'h-56'} w-full bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800`}>
+                <ProductImage src={product.image_url} name={product.name} />
             </div>
 
-            <div className="p-3 bg-white">
-                <button
-                    type="button"
-                    onClick={() => onImageClick?.({ url: imageUrl, alt: imageAlt })}
-                    className="block w-full cursor-zoom-in"
-                    title="Click to preview image"
-                >
-                    <img
-                        src={imageUrl}
-                        alt={imageAlt}
-                        className="w-full max-h-[420px] object-contain rounded-xl border border-gray-100 bg-gray-50"
-                        loading="lazy"
-                    />
-                </button>
-            </div>
+            <div className="p-4 sm:p-5">
+                <h3 className="text-sm sm:text-base font-semibold text-gray-900 dark:text-gray-100 leading-snug">
+                    {product.name}
+                </h3>
 
-            {item.link && item.link !== '#' && (
-                <div className="px-4 pb-3">
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                    {product.price && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+                            {product.price}
+                        </span>
+                    )}
+
+                    {availability && (
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${isInStock
+                                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                                : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300'
+                            }`}>
+                            {availability.replaceAll('_', ' ')}
+                        </span>
+                    )}
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                    {product.brand && <p><span className="font-medium text-gray-600 dark:text-gray-300">Brand:</span> {product.brand}</p>}
+                    {product.category && <p><span className="font-medium text-gray-600 dark:text-gray-300">Category:</span> {product.category}</p>}
+                    {product.product_type && <p><span className="font-medium text-gray-600 dark:text-gray-300">Product type:</span> {product.product_type}</p>}
+                    {product.seller && <p><span className="font-medium text-gray-600 dark:text-gray-300">Seller:</span> {product.seller}</p>}
+                </div>
+
+                {Array.isArray(product.key_details) && product.key_details.length > 0 && (
+                    <ul className="mt-3 list-disc pl-4 text-xs leading-relaxed text-gray-500 dark:text-gray-400 space-y-1">
+                        {product.key_details.slice(0, 3).map((detail, detailIndex) => (
+                            <li key={detailIndex}>{detail}</li>
+                        ))}
+                    </ul>
+                )}
+
+                {product.description && (!product.key_details || product.key_details.length === 0) && (
+                    <p className="mt-3 text-xs leading-relaxed text-gray-500 dark:text-gray-400 line-clamp-3">
+                        {product.description}
+                    </p>
+                )}
+
+                {product.url && (
                     <a
-                        href={item.link}
+                        href={product.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-xs font-semibold text-blue-500 hover:underline"
+                        className={`mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-tr ${color} px-4 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95`}
                     >
-                        Open original source
+                        View product
                     </a>
-                </div>
-            )}
+                )}
+            </div>
         </motion.div>
     );
 };
 
-const EvidenceTableCard = ({ item }) => (
-    <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
-    >
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
-            <p className="text-xs font-bold text-gray-700">
-                {item.title || 'Table reference'}
-            </p>
-            <p className="text-[0.68rem] text-gray-400 mt-0.5">
-                {item.source}
-                {item.page ? ` — Page ${item.page}` : ''}
-            </p>
-        </div>
+const ComparisonProductCards = ({ products, color }) => {
+    const safeProducts = useMemo(() => prepareProductCardsForDisplay(products, 6), [products]);
 
-        <div className="p-3 max-h-[420px] overflow-auto">
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                    table: ({ node, ...props }) => (
-                        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-                            <table className="w-full text-xs text-left border-collapse" {...props} />
-                        </div>
-                    ),
-                    th: ({ node, ...props }) => (
-                        <th className="bg-gray-50 px-3 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />
-                    ),
-                    td: ({ node, ...props }) => (
-                        <td className="px-3 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />
-                    ),
-                    tr: ({ node, ...props }) => (
-                        <tr className="even:bg-gray-50/50" {...props} />
-                    ),
-                    p: ({ node, ...props }) => (
-                        <p className="whitespace-pre-wrap text-xs text-gray-600 mb-0" {...props} />
-                    ),
-                }}
-            >
-                {item.content || ''}
-            </ReactMarkdown>
-        </div>
-
-        {item.link && item.link !== '#' && (
-            <div className="px-4 pb-3">
-                <a
-                    href={item.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-semibold text-blue-500 hover:underline"
-                >
-                    Open original source
-                </a>
-            </div>
-        )}
-    </motion.div>
-);
-
-const EvidenceSection = ({ evidence, color, onImageClick }) => {
-    const items = Array.isArray(evidence)
-        ? evidence.filter(item => item?.type === 'image' || item?.type === 'table')
-        : [];
-
-    if (items.length === 0) return null;
+    if (safeProducts.length === 0) return null;
 
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 10 }}
+        <motion.section
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            className="mt-4 pt-3 border-t border-gray-100/60"
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mt-5 mb-1"
         >
-            <div className="flex items-center gap-2 mb-2.5">
-                <div className={`w-1 h-3.5 rounded-full bg-gradient-to-b ${color}`} />
-                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400">
-                    Relevant Evidence
-                </span>
+            <div className="mb-3">
+                <p className="text-[0.7rem] uppercase tracking-[0.18em] font-bold text-gray-400 dark:text-gray-500">
+                    Visual comparison
+                </p>
+                <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                    Compared LifeStore products with images
+                </h3>
             </div>
 
-            <div className="space-y-3">
-                {items.map((item, i) => (
-                    item.type === 'image'
-                        ? <EvidenceImageCard key={i} item={item} onImageClick={onImageClick} />
-                        : <EvidenceTableCard key={i} item={item} />
+            <div className={`grid grid-cols-1 ${safeProducts.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-3'} gap-4`}>
+                {safeProducts.map((product, index) => (
+                    <div key={product.id || product.url || product.name || index} className="relative">
+                        <div className={`absolute -top-2 left-4 z-10 rounded-full bg-gradient-to-tr ${color} px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wide text-white shadow-sm`}>
+                            Product {index + 1}
+                        </div>
+                        <ProductCard product={product} color={color} compact />
+                    </div>
                 ))}
             </div>
-        </motion.div>
+        </motion.section>
     );
 };
+
+const ProductCards = ({ products, color, display = null }) => {
+    const safeProducts = useMemo(() => prepareProductCardsForDisplay(products), [products]);
+    const [activeIndex, setActiveIndex] = useState(0);
+
+    useEffect(() => {
+        setActiveIndex((prev) => {
+            if (safeProducts.length === 0) return 0;
+            return Math.min(prev, safeProducts.length - 1);
+        });
+    }, [safeProducts.length]);
+
+    if (safeProducts.length === 0) return null;
+
+    const displayMode = normalizeProductDisplay(display, safeProducts.length);
+
+    if (displayMode === 'comparison' && safeProducts.length > 1) {
+        return <ComparisonProductCards products={safeProducts} color={color} />;
+    }
+
+    const isCarousel = safeProducts.length > 1;
+    const activeProduct = safeProducts[Math.min(activeIndex, safeProducts.length - 1)];
+
+    const goPrevious = () => {
+        setActiveIndex((prev) => (prev - 1 + safeProducts.length) % safeProducts.length);
+    };
+
+    const goNext = () => {
+        setActiveIndex((prev) => (prev + 1) % safeProducts.length);
+    };
+
+    return (
+        <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mt-5 mb-1"
+        >
+            <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                    <p className="text-[0.7rem] uppercase tracking-[0.18em] font-bold text-gray-400 dark:text-gray-500">
+                        {isCarousel ? 'Product slideshow' : 'Product card'}
+                    </p>
+                    <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                        {isCarousel ? 'Matched LifeStore products with images' : 'Matched LifeStore product'}
+                    </h3>
+                </div>
+
+                {isCarousel && (
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                            {activeIndex + 1} / {safeProducts.length}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={goPrevious}
+                            className="h-8 w-8 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white shadow-sm"
+                            title="Previous product"
+                        >
+                            ‹
+                        </button>
+                        <button
+                            type="button"
+                            onClick={goNext}
+                            className={`h-8 w-8 rounded-full bg-gradient-to-tr ${color} text-white shadow-sm hover:opacity-95`}
+                            title="Next product"
+                        >
+                            ›
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <div className="relative overflow-hidden">
+                <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                        key={activeProduct.id || activeProduct.url || activeProduct.name || activeIndex}
+                        initial={{ opacity: 0, x: 18 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -18 }}
+                        transition={{ duration: 0.22, ease: 'easeOut' }}
+                    >
+                        <ProductCard product={activeProduct} color={color} compact={isCarousel} />
+                    </motion.div>
+                </AnimatePresence>
+            </div>
+
+            {isCarousel && (
+                <div className="mt-1.5 flex justify-center gap-1.5 overflow-x-auto px-2 pb-1">
+                    {safeProducts.map((product, index) => (
+                        <button
+                            key={product.id || product.url || index}
+                            type="button"
+                            onClick={() => setActiveIndex(index)}
+                            aria-label={`Show product ${index + 1}`}
+                            className={`h-1.5 rounded-full transition-all ${index === activeIndex
+                                    ? 'w-6 bg-gray-800 dark:bg-gray-100'
+                                    : 'w-1.5 bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600'
+                                }`}
+                        />
+                    ))}
+                </div>
+            )}
+        </motion.section>
+    );
+};
+
 
 // ── Copy-to-clipboard helper used by message and code-block buttons ─────────
 const useCopy = () => {
@@ -498,60 +1043,63 @@ const CodeBlock = ({ children, ...props }) => {
 };
 
 // ── Feedback Buttons Component ──────────────────────────────────────
-const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, existingRating, onFeedback }) => {
+const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRating, onFeedback }) => {
     const [rating, setRating] = useState(existingRating || null);
     const [submitting, setSubmitting] = useState(false);
+    const [error, setError] = useState(false);
 
     useEffect(() => {
         setRating(existingRating || null);
     }, [existingRating]);
 
+    const persistLocalFeedback = (finalRating) => {
+        const current = loadLocalFeedback(agentId, threadId);
+        const next = { ...current };
+
+        if (finalRating) {
+            next[messageIndex] = finalRating;
+        } else {
+            delete next[messageIndex];
+        }
+
+        saveLocalFeedback(agentId, threadId, next);
+    };
+
     const handleFeedback = async (newRating) => {
         if (submitting) return;
 
-        // Toggle off if same rating clicked
         const finalRating = rating === newRating ? null : newRating;
+
+        // Make the button work immediately even if the optional backend feedback
+        // route is not available in this MCP frontend test project.
+        setRating(finalRating);
+        setError(false);
+        persistLocalFeedback(finalRating);
+        onFeedback?.(messageIndex, finalRating);
 
         setSubmitting(true);
         try {
-            if (!finalRating) {
-                // Remove feedback from database
-                const res = await fetch(`${API_URL}/api/v1/feedback`, {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        agent_id: agentId,
-                        thread_id: threadId,
-                        message_index: messageIndex,
-                        rating: newRating,
-                        user_id: userId,
-                    }),
-                });
-                if (res.ok) {
-                    setRating(null);
-                    onFeedback?.(messageIndex, null);
-                }
-            } else {
-                // Submit or update feedback
-                const res = await fetch(`${API_URL}/api/v1/feedback`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        agent_id: agentId,
-                        thread_id: threadId,
-                        message_index: messageIndex,
-                        rating: finalRating,
-                        user_id: userId,
-                        user_name: userName || null,
-                    }),
-                });
-                if (res.ok) {
-                    setRating(finalRating);
-                    onFeedback?.(messageIndex, finalRating);
-                }
+            const res = await fetch(`${API_URL}/api/v1/feedback`, {
+                method: finalRating ? 'POST' : 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    agent_id: agentId,
+                    thread_id: threadId,
+                    message_index: messageIndex,
+                    rating: finalRating || newRating,
+                    user_id: userId,
+                }),
+            });
+
+            // Keep the local rating even when this demo backend does not expose
+            // /api/v1/feedback. The amber title simply warns that it was not
+            // synced to the server.
+            if (!res.ok) {
+                setError(true);
             }
         } catch (err) {
-            console.error('Feedback submission failed:', err);
+            console.warn('Feedback saved locally but backend sync failed:', err);
+            setError(true);
         } finally {
             setSubmitting(false);
         }
@@ -560,26 +1108,32 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, ex
     return (
         <>
             <button
+                type="button"
                 onClick={() => handleFeedback('up')}
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'up'
                     ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
+                    : error
+                        ? 'text-amber-500 bg-amber-50 dark:bg-amber-500/10'
+                        : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
                     }`}
-                title="Helpful"
+                title={error ? "Saved locally. Backend feedback sync failed." : "Helpful"}
             >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                     <path d="M1 8.998a1 1 0 011-1h.764a1.483 1.483 0 00-.076.506v5.996a1.483 1.483 0 00.076.506H2a1 1 0 01-1-1V8.998zM5.25 7.726a2 2 0 01.944-1.697l3.476-2.14a1.5 1.5 0 012.33 1.25v2.363h2.5a2 2 0 011.96 2.4l-.782 3.908A2 2 0 0113.72 15.5H5.25V7.726z" />
                 </svg>
             </button>
             <button
+                type="button"
                 onClick={() => handleFeedback('down')}
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'down'
                     ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
+                    : error
+                        ? 'text-amber-500 bg-amber-50 dark:bg-amber-500/10'
+                        : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
                     }`}
-                title="Not helpful"
+                title={error ? "Saved locally. Backend feedback sync failed." : "Not helpful"}
             >
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
                     <path d="M19 11.002a1 1 0 01-1 1h-.764a1.483 1.483 0 00.076-.506V5.5a1.483 1.483 0 00-.076-.506H18a1 1 0 011 1v5.008zM14.75 12.274a2 2 0 01-.944 1.697l-3.476 2.14a1.5 1.5 0 01-2.33-1.25V12.5h-2.5a2 2 0 01-1.96-2.4l.782-3.908A2 2 0 016.28 4.5h8.47v7.774z" />
@@ -634,39 +1188,24 @@ const ScrollToLatestPill = ({ onClick, color }) => (
 );
 
 const ChatInterface = forwardRef(({ agentConfig }, ref) => {
-    const { instance, accounts } = useMsal();
+    const { accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
-
-    // Department + job title resolved from Azure AD (Graph /me). Best-effort:
-    // stay null if the directory lacks them or the Graph call fails.
-    const [profile, setProfile] = useState({ department: null, jobTitle: null });
-    useEffect(() => {
-        let active = true;
-        const account = accounts[0];
-        if (!account) {
-            setProfile({ department: null, jobTitle: null });
-            return;
-        }
-        fetchUserProfile(instance, account).then((p) => {
-            if (active) setProfile(p);
-        });
-        return () => { active = false; };
-    }, [instance, accounts]);
 
     // State for thread ID and messages
     const [threadId, setThreadId] = useState('');
     const [messages, setMessages] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [feedbackMap, setFeedbackMap] = useState({}); // { messageIndex: rating }
-    const [previewImage, setPreviewImage] = useState(null);
 
     // Effect to handle Agent switching:
-    // 1. Get/Create thread_id for the specific agent
-    // 2. Load history if exists, else reset messages
+    // 1. Get/create a thread_id per agent.
+    // 2. Immediately restore browser-saved messages on refresh.
+    // 3. Then try backend history without letting the loading overlay hang forever.
     useEffect(() => {
         if (!agentConfig?.id) return;
 
-        // ── CRITICAL: Immediately clear stale state to prevent race conditions ──
+        let isMounted = true;
+
         setThreadId('');
         setMessages([]);
         setFeedbackMap({});
@@ -682,68 +1221,91 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 sessionStorage.setItem(storageKey, currentThreadId);
             }
 
+            if (!isMounted) return;
             setThreadId(currentThreadId);
 
-            if (isExistingSession) {
-                try {
-                    const response = await fetch(`${API_URL}/api/v1/chat/${agentConfig.id}/${currentThreadId}`);
-                    if (!response.ok) throw new Error("Failed to fetch history");
+            const localMessages = loadLocalMessages(agentConfig.id, currentThreadId);
+            const localFeedback = loadLocalFeedback(agentConfig.id, currentThreadId);
 
-                    const data = await response.json();
-                    if (data.messages && data.messages.length > 0) {
-                        const mappedMessages = data.messages.map(msg => {
-                            let text = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-                            let formType = null;
-                            for (const [token, type] of Object.entries(FORM_TOKENS)) {
-                                if (text.includes(token)) {
-                                    formType = type;
-                                    text = text.replace(token, '').trim();
-                                    break;
-                                }
-                            }
-                            return {
-                                type: msg.type === 'human' ? 'user' : 'bot',
-                                text,
-                                formType,
-                                evidence: [],
-                            };
-                        });
-                        setMessages(mappedMessages);
-
-                        try {
-                            const fbRes = await fetch(`${API_URL}/api/v1/feedback/${agentConfig.id}/${currentThreadId}`);
-                            if (fbRes.ok) {
-                                const fbData = await fbRes.json();
-                                const userId = user.username || "anonymous";
-                                const map = {};
-                                for (const [idx, users] of Object.entries(fbData.feedback || {})) {
-                                    if (users[userId]) {
-                                        map[idx] = users[userId];
-                                    }
-                                }
-                                setFeedbackMap(map);
-                            }
-                        } catch (fbErr) {
-                            console.error("Error fetching feedback:", fbErr);
-                        }
-                    } else {
-                        // Empty history — fall through to the idle landing screen.
-                        setMessages([]);
-                    }
-                } catch (error) {
-                    console.error("Error fetching history:", error);
-                    // On fetch error, still show the idle screen rather than a canned greeting.
-                    setMessages([]);
-                }
-            } else {
-                // Fresh session — show the idle landing screen.
-                setMessages([]);
+            if (Object.keys(localFeedback).length > 0) {
+                setFeedbackMap(localFeedback);
             }
 
-            setIsLoadingHistory(false);
+            if (localMessages.length > 0) {
+                setMessages(localMessages);
+            }
+
+            try {
+                if (isExistingSession) {
+                    const response = await fetchWithTimeout(
+                        getHistoryEndpoint(agentConfig.id, currentThreadId),
+                        {},
+                        HISTORY_TIMEOUT_MS
+                    );
+
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch history: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    const backendMessages = Array.isArray(data.messages)
+                        ? data.messages.map(mapHistoryMessage)
+                        : [];
+
+                    if (backendMessages.length > 0) {
+                        setMessages(backendMessages);
+                        saveLocalMessages(agentConfig.id, currentThreadId, backendMessages);
+                    } else if (localMessages.length === 0) {
+                        setMessages([]);
+                    }
+
+                    try {
+                        const fbRes = await fetchWithTimeout(
+                            `${API_URL}/api/v1/feedback/${agentConfig.id}/${currentThreadId}`,
+                            {},
+                            HISTORY_TIMEOUT_MS
+                        );
+
+                        if (fbRes.ok) {
+                            const fbData = await fbRes.json();
+                            const userId = user.username || "anonymous";
+                            const map = {};
+
+                            for (const [idx, users] of Object.entries(fbData.feedback || {})) {
+                                if (users[userId]) {
+                                    map[idx] = users[userId];
+                                }
+                            }
+
+                            setFeedbackMap(prev => ({ ...prev, ...map }));
+                            saveLocalFeedback(agentConfig.id, currentThreadId, { ...localFeedback, ...map });
+                        }
+                    } catch (fbErr) {
+                        console.error("Error fetching feedback:", fbErr);
+                    }
+                } else {
+                    setMessages([]);
+                }
+            } catch (error) {
+                console.error("Error fetching history:", error);
+
+                // Keep locally restored chat on refresh. Do not wipe it just because
+                // backend history failed or MCP history is not available.
+                if (localMessages.length === 0) {
+                    setMessages([]);
+                }
+            } finally {
+                if (isMounted) {
+                    setIsLoadingHistory(false);
+                }
+            }
         };
 
         loadAgentState();
+
+        return () => {
+            isMounted = false;
+        };
     }, [agentConfig.id, agentConfig.title, user.name]);
 
     const [input, setInput] = useState("");
@@ -761,9 +1323,18 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     // to anchor at the viewport top while NOT permitting scroll past the bot reply.
     const [bottomSpacer, setBottomSpacer] = useState(0);
 
+    // Browser backup for refresh persistence.
+    // The backend history endpoint is still the source of truth when available,
+    // but local storage keeps refreshes safe if history loading fails.
+    useEffect(() => {
+        if (!agentConfig?.id || !threadId || isLoadingHistory) return;
+        saveLocalMessages(agentConfig.id, threadId, messages);
+    }, [agentConfig?.id, threadId, messages, isLoadingHistory]);
+
+
     // True when no exchange has happened yet (only the seeded greeting message exists).
     // Declared here so the observer effects below can react to mode changes.
-    const isIdleForEffects = messages.length <= 1 && !isLoadingHistory && !isLoading;
+    const isIdleForEffects = messages.length === 0 && !isLoadingHistory && !isLoading;
 
     // Track scroll container height — needed by the bottom spacer to guarantee
     // enough room for the latest user message to anchor at the viewport top.
@@ -781,7 +1352,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     // Observe the last rendered message; pill appears when it scrolls out of view.
     // Re-binds when message count changes OR when the last item transitions from
     // empty placeholder to having content (briefly happens during stream startup).
-    const lastTextPresent = !!messages[messages.length - 1]?.text;
+    const lastTextPresent = !!messages[messages.length - 1]?.text || (messages[messages.length - 1]?.productCards?.length > 0);
     useEffect(() => {
         const target = lastMessageRef.current;
         const root = scrollContainerRef.current;
@@ -912,35 +1483,27 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const sendMessage = async (text) => {
         if (!text.trim() || !threadId || isLoadingHistory || isLoading) return;
 
-        // Mask PII client-side so it is neither displayed nor sent in the clear.
-        // Product agents (lifestore/enterprise) are exempt so SKU/model numbers survive.
-        const maskedText = PII_MASK_EXEMPT_AGENTS.includes(agentConfig.id)
-            ? text.trim()
-            : maskPII(text.trim());
-
-        const userMessage = { type: 'user', text: maskedText, timestamp: Date.now() };
+        const userMessage = { type: 'user', text, timestamp: Date.now() };
         setMessages(prev => [...prev, userMessage]);
         setIsLoading(true);
         setLastFailedMessage(null);
-        anchorPendingRef.current = true; // anchor effect will fire once chat mode is ready
-        console.log('[anchor-pending] set', { text: text.slice(0, 30) });
+        anchorPendingRef.current = true;
 
         const controller = new AbortController();
         abortControllerRef.current = controller;
         let botMessageAdded = false;
 
+        const chatEndpoint = getChatEndpoint();
+
         try {
-            const response = await fetch(`${API_URL}/api/v1/chat`, {
+            const response = await fetch(chatEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: maskedText,
+                    message: text,
                     agent_id: agentConfig.id,
                     user_id: user.username || "anonymous",
-                    user_name: user.name || null,
-                    department: profile.department || null,
-                    job_title: profile.jobTitle || null,
-                    thread_id: threadId
+                    thread_id: threadId,
                 }),
                 signal: controller.signal,
             });
@@ -949,30 +1512,24 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder();
-            let accumulatedText = "";
-            let evidenceItems = [];
+            const contentType = response.headers.get('content-type') || '';
 
-            setMessages(prev => [...prev, { type: 'bot', text: "", formType: null, evidence: [], timestamp: Date.now() }]);
+            setMessages(prev => [...prev, {
+                type: 'bot',
+                text: "",
+                formType: null,
+                productCards: [],
+                productCardDisplay: null,
+                timestamp: Date.now()
+            }]);
             botMessageAdded = true;
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                const chunk = decoder.decode(value, { stream: true }).replace(/\r/g, '');
-                accumulatedText = appendChunkSmartly(accumulatedText, chunk);
-
-                // Detect and strip the hidden evidence metadata block first.
-                const parsedEvidence = parseEvidencePayload(accumulatedText);
-                let cleanText = parsedEvidence.text;
-
-                if (parsedEvidence.evidence) {
-                    evidenceItems = parsedEvidence.evidence;
-                }
+            if (contentType.includes('application/json')) {
+                const data = await response.json();
+                const botMessage = buildBotMessageFromJsonResponse(data);
 
                 let currentFormType = null;
+                let cleanText = botMessage.text;
                 for (const [token, type] of Object.entries(FORM_TOKENS)) {
                     if (cleanText.includes(token)) {
                         currentFormType = type;
@@ -987,8 +1544,91 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     newMessages[lastIdx] = {
                         ...newMessages[lastIdx],
                         text: cleanText,
+                        formType: currentFormType || botMessage.formType || newMessages[lastIdx].formType,
+                        formData: botMessage.formData || newMessages[lastIdx].formData || null,
+                        productCards: botMessage.productCards || [],
+                        productCardDisplay: botMessage.productCardDisplay || newMessages[lastIdx].productCardDisplay || null,
+                    };
+                    return newMessages;
+                });
+
+                return;
+            }
+
+            if (!response.body) {
+                throw new Error('Response body is empty or not streamable');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let accumulatedText = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true }).replace(/\r/g, '');
+                accumulatedText = appendChunkSmartly(accumulatedText, chunk);
+
+                let currentFormType = null;
+                const embedded = extractEmbeddedProductCardsFromText(accumulatedText);
+                let cleanText = embedded.text;
+
+                for (const [token, type] of Object.entries(FORM_TOKENS)) {
+                    if (cleanText.includes(token)) {
+                        currentFormType = type;
+                        cleanText = cleanText.replace(token, '').trim();
+                        break;
+                    }
+                }
+
+                setMessages(prev => {
+                    const newMessages = [...prev];
+                    const lastIdx = newMessages.length - 1;
+                    const existingCards = Array.isArray(newMessages[lastIdx].productCards) ? newMessages[lastIdx].productCards : [];
+                    const productCards = prepareProductCardsForDisplay([...existingCards, ...embedded.productCards]);
+                    newMessages[lastIdx] = {
+                        ...newMessages[lastIdx],
+                        text: cleanText,
                         formType: currentFormType || newMessages[lastIdx].formType,
-                        evidence: evidenceItems.length > 0 ? evidenceItems : newMessages[lastIdx].evidence,
+                        productCards,
+                        productCardDisplay: mergeProductDisplay(
+                            newMessages[lastIdx].productCardDisplay,
+                            embedded.productCardDisplay,
+                            normalizeProductDisplay(null, productCards.length),
+                        ),
+                    };
+                    return newMessages;
+                });
+            }
+
+            // Some MCP proxies stream one JSON object as text/SSE. If the final
+            // streamed value is JSON, rebuild the bot message so product image
+            // cards render instead of showing raw JSON or image URLs.
+            const parsedStreamJson = tryParseJsonPayload(accumulatedText);
+            if (parsedStreamJson) {
+                const botMessage = buildBotMessageFromJsonResponse(parsedStreamJson);
+
+                let currentFormType = null;
+                let cleanText = botMessage.text;
+                for (const [token, type] of Object.entries(FORM_TOKENS)) {
+                    if (cleanText.includes(token)) {
+                        currentFormType = type;
+                        cleanText = cleanText.replace(token, '').trim();
+                        break;
+                    }
+                }
+
+                setMessages(prev => {
+                    const newMessages = [...prev];
+                    const lastIdx = newMessages.length - 1;
+                    newMessages[lastIdx] = {
+                        ...newMessages[lastIdx],
+                        text: cleanText,
+                        formType: currentFormType || botMessage.formType || newMessages[lastIdx].formType,
+                        formData: botMessage.formData || newMessages[lastIdx].formData || null,
+                        productCards: botMessage.productCards || [],
+                        productCardDisplay: botMessage.productCardDisplay || newMessages[lastIdx].productCardDisplay || null,
                     };
                     return newMessages;
                 });
@@ -1000,7 +1640,6 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 console.error("Error:", error);
                 setLastFailedMessage(text);
                 if (botMessageAdded) {
-                    // Mark the partial bot message as errored so retry shows.
                     setMessages(prev => {
                         const newMessages = [...prev];
                         const lastIdx = newMessages.length - 1;
@@ -1011,6 +1650,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     setMessages(prev => [...prev, {
                         type: 'bot',
                         text: "Sorry, I'm having trouble connecting to the server. Is the backend running?",
+                        productCards: [],
                         error: true,
                         timestamp: Date.now()
                     }]);
@@ -1064,7 +1704,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const lastRenderedIdx = (() => {
         for (let i = messages.length - 1; i >= 0; i--) {
             const m = messages[i];
-            if (m.type === 'user' || m.text || m.formType) return i;
+            if (m.type === 'user' || m.text || m.formType || (Array.isArray(m.productCards) && m.productCards.length > 0)) return i;
         }
         return -1;
     })();
@@ -1088,7 +1728,6 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
-                    maxLength={1500}
                     placeholder="Ask anything..."
                     className="flex-1 bg-transparent text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-[0.9375rem] pl-3 pr-2 py-2 outline-none resize-none leading-relaxed max-h-[150px] overflow-y-auto chat-scrollbar"
                 />
@@ -1187,7 +1826,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, delay: 0.12 }}
-                        className={`${agentConfig.id === 'supervisor' ? 'text-lg sm:text-xl mt-6' : 'text-lg sm:text-2xl mt-3'} text-slate-600 dark:text-slate-300 text-center max-w-5xl mx-auto leading-relaxed`}
+                        className="text-xl sm:text-2xl text-gray-500 dark:text-gray-400 mt-2 font-light text-center"
                     >
                         {agentConfig.idlePrompt || "How can I help you today?"}
                     </motion.p>
@@ -1236,7 +1875,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         >
                             <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
                                 {messages.map((msg, index) => {
-                                    if (!(msg.type === 'user' || msg.text || msg.formType || (msg.evidence && msg.evidence.length > 0))) return null;
+                                    if (!(msg.type === 'user' || msg.text || msg.formType || (Array.isArray(msg.productCards) && msg.productCards.length > 0))) return null;
                                     const isLastMsg = index === lastRenderedIdx;
                                     const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
                                     const isErrorMsg = msg.error && isLastMsg;
@@ -1246,22 +1885,29 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                         if (isLastMsg) lastMessageRef.current = el;
                                     };
 
-                                    // Separate hidden evidence metadata from the answer text.
-                                    const parsedEvidence = parseEvidencePayload(msg.text || "");
-                                    const visibleText = parsedEvidence.text || "";
-                                    const evidence = msg.evidence?.length > 0
-                                        ? msg.evidence
-                                        : (parsedEvidence.evidence || []);
-
-                                    const parts = visibleText.split(/\*{0,2}Sources:\*{0,2}/);
+                                    const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
                                     const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
                                     const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
                                     const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
                                     const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
+                                    const productCards = Array.isArray(msg.productCards) ? msg.productCards : [];
+                                    const productCardDisplay = msg.productCardDisplay || normalizeProductDisplay(null, productCards.length);
 
                                     const markdownComponents = {
                                         p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
                                         a: ({ node, ...props }) => <a className="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer" {...props} />,
+                                        img: ({ node, ...props }) => (
+                                            <img
+                                                {...props}
+                                                alt={props.alt || "LifeStore product image"}
+                                                loading="lazy"
+                                                referrerPolicy="no-referrer"
+                                                onError={(e) => {
+                                                    e.currentTarget.style.display = "none";
+                                                }}
+                                                className="my-4 max-w-[260px] rounded-2xl border border-gray-200 dark:border-gray-700 bg-white object-contain shadow-sm"
+                                            />
+                                        ),
                                         ul: ({ node, ...props }) => <ul className="list-disc pl-5 mb-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500" {...props} />,
                                         ol: ({ node, ...prefix }) => <ol className="list-decimal pl-5 mb-3 space-y-1.5 marker:text-gray-400 dark:marker:text-gray-500" {...prefix} />,
                                         li: ({ node, ...props }) => <li className="pl-1" {...props} />,
@@ -1310,26 +1956,16 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                 // Bot: no card — text flows directly on the page background.
                                                 <div className="w-full text-[15px] sm:text-[16px] leading-[1.75] text-gray-800 dark:text-gray-200">
                                                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                                                        {sanitizeMarkdownBold(mainText)}
+                                                        {sanitizeMarkdownBold(normalizeAssistantMarkdown(mainText))}
                                                     </ReactMarkdown>
+                                                    <ProductCards products={productCards} color={agentConfig.color} display={productCardDisplay} />
                                                     {isStreamingThisMsg && (
                                                         <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 dark:bg-gray-300/70 ml-0.5 rounded-sm animate-pulse" />
                                                     )}
-                                                    <EvidenceSection
-                                                        evidence={evidence}
-                                                        color={agentConfig.color}
-                                                        onImageClick={setPreviewImage}
-                                                    />
                                                     <SourcesSection sources={sources} color={agentConfig.color} />
-
-                                                    {/* Standalone HITL Buttons Component */}
-                                                    <Buttons
-                                                        message={msg}
-                                                        isLast={isLastMsg}
-                                                        onSend={(text) => sendMessage(text)}
-                                                    />
-
-                                                    {msg.formType === 'lifestore' && <LifestoreForm />}
+                                                    {msg.formType === 'lifestore' && (
+                                                        <LifestoreForm initialProduct={msg.formData?.product || productCards[0]?.name || ''} />
+                                                    )}
                                                     {msg.formType === 'enterprise' && <EnterpriseForm />}
                                                 </div>
                                             )}
@@ -1343,9 +1979,16 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                             agentId={agentConfig.id}
                                                             threadId={threadId}
                                                             userId={user.username || "anonymous"}
-                                                            userName={user.name || null}
                                                             existingRating={feedbackMap[index] || null}
-                                                            onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
+                                                            onFeedback={(idx, rating) => {
+                                                                setFeedbackMap(prev => {
+                                                                    const next = { ...prev };
+                                                                    if (rating) next[idx] = rating;
+                                                                    else delete next[idx];
+                                                                    saveLocalFeedback(agentConfig.id, threadId, next);
+                                                                    return next;
+                                                                });
+                                                            }}
                                                         />
                                                     )}
                                                     {!msg.error && <CopyMessageButton text={msg.text} />}
@@ -1373,7 +2016,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                     );
                                 })}
 
-                                {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType)) && (
+                                {isLoading && (messages.length === 0 || messages[messages.length - 1].type === 'user' || (!messages[messages.length - 1].text && !messages[messages.length - 1].formType && !(messages[messages.length - 1].productCards && messages[messages.length - 1].productCards.length))) && (
                                     <ThinkingIndicator />
                                 )}
 
@@ -1410,10 +2053,6 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     </div>
                 </motion.div>
             )}
-            <ImagePreviewModal
-                image={previewImage}
-                onClose={() => setPreviewImage(null)}
-            />
         </motion.div>
     );
 });

@@ -1,25 +1,37 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-const LifestoreForm = () => {
+const LifestoreForm = ({ initialProduct = '' }) => {
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
     const [formData, setFormData] = useState({
-        product: '',
+        product: initialProduct || '',
         fullName: '',
         deliveryAddress: '',
         phone: '',
     });
+
+    useEffect(() => {
+        setFormData(prev => {
+            if (prev.product || !initialProduct) return prev;
+            return { ...prev, product: initialProduct };
+        });
+    }, [initialProduct]);
 
     const handleChange = (e) => {
         setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
     };
 
     const handleCancel = () => {
-        setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '' });
+        setFormData({
+            product: initialProduct || '',
+            fullName: '',
+            deliveryAddress: '',
+            phone: '',
+        });
         setError('');
     };
 
@@ -27,7 +39,6 @@ const LifestoreForm = () => {
         e.preventDefault();
         setError('');
 
-        // Client-side required-field validation
         if (!formData.fullName.trim() || !formData.deliveryAddress.trim() || !formData.phone.trim()) {
             setError('Please fill in all required fields.');
             return;
@@ -45,9 +56,13 @@ const LifestoreForm = () => {
                 throw new Error(`Server error: ${response.status}`);
             }
 
-            // Success
             setIsSubmitted(true);
-            setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '' });
+            setFormData({
+                product: initialProduct || '',
+                fullName: '',
+                deliveryAddress: '',
+                phone: '',
+            });
         } catch (err) {
             console.error('Order submission failed:', err);
             setError('Failed to submit order. Please try again.');
@@ -56,7 +71,6 @@ const LifestoreForm = () => {
         }
     };
 
-    // ── Success state ───────────────────────────────────────────────────
     if (isSubmitted) {
         return (
             <motion.div
@@ -71,14 +85,13 @@ const LifestoreForm = () => {
                     </svg>
                     <h3 className="text-lg font-bold text-green-800">Order Submitted!</h3>
                     <p className="text-sm text-green-600 mt-1">
-                        Thank you. The Lifestore team will contact you shortly.
+                        Thank you. The LifeStore team will contact you shortly.
                     </p>
                 </div>
             </motion.div>
         );
     }
 
-    // ── Form state ──────────────────────────────────────────────────────
     return (
         <motion.div
             initial={{ opacity: 0, y: 12 }}
@@ -87,10 +100,8 @@ const LifestoreForm = () => {
             className="w-full my-3"
         >
             <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-                {/* Title */}
                 <h3 className="text-lg font-bold text-gray-800 mb-4">Please fill the form</h3>
 
-                {/* Error banner */}
                 {error && (
                     <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">
                         {error}
@@ -98,7 +109,6 @@ const LifestoreForm = () => {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Product (optional) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">Product</label>
                         <input
@@ -111,7 +121,6 @@ const LifestoreForm = () => {
                         />
                     </div>
 
-                    {/* Full Name (required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Full Name <span className="text-red-500">*</span>
@@ -127,7 +136,6 @@ const LifestoreForm = () => {
                         />
                     </div>
 
-                    {/* Delivery Address (required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Delivery Address <span className="text-red-500">*</span>
@@ -143,7 +151,6 @@ const LifestoreForm = () => {
                         />
                     </div>
 
-                    {/* Phone (required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Phone <span className="text-red-500">*</span>
@@ -159,7 +166,6 @@ const LifestoreForm = () => {
                         />
                     </div>
 
-                    {/* Action buttons */}
                     <div className="flex justify-end gap-4 mt-4">
                         <button
                             type="button"
