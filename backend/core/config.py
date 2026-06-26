@@ -27,6 +27,18 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: Optional[str] = None
     EMBEDDING_BASE_URL: Optional[str] = None
 
+    # Ingestion-only embedding override (for zero-downtime provider migrations).
+    # When INGESTION_EMBEDDING_PROVIDER is set, INGESTION embeds with this provider
+    # and writes that provider's collection namespace (e.g. *_docs_gemini), while
+    # RETRIEVAL keeps using EMBEDDING_PROVIDER (e.g. *_docs). This lets you build
+    # the new provider's collections in the background while still serving users
+    # from the old provider. Unset → ingestion uses EMBEDDING_* (normal behavior).
+    INGESTION_EMBEDDING_PROVIDER: Optional[str] = None
+    INGESTION_EMBEDDING_MODEL: Optional[str] = None
+    INGESTION_EMBEDDING_DIMENSIONS: Optional[int] = None
+    INGESTION_EMBEDDING_API_KEY: Optional[str] = None
+    INGESTION_EMBEDDING_BASE_URL: Optional[str] = None
+
     # Vertex AI (Google Cloud). Used when LLM_PROVIDER / EMBEDDING_PROVIDER == "vertex".
     # Auth is via a service-account JSON; the SDK reads GOOGLE_APPLICATION_CREDENTIALS
     # (set below from .env, normalized to an absolute path).
@@ -142,14 +154,19 @@ _EMBEDDING_COLLECTION_SUFFIX = {
 }
 
 
+def _suffix_for_provider(provider: Optional[str]) -> str:
+    """Qdrant collection suffix for a given embedding provider."""
+    return _EMBEDDING_COLLECTION_SUFFIX.get((provider or "").lower().strip(), "")
+
+
 def collection_suffix() -> str:
-    """Return the Qdrant collection suffix for the active embedding provider."""
-    provider = settings.EMBEDDING_PROVIDER.lower().strip()
-    return _EMBEDDING_COLLECTION_SUFFIX.get(provider, "")
+    """Return the Qdrant collection suffix for the active (serving) provider."""
+    return _suffix_for_provider(settings.EMBEDDING_PROVIDER)
 
 
 def agent_collection_name(agent_id: str) -> str:
-    """Resolve the Qdrant collection for an agent's KB, namespaced by provider.
+    """Resolve the Qdrant collection for an agent's KB, namespaced by the SERVING
+    (retrieval) embedding provider.
 
     e.g. agent_id="hr" -> "hr_docs" (openai) or "hr_docs_gemini" (gemini/vertex).
 
@@ -157,6 +174,25 @@ def agent_collection_name(agent_id: str) -> str:
     it always uses its own "askhrslm_docs" collection regardless of provider.
     """
     return f"{agent_id}_docs{collection_suffix()}"
+
+
+def ingestion_embedding_provider() -> str:
+    """Provider that INGESTION embeds with (override, else serving provider)."""
+    return settings.INGESTION_EMBEDDING_PROVIDER or settings.EMBEDDING_PROVIDER
+
+
+def ingestion_embedding_dimensions() -> int:
+    """Vector size for collections CREATED by ingestion (override, else serving)."""
+    return settings.INGESTION_EMBEDDING_DIMENSIONS or settings.EMBEDDING_DIMENSIONS
+
+
+def ingestion_agent_collection_name(agent_id: str) -> str:
+    """Resolve the Qdrant collection that INGESTION writes to, namespaced by the
+    ingestion embedding provider. When no ingestion override is set this equals
+    agent_collection_name(); when set (e.g. ingestion=vertex while serving=openai)
+    it targets the other provider's namespace (e.g. "hr_docs_gemini").
+    """
+    return f"{agent_id}_docs{_suffix_for_provider(ingestion_embedding_provider())}"
 
 
 def get_mail_config() -> ConnectionConfig:

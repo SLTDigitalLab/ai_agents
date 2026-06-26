@@ -116,25 +116,21 @@ def get_chat_model():
         raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
 
 
-@lru_cache(maxsize=1)
-def get_embedding_model():
+def _build_embedding_model(provider: str, model_name: str, api_key, base_url):
+    """Construct a document embedding model for the given provider/model.
+
+    Shared by get_embedding_model (serving) and get_ingestion_embedding_model
+    (background ingestion), so both honour the same provider behaviors —
+    crucially the Vertex single-input batching + asymmetric task prefixes.
     """
-    Returns an instantiated embedding model based on the EMBEDDING_PROVIDER setting.
-    Used for document embedding (Qdrant ingestion + retrieval).
-    """
-    provider = settings.EMBEDDING_PROVIDER.lower().strip()
-    model_name = settings.EMBEDDING_MODEL
-    api_key = settings.EMBEDDING_API_KEY
-    base_url = settings.EMBEDDING_BASE_URL
+    provider = (provider or "").lower().strip()
 
     if provider == "openai":
         from langchain_openai import OpenAIEmbeddings
-        
+
         # Fall back to global OPENAI_API_KEY if specific key is not set
         final_api_key = api_key or settings.OPENAI_API_KEY
-        
-        # Determine dimension based on known openai embedding models if needed
-        # By default openai gives varying dimensions 
+
         log.info(f"Initialized OpenAI embedding model: {model_name} (Base URL: {base_url})")
         return OpenAIEmbeddings(
             model=model_name,
@@ -143,10 +139,10 @@ def get_embedding_model():
         )
     elif provider == "gemini":
         from langchain_google_genai import GoogleGenerativeAIEmbeddings
-        
+
         # Fall back to global GOOGLE_API_KEY if specific key is not set
         final_api_key = api_key or settings.GOOGLE_API_KEY
-        
+
         log.info(f"Initialized Gemini embedding model: {model_name}")
         return GoogleGenerativeAIEmbeddings(
             model=model_name,
@@ -166,7 +162,46 @@ def get_embedding_model():
             query_prefix=_VERTEX_QUERY_PREFIX,
         )
     else:
-        raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {provider}")
+        raise ValueError(f"Unsupported embedding provider: {provider}")
+
+
+@lru_cache(maxsize=1)
+def get_embedding_model():
+    """
+    Returns the embedding model for RETRIEVAL (and ingestion when no ingestion
+    override is set), based on the EMBEDDING_PROVIDER setting.
+    """
+    return _build_embedding_model(
+        settings.EMBEDDING_PROVIDER,
+        settings.EMBEDDING_MODEL,
+        settings.EMBEDDING_API_KEY,
+        settings.EMBEDDING_BASE_URL,
+    )
+
+
+@lru_cache(maxsize=1)
+def get_ingestion_embedding_model():
+    """
+    Returns the embedding model used for INGESTION (writing Qdrant collections).
+
+    When INGESTION_EMBEDDING_PROVIDER is set, ingestion embeds with that provider
+    while retrieval (get_embedding_model) keeps using EMBEDDING_PROVIDER. This
+    lets you build one provider's collections in the background while serving
+    from another — a zero-downtime provider migration. When the ingestion vars
+    are unset, this is identical to get_embedding_model.
+    """
+    provider = settings.INGESTION_EMBEDDING_PROVIDER or settings.EMBEDDING_PROVIDER
+    model_name = settings.INGESTION_EMBEDDING_MODEL or settings.EMBEDDING_MODEL
+    api_key = settings.INGESTION_EMBEDDING_API_KEY or settings.EMBEDDING_API_KEY
+    base_url = settings.INGESTION_EMBEDDING_BASE_URL or settings.EMBEDDING_BASE_URL
+
+    log.info(
+        "Ingestion embedding model | provider=%s model=%s (serving provider=%s)",
+        provider,
+        model_name,
+        settings.EMBEDDING_PROVIDER,
+    )
+    return _build_embedding_model(provider, model_name, api_key, base_url)
 
 
 @lru_cache(maxsize=1)
