@@ -96,8 +96,14 @@ const IngestionPanel = () => {
     const [activeTab, setActiveTab] = useState('url');
     const [status, setStatus] = useState(null);
 
-    // URL Ingestion state
-    const [urlForm, setUrlForm] = useState({ url: '', agent_name: AGENT_LIST[0]?.id || '' });
+    // URL Ingestion state — crawl defaults ON so a single URL pulls the whole site
+    const [urlForm, setUrlForm] = useState({
+        url: '',
+        agent_name: AGENT_LIST[0]?.id || '',
+        crawl: true,
+        max_pages: 200,
+        max_depth: 3,
+    });
     const [urlLoading, setUrlLoading] = useState(false);
 
     // OneDrive Ingestion state
@@ -358,6 +364,55 @@ const IngestionPanel = () => {
                                         required
                                         className="w-full bg-white/5 border border-white/10 text-white rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition-all placeholder:text-white/20"
                                     />
+                                </div>
+
+                                {/* Crawl Options */}
+                                <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-4 space-y-4">
+                                    <label className="flex items-center justify-between gap-4 cursor-pointer">
+                                        <div>
+                                            <p className="text-white/70 text-sm font-medium">Crawl entire site</p>
+                                            <p className="text-white/30 text-[11px] mt-0.5 leading-relaxed">
+                                                Follow links on the same domain and ingest every reachable page, instead of just this one URL
+                                            </p>
+                                        </div>
+                                        <input
+                                            type="checkbox"
+                                            checked={urlForm.crawl}
+                                            onChange={(e) => setUrlForm(prev => ({ ...prev, crawl: e.target.checked }))}
+                                            className="w-4 h-4 shrink-0 accent-purple-500 cursor-pointer"
+                                        />
+                                    </label>
+
+                                    {urlForm.crawl && (
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div>
+                                                <label htmlFor="url-max-pages" className="block text-white/40 text-[11px] uppercase tracking-wider font-medium mb-1.5">
+                                                    Max pages
+                                                </label>
+                                                <input
+                                                    id="url-max-pages"
+                                                    type="number"
+                                                    min={1}
+                                                    value={urlForm.max_pages}
+                                                    onChange={(e) => setUrlForm(prev => ({ ...prev, max_pages: Number(e.target.value) }))}
+                                                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition-all"
+                                                />
+                                            </div>
+                                            <div>
+                                                <label htmlFor="url-max-depth" className="block text-white/40 text-[11px] uppercase tracking-wider font-medium mb-1.5">
+                                                    Max depth
+                                                </label>
+                                                <input
+                                                    id="url-max-depth"
+                                                    type="number"
+                                                    min={1}
+                                                    value={urlForm.max_depth}
+                                                    onChange={(e) => setUrlForm(prev => ({ ...prev, max_depth: Number(e.target.value) }))}
+                                                    className="w-full bg-white/5 border border-white/10 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/40 transition-all"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
 
                                 {/* Submit */}

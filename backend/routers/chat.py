@@ -460,6 +460,8 @@ async def chat(request: ChatRequest):
                 thread_id=request.thread_id,
                 user_id=request.user_id,
                 user_name=request.user_name,
+                department=request.department,
+                job_title=request.job_title,
             )
 
             # ── Run guardrail classifier FIRST ──────────────────────────
