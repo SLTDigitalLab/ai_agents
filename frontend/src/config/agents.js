@@ -175,5 +175,17 @@ export const AGENTS = {
         buttonColor: "bg-red-600 hover:bg-red-700",
         idlePrompt: "Ask about a business listing, contact, or service category.",
         disclaimer: "If you need any further clarifications, please reach out to the Rainbow Pages team."
+    },
+
+    // 14. AI Expo (public — knowledge base from aiexpo.lk)
+    askaiexpo: {
+        public: true,
+        id: "aiexpo",
+        title: "ASK AI EXPO",
+        subtitle: "Your guide to National AI Expo & Conference — speakers, agenda, partners, schedule, and event highlights.",
+        color: "from-cyan-900 to-cyan-600",
+        buttonColor: "bg-cyan-600 hover:bg-cyan-700",
+        idlePrompt: "Ask about speakers, the agenda, partners, or event dates.",
+        disclaimer: "Event information is sourced from aiexpo.lk and may change. Please verify critical details on the official website."
     }
 };
