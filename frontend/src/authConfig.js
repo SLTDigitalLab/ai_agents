@@ -15,3 +15,11 @@ export const loginRequest = {
     scopes: ["User.Read"],
     prompt: "select_account"
 };
+
+// Microsoft Graph endpoint used to read the signed-in user's profile.
+// `department` (and `jobTitle`) come from Azure AD directory attributes and
+// require only the User.Read scope already requested at login.
+export const graphConfig = {
+    meEndpoint:
+        "https://graph.microsoft.com/v1.0/me?$select=department,jobTitle,officeLocation"
+};
