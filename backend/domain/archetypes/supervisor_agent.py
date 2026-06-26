@@ -175,6 +175,61 @@ def _is_vague_specialist_prompt(query: str) -> bool:
     )
 
 
+# Filler words/phrases that carry no question content. Stripping them lets us
+# tell a bare department name ("Marketing", "the marketing department please")
+# apart from a real question that merely mentions a department ("marketing budget
+# approval process"). Multi-word phrases must come before their single-word parts.
+_DEPARTMENT_FILLER_RE = re.compile(
+    r"\b(tell me|i need|i want|i would like|can you|could you|please|"
+    r"department|division|section|team|unit|"
+    r"info|information|details|detail|stuff|matters|related|regarding|"
+    r"about|on|the|some|any|a|an|to|know|tell|help|with|me)\b",
+    re.IGNORECASE,
+)
+
+
+def _resolve_bare_department(query: str) -> str | None:
+    """Return a specialist id when the query is essentially just a department name.
+
+    A bare department prompt ("Marketing", "marketing department") carries no
+    actual question, so delegating it to a KB agent produces a misleading "I
+    can't find that / knowledge base unavailable" decline. Detect it here so the
+    supervisor can instead ask what the user wants to know about that area.
+
+    Only fires when the whole query reduces EXACTLY to a known department name or
+    alias, so real questions that merely mention a department are left untouched.
+    """
+    normalized = query.strip().lower()
+    normalized = _DEPARTMENT_FILLER_RE.sub(" ", normalized)
+    normalized = re.sub(r"[^\w\s]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    if not normalized:
+        return None
+
+    for agent_id in SPECIALIST_BUILDERS:
+        aliases = CLARIFICATION_CHOICE_ALIASES.get(agent_id, ())
+        for term in (agent_id, *aliases):
+            if normalized == term.lower():
+                return agent_id
+    return None
+
+
+def _department_overview_message(agent_id: str) -> str:
+    """Build a scoped 'what would you like to know about X' reply for a department."""
+    profile = SPECIALIST_ROUTING_PROFILES[agent_id]
+    display = profile["display_name"]
+    description = str(profile.get("description", "")).strip()
+    examples = list(profile.get("examples") or [])[:3]
+
+    lines = [f"What would you like to know about **{display}**?"]
+    if description:
+        lines += ["", description]
+    if examples:
+        lines += ["", "For example, you could ask:"]
+        lines += [f"- {example}" for example in examples]
+    return "\n".join(lines)
+
+
 def _is_short_follow_up(query: str) -> bool:
     """Detect short follow-up turns that should inherit route bias."""
     stripped = query.strip().lower()
@@ -361,6 +416,23 @@ async def route_request(state: AgentState) -> dict:
         return {
             "routing_action": "direct",
             "routing_reason": "general_help_rule",
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
+    bare_department = _resolve_bare_department(query)
+    if bare_department:
+        logger.info(
+            "Supervisor route | action=department_overview | target=%s | query=%r",
+            bare_department,
+            query[:200],
+        )
+        return {
+            "routing_action": "department_overview",
+            "routed_agent_id": bare_department,
+            "routing_reason": f"bare_department:{bare_department}",
+            "routing_scores": {},
             "pending_clarification": False,
             "clarification_options": [],
             "original_query": "",
@@ -669,6 +741,35 @@ async def respond_out_of_scope(state: AgentState) -> dict:
         "**HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, **Marketing**, **Enterprise Business**, and **Consumer Business**."
     )
     return {"messages": [AIMessage(content=content)]}
+
+
+async def respond_department_overview(state: AgentState) -> dict:
+    """Ask what the user wants to know about a department they named bare.
+
+    Reached when the user typed just a department name with no question. Instead
+    of delegating an empty query to the KB agent (which would decline), we explain
+    what that department covers and invite a specific question. We set
+    last_specialist_agent so a short follow-up keeps the department context.
+    """
+    agent_id = state.get("routed_agent_id")
+    if agent_id not in SPECIALIST_ROUTING_PROFILES:
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        "Which area is this about: **HR**, **Finance**, **IT**, **Admin**, **CIA**, **Network**, **Legal**, **Marketing**, **Enterprise Business**, or **Consumer Business**?"
+                    )
+                )
+            ]
+        }
+
+    return {
+        "messages": [AIMessage(content=_department_overview_message(agent_id))],
+        "last_specialist_agent": agent_id,
+        "pending_clarification": False,
+        "clarification_options": [],
+        "original_query": "",
+    }
 
 
 def _build_delegate_node(agent_id: str):
@@ -1207,6 +1308,8 @@ def _route_to_node(state: AgentState) -> str:
         return "ask_for_clarification"
     if action == "out_of_scope":
         return "respond_out_of_scope"
+    if action == "department_overview":
+        return "respond_department_overview"
     if action == "delegate":
         routed_agent_id = state.get("routed_agent_id")
         if routed_agent_id in SPECIALIST_BUILDERS:
@@ -1225,6 +1328,7 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_node("answer_directly", answer_directly)
     workflow.add_node("ask_for_clarification", ask_for_clarification)
     workflow.add_node("respond_out_of_scope", respond_out_of_scope)
+    workflow.add_node("respond_department_overview", respond_department_overview)
     workflow.add_node("decompose_query", decompose_query)
     workflow.add_node("multi_delegate", multi_delegate)
     workflow.add_node("synthesize_multi_answer", synthesize_multi_answer)
@@ -1240,6 +1344,7 @@ def build_supervisor_workflow() -> StateGraph:
             "answer_directly": "answer_directly",
             "ask_for_clarification": "ask_for_clarification",
             "respond_out_of_scope": "respond_out_of_scope",
+            "respond_department_overview": "respond_department_overview",
             "decompose_query": "decompose_query",
             "delegate_hr": "delegate_hr",
             "delegate_finance": "delegate_finance",
@@ -1257,6 +1362,7 @@ def build_supervisor_workflow() -> StateGraph:
     workflow.add_edge("answer_directly", END)
     workflow.add_edge("ask_for_clarification", END)
     workflow.add_edge("respond_out_of_scope", END)
+    workflow.add_edge("respond_department_overview", END)
     workflow.add_edge("decompose_query", "multi_delegate")
     workflow.add_edge("multi_delegate", "synthesize_multi_answer")
     workflow.add_edge("synthesize_multi_answer", END)
