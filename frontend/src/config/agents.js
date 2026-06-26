@@ -178,7 +178,7 @@ export const AGENTS = {
     },
 
     // 14. AI Expo (public — knowledge base from aiexpo.lk)
-    askaiexpo: {
+    aiexpo: {
         public: true,
         id: "aiexpo",
         title: "ASK AI EXPO",
