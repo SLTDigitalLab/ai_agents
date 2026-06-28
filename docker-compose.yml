@@ -48,6 +48,7 @@ services:
     volumes:
       - ./backend:/app
       - ./data/evidence:/app/storage/evidence
+      - ./backend/routers/service-account.json:/service-account.json:ro
     restart: always
 
   frontend:
