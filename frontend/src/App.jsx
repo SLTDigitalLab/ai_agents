@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, useParams, useLocation, Navigate } from 'react-router-dom';
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
 import { PublicClientApplication, InteractionStatus } from "@azure/msal-browser";
-import { msalConfig, loginRequest } from './authConfig';
+import { msalConfig, loginRequest, authFlowStorage } from './authConfig';
 import { AGENTS } from './config/agents';
 import ChatInterface from './components/ChatInterface';
 import ChatBrowser from './components/admin/ChatBrowser';
@@ -288,8 +288,8 @@ const AgentWrapper = () => {
 
   const handleLogin = () => {
     // 1. Set flags so the app knows this is a legitimate user action, not a back-button loop.
-    sessionStorage.setItem("intentionalLogin", "true");
-    sessionStorage.setItem("lastAgent", location.pathname);
+    authFlowStorage.setItem("intentionalLogin", "true");
+    authFlowStorage.setItem("lastAgent", location.pathname);
 
     // 2. Use Redirect, NOT popup.
     instance.loginRedirect(loginRequest).catch((e) => console.error(e));
@@ -556,11 +556,12 @@ function App() {
     msalInstance.initialize().then(() => {
       msalInstance.handleRedirectPromise().then((response) => {
         // Grab the agent the user originally wanted to log into
-        const targetRoute = sessionStorage.getItem('lastAgent') || '/';
+        const targetRoute = authFlowStorage.getItem('lastAgent') || '/';
 
         if (response) {
           // 1. Legitimate, intentional login. 
-          sessionStorage.removeItem('intentionalLogin');
+          authFlowStorage.removeItem('intentionalLogin');
+          authFlowStorage.removeItem('lastAgent');
           window.location.replace(targetRoute);
           return;
         }
@@ -571,6 +572,8 @@ function App() {
         if (window.location.pathname === '/auth/callback') {
           // Wipe the local session storage so React forgets the authenticated state
           sessionStorage.clear();
+          authFlowStorage.removeItem('intentionalLogin');
+          authFlowStorage.removeItem('lastAgent');
 
           // Send you cleanly to the unauthenticated view
           window.location.replace(targetRoute);

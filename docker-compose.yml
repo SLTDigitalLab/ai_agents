@@ -47,6 +47,7 @@ services:
       - ./.env
     volumes:
       - ./backend:/app
+      - ./backend/routers/service-account.json:/service-account.json:ro
     restart: always
 
   frontend:

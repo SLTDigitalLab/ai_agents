@@ -8,6 +8,21 @@
   <meta name="description"
     content="SLTMobitel Enterprise AI Agent — Intelligent assistance for HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, and more." />
   <title>SLTMobitel AI Agent</title>
+  <script>
+    if (typeof Object.hasOwn !== "function") {
+      Object.defineProperty(Object, "hasOwn", {
+        value: function hasOwn(object, property) {
+          if (object == null) {
+            throw new TypeError("Cannot convert undefined or null to object");
+          }
+          return Object.prototype.hasOwnProperty.call(Object(object), property);
+        },
+        configurable: true,
+        enumerable: false,
+        writable: true
+      });
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
