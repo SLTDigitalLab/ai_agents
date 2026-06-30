@@ -395,8 +395,31 @@ const AgentWrapper = () => {
             )}
           </div>
 
-          {/* Right cluster: SLT logo + mobile avatar for internal authenticated agents */}
+          {/* Right cluster: Voice Agent pill + SLT logo + mobile avatar for internal authenticated agents */}
           <div className="flex items-center gap-2 sm:gap-0 shrink-0">
+            {/* Voice Agent — header pill (desktop); also available in the avatar menu on mobile */}
+            {!isPublicAgent && (
+              <AuthenticatedTemplate>
+                <motion.button
+                  type="button"
+                  onClick={() => { window.location.href = '/voice'; }}
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.97 }}
+                  title="Voice Agent"
+                  className={`hidden sm:flex items-center gap-2 mr-4 bg-gradient-to-r ${agentConfig.color} text-white px-4 py-2 rounded-full text-sm font-semibold shadow-md hover:shadow-lg transition-shadow`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                    <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
+                    <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
+                  </svg>
+                  Voice Agent
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+                  </svg>
+                </motion.button>
+              </AuthenticatedTemplate>
+            )}
+
             <img
               src={sltLogo}
               alt="SLTMobitel"
