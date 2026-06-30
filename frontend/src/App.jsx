@@ -11,6 +11,7 @@ import IngestionPanel from './components/admin/IngestionPanel';
 import FeedbackPanel from './components/admin/FeedbackPanel';
 import AdminRoute from './components/admin/AdminRoute';
 import IframeChatPage from './components/admin/IframeChatPage';
+import VoiceAgentPage from './pages/VoiceAgentPage';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 import embryoLogo from './assets/embryo-removebg.png';
@@ -183,6 +184,19 @@ const UserAvatarMenu = ({ user, onLogout, agentColor, placement = 'upRight' }) =
                 ))}
               </div>
             </div>
+
+            {/* Voice Agent */}
+            <button
+              type="button"
+              onClick={() => { window.location.href = '/voice'; }}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-800"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-gray-500 dark:text-gray-400">
+                <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
+                <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
+              </svg>
+              Voice Agent
+            </button>
 
             {/* Logout */}
             <button
@@ -634,6 +648,7 @@ function App() {
             <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
 
+          <Route path="/voice" element={<VoiceAgentPage />} />
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
       </BrowserRouter>
