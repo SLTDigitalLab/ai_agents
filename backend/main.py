@@ -8,6 +8,7 @@ logging.basicConfig(
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
+from routers import lifestore_payments
 from routers.voice_agent import realtime
 from services.ingestion import router as ingestion_router
 
@@ -31,6 +32,7 @@ app.add_middleware(
 app.include_router(admin.router)
 app.include_router(chat.router)  # Connect the new chat endpoint
 app.include_router(orders.router)  # LifeStore order submissions
+app.include_router(lifestore_payments.router)  # LifeStore cart + PayHere checkout
 app.include_router(enterprise.router)  # Enterprise lead → Bitrix24
 app.include_router(admin_dashboard.router)  # Admin dashboard panel
 app.include_router(feedback.router)  # Feedback (thumbs up/down)

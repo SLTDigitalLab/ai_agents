@@ -3,6 +3,7 @@ import { useMsal } from "@azure/msal-react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
 import LifestoreForm from './forms/LifestoreForm';
+import LifestoreCheckout from './forms/LifestoreCheckout';
 import EnterpriseForm from './forms/EnterpriseForm';
 import embryoLogo from '../assets/embryo-removebg.png';
 import ReactMarkdown from 'react-markdown';
@@ -62,12 +63,13 @@ const saveLocalMessages = (agentId, threadId, messages) => {
     if (!agentId || !threadId || !Array.isArray(messages)) return;
 
     const cleanMessages = messages
-        .filter((msg) => msg && (msg.type === 'user' || msg.text || msg.formType || (msg.productCards && msg.productCards.length)))
+        .filter((msg) => msg && (msg.type === 'user' || msg.text || msg.formType || msg.checkoutOrderId || (msg.productCards && msg.productCards.length)))
         .map((msg) => ({
             type: msg.type,
             text: msg.text || '',
             formType: msg.formType || null,
             formData: msg.formData || null,
+            checkoutOrderId: msg.checkoutOrderId || null,
             productCards: Array.isArray(msg.productCards) ? msg.productCards : [],
             productCardDisplay: msg.productCardDisplay || null,
             error: !!msg.error,
@@ -493,6 +495,9 @@ const buildBotMessageFromJsonResponse = (data) => {
         }
     }
 
+    const checkout = extractCheckoutMarker(text);
+    text = checkout.text;
+
     const productCards = prepareProductCardsForDisplay([...directPayload.cards, ...embedded.productCards]);
 
     return {
@@ -506,6 +511,7 @@ const buildBotMessageFromJsonResponse = (data) => {
         ),
         formType,
         formData: data.form_payload || data.formData || null,
+        checkoutOrderId: checkout.checkoutOrderId,
         timestamp: Date.now(),
     };
 };
@@ -525,6 +531,9 @@ const mapHistoryMessage = (msg) => {
     const embedded = extractEmbeddedProductCardsFromText(text);
     text = embedded.text;
 
+    const checkout = extractCheckoutMarker(text);
+    text = checkout.text;
+
     const directPayload = extractProductCardPayloadFromJsonResponse(msg);
     const productCards = prepareProductCardsForDisplay([
         ...directPayload.cards,
@@ -536,6 +545,7 @@ const mapHistoryMessage = (msg) => {
         text: removeBadImageUrlLines(text),
         formType,
         formData: msg.formData || msg.form_payload || null,
+        checkoutOrderId: checkout.checkoutOrderId,
         productCards,
         productCardDisplay: mergeProductDisplay(
             msg.productCardDisplay,
@@ -553,6 +563,21 @@ const mapHistoryMessage = (msg) => {
 const FORM_TOKENS = {
     '[RENDER_LIFESTORE_FORM]': 'lifestore',
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
+};
+
+// Chat-driven PayHere checkout marker: [RENDER_LIFESTORE_CHECKOUT:<order_id>].
+// The backend agent emits this after creating an order; the frontend renders a
+// secure checkout card that loads the amount/link from the backend by order id.
+const CHECKOUT_TOKEN_RE = /\[RENDER_LIFESTORE_CHECKOUT:([^\]\s]+)\]/;
+
+const extractCheckoutMarker = (text) => {
+    const source = String(text || '');
+    const match = source.match(CHECKOUT_TOKEN_RE);
+    if (!match) return { text: source, checkoutOrderId: null };
+    return {
+        text: source.replace(match[0], '').trim(),
+        checkoutOrderId: match[1],
+    };
 };
 
 // Greeting pool for the idle landing screen.
@@ -1546,6 +1571,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         text: cleanText,
                         formType: currentFormType || botMessage.formType || newMessages[lastIdx].formType,
                         formData: botMessage.formData || newMessages[lastIdx].formData || null,
+                        checkoutOrderId: botMessage.checkoutOrderId || newMessages[lastIdx].checkoutOrderId || null,
                         productCards: botMessage.productCards || [],
                         productCardDisplay: botMessage.productCardDisplay || newMessages[lastIdx].productCardDisplay || null,
                     };
@@ -1582,6 +1608,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     }
                 }
 
+                const checkout = extractCheckoutMarker(cleanText);
+                cleanText = checkout.text;
+
                 setMessages(prev => {
                     const newMessages = [...prev];
                     const lastIdx = newMessages.length - 1;
@@ -1591,6 +1620,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         ...newMessages[lastIdx],
                         text: cleanText,
                         formType: currentFormType || newMessages[lastIdx].formType,
+                        checkoutOrderId: checkout.checkoutOrderId || newMessages[lastIdx].checkoutOrderId || null,
                         productCards,
                         productCardDisplay: mergeProductDisplay(
                             newMessages[lastIdx].productCardDisplay,
@@ -1627,6 +1657,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         text: cleanText,
                         formType: currentFormType || botMessage.formType || newMessages[lastIdx].formType,
                         formData: botMessage.formData || newMessages[lastIdx].formData || null,
+                        checkoutOrderId: botMessage.checkoutOrderId || newMessages[lastIdx].checkoutOrderId || null,
                         productCards: botMessage.productCards || [],
                         productCardDisplay: botMessage.productCardDisplay || newMessages[lastIdx].productCardDisplay || null,
                     };
@@ -1875,7 +1906,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         >
                             <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
                                 {messages.map((msg, index) => {
-                                    if (!(msg.type === 'user' || msg.text || msg.formType || (Array.isArray(msg.productCards) && msg.productCards.length > 0))) return null;
+                                    if (!(msg.type === 'user' || msg.text || msg.formType || msg.checkoutOrderId || (Array.isArray(msg.productCards) && msg.productCards.length > 0))) return null;
                                     const isLastMsg = index === lastRenderedIdx;
                                     const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
                                     const isErrorMsg = msg.error && isLastMsg;
@@ -1892,6 +1923,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                     const sources = Array.from(sourceMatches).map(m => ({ name: m[1], url: m[2] }));
                                     const productCards = Array.isArray(msg.productCards) ? msg.productCards : [];
                                     const productCardDisplay = msg.productCardDisplay || normalizeProductDisplay(null, productCards.length);
+                                    const checkoutOrderId = msg.checkoutOrderId || null;
 
                                     const markdownComponents = {
                                         p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
@@ -1967,6 +1999,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                         <LifestoreForm initialProduct={msg.formData?.product || productCards[0]?.name || ''} />
                                                     )}
                                                     {msg.formType === 'enterprise' && <EnterpriseForm />}
+                                                    {checkoutOrderId && <LifestoreCheckout orderId={checkoutOrderId} />}
                                                 </div>
                                             )}
 

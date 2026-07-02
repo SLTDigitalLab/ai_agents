@@ -18,6 +18,7 @@ Flow:
     START ──► agent (LLM) ──► tools_condition ──► tools ──► agent ──► END
 """
 
+import os
 import re
 
 from langchain_core.messages import AIMessage, trim_messages
@@ -28,6 +29,7 @@ from core.llm import get_chat_model
 from domain.state import AgentState
 from domain.tools.rag_tools import search_knowledge_base
 from domain.tools.lifestore_mcp_tools import LIFESTORE_MCP_TOOLS
+from domain.tools.lifestore_cart_tools import LIFESTORE_CART_TOOLS
 
 
 # ── LLM setup ────────────────────────────────────────────────────────────
@@ -38,13 +40,14 @@ llm = get_chat_model()
 # Base tool used by all KB + Form agents.
 BASE_TOOLS = [search_knowledge_base]
 
-# LifeStore gets the normal RAG tool plus MCP-backed product tools.
-LIFESTORE_TOOLS = BASE_TOOLS + LIFESTORE_MCP_TOOLS
+# LifeStore gets the normal RAG tool, MCP-backed product tools, and the
+# chat-driven cart + PayHere checkout tools.
+LIFESTORE_TOOLS = BASE_TOOLS + LIFESTORE_MCP_TOOLS + LIFESTORE_CART_TOOLS
 
 # ToolNode must know every possible tool that any agent in this workflow can call.
 # However, in call_model(), the LLM is only bound to the correct tool list for
 # the current agent_id, so Enterprise will not see LifeStore-specific MCP tools.
-ALL_TOOLS = BASE_TOOLS + LIFESTORE_MCP_TOOLS
+ALL_TOOLS = BASE_TOOLS + LIFESTORE_MCP_TOOLS + LIFESTORE_CART_TOOLS
 
 
 def _is_lifestore_agent(agent_id: str) -> bool:
@@ -145,10 +148,42 @@ Use the tools like this:
    - "What categories do you have?"
    - "List LifeStore product categories"
 
-8. `lifestore_create_draft_order_tool`
-   Use this only when the user has clearly selected product(s) and wants to proceed with an order.
-   This creates a local draft order only. It does not place a real LifeStore order.
-   In the normal website flow, the frontend form handles customer details.
+8. `lifestore_add_to_cart`
+   Use this when the customer wants to add/buy a specific product
+   (e.g. "add the COMSTOX ZLT T10 Max", "I'll take 2 of those", "buy this one").
+   Pass the product name/ID as product_query and the quantity. The price is
+   taken from the live catalog automatically — NEVER state or guess a price.
+   After adding, briefly confirm what was added and the running subtotal from
+   the tool result.
+
+9. `lifestore_view_cart`
+   Use when the customer asks what's in their cart, or before checkout.
+
+10. `lifestore_update_cart_item` / `lifestore_remove_from_cart` / `lifestore_clear_cart`
+   Use to change a quantity ("make it 3"), remove one product, or empty the cart.
+
+11. `lifestore_begin_checkout`  ← PAYMENT
+   Use ONLY when the customer clearly wants to pay / check out and the cart is
+   not empty (e.g. "checkout", "pay now", "place the order", "I'm ready to pay").
+   The tool returns an `order_id` and the server-computed `amount`.
+   After it succeeds you MUST:
+   - Tell the customer the total to pay (use the tool's `amount` exactly).
+   - Say clearly this is a sandbox demo payment — no real money is charged.
+   - End your reply with EXACTLY this marker on its own, using the returned id:
+     [RENDER_LIFESTORE_CHECKOUT:<order_id>]
+   NEVER write a payment URL, card form, or made-up amount yourself. The secure
+   PayHere checkout button is rendered by the frontend from the order_id.
+   Do NOT append the old [RENDER_LIFESTORE_FORM] token in the checkout flow.
+
+CHECKOUT SAFETY RULES:
+- All prices and totals come only from the cart/checkout tool results. Never
+  invent, estimate, or round prices.
+- If lifestore_begin_checkout returns status "cart_empty", ask the customer to
+  add a product first instead of emitting a checkout marker.
+
+8b. `lifestore_create_draft_order_tool`
+   Legacy local draft order (no payment). Do not use this for the normal cart +
+   pay flow; prefer lifestore_add_to_cart + lifestore_begin_checkout.
 
 IMPORTANT LIFESTORE RULES:
 - For LifeStore product questions, prefer MCP product tools over `search_knowledge_base`.
@@ -159,6 +194,88 @@ IMPORTANT LIFESTORE RULES:
 - Do NOT print raw image URLs in the chat answer. Image URLs belong only in structured product data.
 - Do NOT invent prices, stock status, seller, brand, features, categories, offer labels, or availability.
 """
+
+def _payments_enabled() -> bool:
+    return os.getenv("LIFESTORE_PAYMENTS_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+
+
+def _build_purchase_rule(agent_id: str, form_token: str) -> str:
+    """
+    Build the "what happens on purchase intent" section of the prompt.
+
+    LifeStore with payments enabled uses the cart/checkout tools exclusively
+    and must NEVER fall back to the legacy [RENDER_LIFESTORE_FORM] token — that
+    token is only for Enterprise (and LifeStore when payments are disabled).
+    Mixing the two caused both the cart tool AND the old form to render for the
+    same purchase message.
+    """
+    if _is_lifestore_agent(agent_id) and _payments_enabled():
+        return f"""
+5. PURCHASE / CHECKOUT RULE (chat commerce):
+   LifeStore purchases go through the cart + checkout tools only
+   (`lifestore_add_to_cart`, `lifestore_view_cart`, `lifestore_update_cart_item`,
+   `lifestore_remove_from_cart`, `lifestore_clear_cart`, `lifestore_begin_checkout`).
+
+   The token {form_token} is RETIRED for LifeStore. Never write it, in any
+   response, for any reason.
+
+   When the user expresses intent to add/buy a specific product
+   (e.g. "I want to buy this", "add this to my cart", "I'll take 2"):
+   - Call `lifestore_add_to_cart` with the product and quantity.
+   - Confirm what was added and the running subtotal using ONLY the tool's
+     returned values. Do not ask for name, address, or phone.
+
+   When the user expresses checkout/payment intent
+   (e.g. "checkout", "I'm ready to pay", "place the order", "pay now"):
+   - Call `lifestore_begin_checkout` and follow tool rule 11 exactly: state the
+     total from the tool result, mention this is a sandbox demo, and end the
+     reply with EXACTLY the returned [RENDER_LIFESTORE_CHECKOUT:<order_id>]
+     marker as the final text.
+
+   Do NOT end informational answers with purchase-suggestion sentences such as
+   "If you want, I can help you proceed with the purchase request."
+   If the user asks only for information, answer descriptively and stop — do
+   not add to the cart or start checkout.
+"""
+
+    return f"""
+5. FORM TRIGGER RULE:
+   Append {form_token} ONLY when the user's latest message directly and clearly expresses that they want to proceed with a purchase, order, subscription, application, registration, or service request.
+
+   Append {form_token} for clear intent such as:
+   - "I want to buy this"
+   - "I need to buy a TV"
+   - "I want to order this product"
+   - "I want to purchase this"
+   - "I want to subscribe to this package"
+   - "I need a new connection"
+   - "I want to apply for this service"
+   - "Register me for this"
+   - "How can I buy this?"
+   - "How can I order this?"
+
+   Do NOT append {form_token} for informational, comparison, recommendation, stock, seller, price, feature, or availability questions.
+
+   Do NOT append {form_token} for questions such as:
+   - "What is the price?"
+   - "Is this in stock?"
+   - "Is this available?"
+   - "Who is the seller?"
+   - "What are the features?"
+   - "Tell me about this product"
+   - "Compare these products"
+   - "Recommend a router"
+   - "Do you have TVs?"
+   - "What products are available?"
+
+   Do NOT end informational answers with purchase-suggestion sentences such as "If you want, I can help you proceed with the purchase request."
+
+   If the user asks only for information, answer descriptively and stop.
+
+   If the user clearly wants to buy/order/subscribe/apply/register, append exactly this token at the very end of the response:
+   {form_token}
+"""
+
 
 def _get_enterprise_tool_rules() -> str:
     return """
@@ -253,6 +370,52 @@ def _build_system_prompt(agent_id: str, form_token: str) -> str:
         else f"{agent_id} products and services"
     )
 
+    purchase_rule = _build_purchase_rule(agent_id, form_token)
+    lifestore_cart_checkout_active = is_lifestore and _payments_enabled()
+
+    ordering_note = (
+        (
+            "- For normal LifeStore product answers, place the product-card block after the visible answer.\n"
+            "- If the answer also triggers checkout (tool rule 11), place the product-card block before the "
+            "[RENDER_LIFESTORE_CHECKOUT:<order_id>] marker, and keep that marker as the final text in the "
+            "entire response. Never place [RENDER_LIFESTORE_FORM] anywhere — it is retired for LifeStore."
+        )
+        if lifestore_cart_checkout_active
+        else (
+            f"- For normal LifeStore product answers, place the product-card block after the visible answer.\n"
+            f"- If the answer also needs {form_token}, place the product-card block before {form_token}, "
+            f"and keep {form_token} as the final text in the entire response."
+        )
+    )
+
+    closing_example = (
+        (
+            'Example Informational Response:\n'
+            'User: "Do you have TVs?"\n'
+            'Assistant: "Yes, LifeStore has TV-related products available."\n\n'
+            'Example Add-to-Cart Response:\n'
+            'User: "I need to buy a TV."\n'
+            'Assistant: calls lifestore_add_to_cart, then replies '
+            '"I\'ve added <TV name> to your cart. Subtotal: <amount>." '
+            '(no form token, no checkout marker yet)\n\n'
+            'Example Checkout Response:\n'
+            'User: "Checkout" / "I\'m ready to pay"\n'
+            'Assistant: calls lifestore_begin_checkout, then replies with the total, '
+            'a note that this is a sandbox demo, and ends with exactly '
+            '[RENDER_LIFESTORE_CHECKOUT:<order_id>] as the final text.'
+        )
+        if lifestore_cart_checkout_active
+        else (
+            'Example Informational Response:\n'
+            'User: "Do you have TVs?"\n'
+            'Assistant: "Yes, LifeStore has TV-related products available."\n\n'
+            'Example Purchase Response:\n'
+            'User: "I need to buy a TV."\n'
+            'Assistant: "I can help you start the purchase request for the TV."\n\n'
+            f'{form_token}'
+        )
+    )
+
     return f"""You are the Ask {agent_id.upper()} AI assistant for SLTMobitel.
 Your primary purpose is to answer questions related to {product_or_service_label}.
 You handle {agent_id} queries only.
@@ -269,42 +432,7 @@ STRICT RULES FOR FACTUAL QUESTIONS:
 2. DO NOT use your pre-trained general knowledge to answer factual or product questions.
 3. If the selected tool returns an empty result, or if the retrieved context does not clearly contain the answer, you MUST say that you could not find enough information in the current knowledge base.
 4. If a tool returns an error, inform the user honestly that you could not retrieve the information. DO NOT fabricate data.
-5. FORM TRIGGER RULE:
-   Append {form_token} ONLY when the user's latest message directly and clearly expresses that they want to proceed with a purchase, order, subscription, application, registration, or service request.
-
-   Append {form_token} for clear intent such as:
-   - "I want to buy this"
-   - "I need to buy a TV"
-   - "I want to order this product"
-   - "I want to purchase this"
-   - "I want to subscribe to this package"
-   - "I need a new connection"
-   - "I want to apply for this service"
-   - "Register me for this"
-   - "How can I buy this?"
-   - "How can I order this?"
-
-   Do NOT append {form_token} for informational, comparison, recommendation, stock, seller, price, feature, or availability questions.
-
-   Do NOT append {form_token} for questions such as:
-   - "What is the price?"
-   - "Is this in stock?"
-   - "Is this available?"
-   - "Who is the seller?"
-   - "What are the features?"
-   - "Tell me about this product"
-   - "Compare these products"
-   - "Recommend a router"
-   - "Do you have TVs?"
-   - "What products are available?"
-
-   Do NOT end informational answers with purchase-suggestion sentences such as "If you want, I can help you proceed with the purchase request."
-
-   If the user asks only for information, answer descriptively and stop.
-
-   If the user clearly wants to buy/order/subscribe/apply/register, append exactly this token at the very end of the response:
-   {form_token}
-
+{purchase_rule}
 6. Do NOT ask the user for their name, NIC, phone number, address, or personal details in the chat. The form will handle that.
 7. CRITICAL: When the context contains multiple items, you MUST carefully isolate the specific item the user asked about. DO NOT mix up details belonging to one product or service with another.
 
@@ -536,23 +664,14 @@ For category or multi-product answers, use:
 [/LIFESTORE_PRODUCT_CARDS]
 
 IMPORTANT ORDERING:
-- For normal LifeStore product answers, place the product-card block after the visible answer.
-- If the answer also needs {form_token}, place the product-card block before {form_token}, and keep {form_token} as the final text in the entire response.
+{ordering_note}
 
 CITATIONS:
 1. You may see `[Source: ... | Link: ...]` tags in retrieved context.
 2. You MUST IGNORE these tags.
 3. DO NOT include any "Sources:" section or links in your response.
 
-Example Informational Response:
-User: "Do you have TVs?"
-Assistant: "Yes, LifeStore has TV-related products available."
-
-Example Purchase Response:
-User: "I need to buy a TV."
-Assistant: "I can help you start the purchase request for the TV."
-
-{form_token}
+{closing_example}
 """
 
 
@@ -567,7 +686,16 @@ async def call_model(state: AgentState) -> dict:
     # Fast deterministic form trigger for clear LifeStore purchase intent.
     # This avoids an unnecessary LLM/tool round-trip and makes the existing
     # frontend/src/components/forms/LifestoreForm.jsx render reliably.
-    if _is_lifestore_agent(agent_id) and _is_lifestore_purchase_intent(latest_user_text):
+    #
+    # When the chat-driven cart + PayHere checkout is enabled (default), we skip
+    # this short-circuit for LifeStore so purchase intent flows into the cart /
+    # begin_checkout tools instead of the legacy name/address/phone email form.
+    _payments_enabled = os.getenv("LIFESTORE_PAYMENTS_ENABLED", "true").strip().lower() in {"1", "true", "yes"}
+    if (
+        _is_lifestore_agent(agent_id)
+        and not _payments_enabled
+        and _is_lifestore_purchase_intent(latest_user_text)
+    ):
         product_hint = _extract_lifestore_purchase_product(latest_user_text)
 
         if product_hint:
