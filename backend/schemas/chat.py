@@ -83,6 +83,45 @@ class ChatRequest(BaseModel):
 
         return value
 
+    @field_validator("user_name", mode="before")
+    @classmethod
+    def validate_user_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = str(value).strip()
+        if not value:
+            return None
+
+        # Strip control characters; keep the rest of the display name intact.
+        return CONTROL_CHAR_PATTERN.sub("", value)
+
+    @field_validator("department", mode="before")
+    @classmethod
+    def validate_department(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = str(value).strip()
+        if not value:
+            return None
+
+        # Strip control characters; keep the rest of the department name intact.
+        return CONTROL_CHAR_PATTERN.sub("", value)
+
+    @field_validator("job_title", mode="before")
+    @classmethod
+    def validate_job_title(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = str(value).strip()
+        if not value:
+            return None
+
+        # Strip control characters; keep the rest of the title intact.
+        return CONTROL_CHAR_PATTERN.sub("", value)
+
     @field_validator("thread_id", mode="before")
     @classmethod
     def validate_thread_id(cls, value: Optional[str]) -> str:

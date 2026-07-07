@@ -13,18 +13,62 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
 
-from core.checkpointer import get_postgres_checkpointer, get_async_postgres_checkpointer
-from domain.registry import get_agent_builder
-from domain.guardrails import classify_intent
-from schemas.chat import ChatRequest
 from core.config import settings
+from domain.registry import (
+    get_agent_builder,
+    get_compiled_async_graph,
+    get_compiled_sync_graph,
+)
+from domain.guardrails import classify_intent
 from domain.tools.rag_tools import clear_thread_evidence, consume_thread_evidence
-from langchain_core.tracers.context import tracing_v2_enabled
+from schemas.chat import ChatRequest
+from services.sessions import record_session
+
+# --- 1. Import Langfuse CallbackHandler ---
+from langfuse.langchain import CallbackHandler
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
 
 BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
+
+# Shown when the underlying LLM provider is out of quota / rate-limited
+# (Gemini ResourceExhausted, OpenAI insufficient_quota / 429, etc.) so the
+# user never sees a raw provider error.
+BUSY_MESSAGE = (
+    "I'm a little busy right now and can't respond at the moment. "
+    "Please try again in a few minutes."
+)
+
+# Generic fallback for any other unexpected failure.
+GENERIC_ERROR_MESSAGE = (
+    "Sorry, something went wrong on my end. Please try again."
+)
+
+# Substrings that indicate the LLM provider rejected the call due to
+# quota/rate limits rather than a real application bug.
+_QUOTA_ERROR_MARKERS = (
+    "quota",
+    "rate limit",
+    "ratelimit",
+    "429",
+    "resourceexhausted",
+    "resource_exhausted",
+    "insufficient_quota",
+    "too many requests",
+    "exceeded your current quota",
+)
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    """True if the exception looks like a provider quota / rate-limit error."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(marker in text for marker in _QUOTA_ERROR_MARKERS)
+
+# Product agents skip query PII masking: model/SKU numbers in product
+# searches would otherwise be mangled (e.g. masked as [PHONE]/[CARD_NUMBER])
+# and degrade retrieval. These agents are owned/managed separately.
+PII_MASK_EXEMPT_AGENTS = {"lifestore", "enterprise"}
 
 # ── Guardrail helpers: PII masking + URL validation ─────────────────────
 PII_PATTERNS: list[tuple[re.Pattern, str]] = [
@@ -162,6 +206,8 @@ def _message_content_to_text(content, strip: bool = True) -> str:
 
     return str(content).strip() if strip else str(content)
 
+
+# ── Evidence selection helpers ──────────────────────────────────────────
 def _normalize_text(value: str) -> str:
     """Lowercase text and collapse spaces for matching."""
     return re.sub(r"\s+", " ", (value or "").strip().lower())
@@ -294,6 +340,7 @@ def _select_best_evidence(answer_text: str, evidence_items: list[dict]) -> list[
     # The Sources section is enough for text-only answers.
     return []
 
+
 def _extract_used_source_keys(answer_text: str) -> tuple[set[str], set[str]]:
     """Extract source names and URLs from the final Sources section."""
     if not answer_text:
@@ -372,6 +419,7 @@ def _build_evidence_stream_chunk(answer_text: str, thread_id: str) -> str:
         + "[[/EVIDENCE_JSON]]"
     )
 
+
 @router.post("")
 async def chat(request: ChatRequest):
     """Handle an incoming chat message from the frontend with streaming."""
@@ -382,10 +430,39 @@ async def chat(request: ChatRequest):
 
     async def event_generator() -> AsyncGenerator[str, None]:
         clear_thread_evidence(request.thread_id)
-        safe_user_message = mask_pii(request.message)
+        # Skip masking for product agents so SKU/model numbers survive.
+        if request.agent_id in PII_MASK_EXEMPT_AGENTS:
+            safe_user_message = request.message
+        else:
+            safe_user_message = mask_pii(request.message)
+        # Tracked outside the try so the error handler can tell whether a
+        # partial answer was already streamed before the failure.
+        streamed_any_text = False
         try:
-            # Thread config enables LangGraph memory/checkpointing per conversation
-            config = {"configurable": {"thread_id": request.thread_id}}
+            # --- 2. Initialize Langfuse Handler (Empty in v3+) ---
+            langfuse_handler = CallbackHandler()
+
+            # --- 3. Inject callbacks and Langfuse metadata into the config ---
+            config = {
+                "configurable": {"thread_id": request.thread_id},
+                "callbacks": [langfuse_handler],
+                "metadata": {
+                    "langfuse_session_id": request.thread_id,
+                    "langfuse_user_id": request.user_id,
+                    "langfuse_tags": [request.agent_id, "prod"]
+                }
+            }
+
+            # Record who is behind this session (id + display name) so the admin
+            # panel can attribute sessions and agents can personalize by name.
+            record_session(
+                agent_id=request.agent_id,
+                thread_id=request.thread_id,
+                user_id=request.user_id,
+                user_name=request.user_name,
+                department=request.department,
+                job_title=request.job_title,
+            )
 
             # ── Run guardrail classifier FIRST ──────────────────────────
             # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
@@ -436,134 +513,145 @@ async def chat(request: ChatRequest):
                 "sentiment": guardrail.sentiment,
             }
 
-            # Use the ASYNC checkpointer for streaming – required by astream_events
-            async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
-                workflow = builder_fn()
-                graph = workflow.compile(checkpointer=checkpointer)
+            # Reuse the cached, pre-compiled graph bound to a long-lived pool.
+            graph = await get_compiled_async_graph(request.agent_id)
 
-                streamed_any_text = False
-                streamed_response_text = ""
+            streamed_response_text = ""
 
-                project_name = f"Ask SLT - {request.agent_id.upper()}"
-                with tracing_v2_enabled(project_name=project_name):
-                    # We use astream_events (v2) for fine-grained streaming.
-                    #
-                    # Nodes whose token stream must be SUPPRESSED — these fan
-                    # out multiple concurrent LLM calls whose tokens would
-                    # otherwise interleave in the HTTP stream and render as
-                    # garbled text on the client. The final merged reply from
-                    # the downstream synthesis node still streams cleanly.
-                    #
-                    # Specialists invoked inside multi_delegate run as compiled
-                    # subgraphs, so their LLM events bubble up with the subgraph's
-                    # internal node name ("agent") rather than the parent node.
-                    # We must also match on ``langgraph_checkpoint_ns`` (a
-                    # namespace string like "multi_delegate:<hash>|agent:<hash>")
-                    # to suppress nested events too.
-                    SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
-                    logged_metadata_sample = False
+            # We use astream_events (v2) for fine-grained streaming.
+            #
+            # Nodes whose token stream must be SUPPRESSED — these fan
+            # out multiple concurrent LLM calls whose tokens would
+            # otherwise interleave in the HTTP stream and render as
+            # garbled text on the client. The final merged reply from
+            # the downstream synthesis node still streams cleanly.
+            #
+            # Specialists invoked inside multi_delegate run as compiled
+            # subgraphs, so their LLM events bubble up with the subgraph's
+            # internal node name ("agent") rather than the parent node.
+            # We must also match on ``langgraph_checkpoint_ns`` (a
+            # namespace string like "multi_delegate:<hash>|agent:<hash>")
+            # to suppress nested events too.
+            SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
+            logged_metadata_sample = False
 
-                    # ── DeepSeek-R1 <think> stripper ─────────────
-                    # The internal SLM (deepseek-r1) prefixes its output
-                    # with <think>...</think> reasoning tokens. We hide
-                    # those from the user but let the final answer stream.
-                    strip_think = request.agent_id == "askhrslm"
-                    think_buffer = ""
-                    in_think_block = False
-                    think_done = False
+            # ── DeepSeek-R1 <think> stripper ─────────────
+            # The internal SLM (deepseek-r1) prefixes its output
+            # with <think>...</think> reasoning tokens. We hide
+            # those from the user but let the final answer stream.
+            strip_think = request.agent_id == "askhrslm"
+            think_buffer = ""
+            in_think_block = False
+            think_done = False
 
-                    async for event in graph.astream_events(state, config, version="v2"):
-                        # ── Extract tokens from stream events ────────
-                        kind = event["event"]
+            # --- 4. The `config` object here now contains the Langfuse callbacks ---
+            async for event in graph.astream_events(state, config, version="v2"):
+                # ── Extract tokens from stream events ────────
+                kind = event["event"]
 
-                        if kind == "on_chat_model_stream":
-                            metadata = event.get("metadata") or {}
+                if kind == "on_chat_model_stream":
+                    metadata = event.get("metadata") or {}
 
-                            if not logged_metadata_sample:
-                                logger.info(
-                                    "Stream metadata sample | node=%r | checkpoint_ns=%r | tags=%r",
-                                    metadata.get("langgraph_node"),
-                                    metadata.get("langgraph_checkpoint_ns"),
-                                    event.get("tags"),
-                                )
-                                logged_metadata_sample = True
+                    if not logged_metadata_sample:
+                        logger.info(
+                            "Stream metadata sample | node=%r | checkpoint_ns=%r | tags=%r",
+                            metadata.get("langgraph_node"),
+                            metadata.get("langgraph_checkpoint_ns"),
+                            event.get("tags"),
+                        )
+                        logged_metadata_sample = True
 
-                            node = metadata.get("langgraph_node")
-                            checkpoint_ns = metadata.get("langgraph_checkpoint_ns") or ""
-                            suppressed = (
-                                node in SUPPRESS_STREAM_NODES
-                                or any(
-                                    suppressed_node in checkpoint_ns
-                                    for suppressed_node in SUPPRESS_STREAM_NODES
-                                )
-                            )
-                            if suppressed:
-                                continue
+                    node = metadata.get("langgraph_node")
+                    checkpoint_ns = metadata.get("langgraph_checkpoint_ns") or ""
+                    suppressed = (
+                        node in SUPPRESS_STREAM_NODES
+                        or any(
+                            suppressed_node in checkpoint_ns
+                            for suppressed_node in SUPPRESS_STREAM_NODES
+                        )
+                    )
+                    if suppressed:
+                        continue
 
-                            content = event["data"]["chunk"].content
-                            text = _message_content_to_text(content, strip=False)
+                    content = event["data"]["chunk"].content
+                    text = _message_content_to_text(content, strip=False)
 
-                            if text and strip_think and not think_done:
-                                think_buffer += text
-                                if not in_think_block and "<think>" in think_buffer:
-                                    in_think_block = True
-                                    think_buffer = think_buffer.split("<think>", 1)[1]
-                                    text = ""
-                                if in_think_block:
-                                    if "</think>" in think_buffer:
-                                        # Drop everything up to and including </think>;
-                                        # whatever follows is the real answer.
-                                        text = think_buffer.split("</think>", 1)[1].lstrip()
-                                        in_think_block = False
-                                        think_done = True
-                                        think_buffer = ""
-                                    else:
-                                        text = ""  # still inside think block
-                                elif "<think>" not in think_buffer:
-                                    # No think tag at all — flush buffer as normal output.
-                                    text = think_buffer
-                                    think_buffer = ""
-                                    think_done = True
+                    if text and strip_think and not think_done:
+                        think_buffer += text
+                        if not in_think_block and "<think>" in think_buffer:
+                            in_think_block = True
+                            think_buffer = think_buffer.split("<think>", 1)[1]
+                            text = ""
+                        if in_think_block:
+                            if "</think>" in think_buffer:
+                                # Drop everything up to and including </think>;
+                                # whatever follows is the real answer.
+                                text = think_buffer.split("</think>", 1)[1].lstrip()
+                                in_think_block = False
+                                think_done = True
+                                think_buffer = ""
+                            else:
+                                text = ""  # still inside think block
+                        elif "<think>" not in think_buffer:
+                            # No think tag at all — flush buffer as normal output.
+                            text = think_buffer
+                            think_buffer = ""
+                            think_done = True
 
+                    if text:
+                        streamed_any_text = True
+                        streamed_response_text += text
+                        yield text
+
+            # Fallback: if the graph responded without streaming tokens,
+            # fetch the latest AI message from final graph state.
+            if not streamed_any_text:
+                snapshot = await graph.aget_state(config)
+
+                if snapshot.values:
+                    messages = snapshot.values.get("messages", [])
+
+                    for msg in reversed(messages):
+                        if msg.type == "ai":
+                            text = _message_content_to_text(msg.content)
                             if text:
-                                streamed_any_text = True
+                                logger.info(
+                                    "Non-streaming fallback response used | agent=%s | thread=%s",
+                                    request.agent_id,
+                                    request.thread_id,
+                                )
                                 streamed_response_text += text
                                 yield text
+                                break
 
-                # Fallback: if the graph responded without streaming tokens,
-                # fetch the latest AI message from final graph state.
-                if not streamed_any_text:
-                    snapshot = await graph.aget_state(config)
+            # ── Visual/table evidence ───────────────────────────────
+            # Stream a hidden evidence block (cropped PDF images/tables)
+            # after the answer. The frontend parses and renders it as a
+            # "Relevant Evidence" section.
+            evidence_chunk = _build_evidence_stream_chunk(
+                streamed_response_text,
+                request.thread_id,
+            )
 
-                    if snapshot.values:
-                        messages = snapshot.values.get("messages", [])
-
-                        for msg in reversed(messages):
-                            if msg.type == "ai":
-                                text = _message_content_to_text(msg.content)
-                                if text:
-                                    logger.info(
-                                        "Non-streaming fallback response used | agent=%s | thread=%s",
-                                        request.agent_id,
-                                        request.thread_id,
-                                    )
-                                    streamed_response_text += text
-                                    yield text
-                                    break
-
-                evidence_chunk = _build_evidence_stream_chunk(
-                    streamed_response_text,
-                    request.thread_id,
-                )
-
-                if evidence_chunk:
-                    yield evidence_chunk
+            if evidence_chunk:
+                yield evidence_chunk
 
         except Exception as exc:
             import traceback
             error_details = traceback.format_exc()
             logger.error(f"Streaming error: {exc}\n{error_details}")
-            yield f"\n\n[ERROR]: {str(exc)}"
+
+            # Show a friendly message instead of leaking raw provider errors
+            # (quota exhausted, rate limits, etc.) to the user.
+            if _is_quota_error(exc):
+                user_message = BUSY_MESSAGE
+            else:
+                user_message = GENERIC_ERROR_MESSAGE
+
+            # If we already streamed part of an answer, separate the notice.
+            if streamed_any_text:
+                yield "\n\n"
+            yield user_message
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -576,45 +664,45 @@ async def get_history(agent_id: str, thread_id: str):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
-    workflow = builder_fn()
     config = {"configurable": {"thread_id": thread_id}}
 
     try:
-        with get_postgres_checkpointer(agent_id) as checkpointer:
-            graph = workflow.compile(checkpointer=checkpointer)
+        graph = get_compiled_sync_graph(agent_id)
 
-            snapshot = graph.get_state(config)
+        snapshot = graph.get_state(config)
 
-            if not snapshot.values:
-                return {"messages": []}
+        if not snapshot.values:
+            return {"messages": []}
 
-            messages = []
-            for msg in snapshot.values.get("messages", []):
-                if msg.type not in ("human", "ai"):
-                    continue
+        messages = []
+        for msg in snapshot.values.get("messages", []):
+            if msg.type not in ("human", "ai"):
+                continue
 
-                content = msg.content
-                if isinstance(content, list):
-                    text_parts = []
-                    for block in content:
-                        if isinstance(block, str):
-                            text_parts.append(block)
-                        elif isinstance(block, dict) and "text" in block:
-                            text_parts.append(str(block["text"]))
-                    content = _join_text_parts(text_parts)
-                elif not isinstance(content, str):
-                    content = str(content).strip()
-                else:
-                    content = content.strip()
+            content = msg.content
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, str):
+                        text_parts.append(block)
+                    elif isinstance(block, dict) and "text" in block:
+                        text_parts.append(str(block["text"]))
+                content = _join_text_parts(text_parts)
+            elif not isinstance(content, str):
+                content = str(content).strip()
+            else:
+                content = content.strip()
 
-                if content:
-                    messages.append({
-                        "type": msg.type,
-                        "content": content
-                    })
+            if content:
+                messages.append({
+                    "type": msg.type,
+                    "content": content
+                })
 
-            return {"messages": messages}
+        return {"messages": messages}
 
     except Exception as exc:
         logger.error(f"Error fetching history: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
+    
+    

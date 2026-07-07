@@ -8,6 +8,8 @@ import EnterpriseForm from './forms/EnterpriseForm';
 import embryoLogo from '../assets/embryo-removebg.png';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import Buttons from './Buttons';
+import { fetchUserProfile } from '../userProfile';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -204,8 +206,8 @@ const CopyMessageButton = ({ text }) => {
             disabled={copied}
             title={copied ? "Copied" : "Copy message"}
             className={`p-1.5 rounded-md transition-all duration-200 ${copied
-                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
+                ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
                 }`}
         >
             {copied ? (
@@ -233,8 +235,8 @@ const CodeBlock = ({ children, ...props }) => {
                 onClick={() => copy(text)}
                 title={copied ? "Copied" : "Copy code"}
                 className={`absolute top-2 right-2 px-2 py-1 rounded-md text-[0.7rem] font-medium transition-all duration-200 opacity-0 group-hover/code:opacity-100 ${copied
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
                     }`}
             >
                 {copied ? 'Copied' : 'Copy'}
@@ -247,7 +249,7 @@ const CodeBlock = ({ children, ...props }) => {
 };
 
 // ── Feedback Buttons Component ──────────────────────────────────────
-const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRating, onFeedback }) => {
+const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, existingRating, onFeedback }) => {
     const [rating, setRating] = useState(existingRating || null);
     const [submitting, setSubmitting] = useState(false);
 
@@ -291,6 +293,7 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                         message_index: messageIndex,
                         rating: finalRating,
                         user_id: userId,
+                        user_name: userName || null,
                     }),
                 });
                 if (res.ok) {
@@ -311,8 +314,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                 onClick={() => handleFeedback('up')}
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'up'
-                        ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                        : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
+                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                    : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
                     }`}
                 title="Helpful"
             >
@@ -324,8 +327,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                 onClick={() => handleFeedback('down')}
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'down'
-                        ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
-                        : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
+                    ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
+                    : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
                     }`}
                 title="Not helpful"
             >
@@ -382,7 +385,7 @@ const ScrollToLatestPill = ({ onClick, color }) => (
 );
 
 const ChatInterface = forwardRef(({ agentConfig }, ref) => {
-    const { accounts } = useMsal();
+    const { instance, accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
     const navigate = useNavigate();
 
@@ -391,6 +394,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const [messages, setMessages] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [feedbackMap, setFeedbackMap] = useState({}); // { messageIndex: rating }
+    const [previewImage, setPreviewImage] = useState(null);
 
     // Effect to handle Agent switching:
     // 1. Get/Create thread_id for the specific agent
@@ -805,6 +809,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
+                    maxLength={1500}
                     placeholder="Ask anything..."
                     className="flex-1 bg-transparent text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-[0.9375rem] pl-3 pr-2 py-2 outline-none resize-none leading-relaxed max-h-[150px] overflow-y-auto chat-scrollbar"
                 />
@@ -903,7 +908,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, delay: 0.12 }}
-                        className="text-xl sm:text-2xl text-gray-500 dark:text-gray-400 mt-2 font-light text-center"
+                        className={`${agentConfig.id === 'supervisor' ? 'text-lg sm:text-xl mt-6' : 'text-lg sm:text-2xl mt-3'} text-slate-600 dark:text-slate-300 text-center max-w-5xl mx-auto leading-relaxed`}
                     >
                         {agentConfig.idlePrompt || "How can I help you today?"}
                     </motion.p>
@@ -952,7 +957,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         >
                             <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
                                 {messages.map((msg, index) => {
-                                    if (!(msg.type === 'user' || msg.text || msg.formType)) return null;
+                                    if (!(msg.type === 'user' || msg.text || msg.formType || (msg.evidence && msg.evidence.length > 0))) return null;
                                     const isLastMsg = index === lastRenderedIdx;
                                     const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
                                     const isErrorMsg = msg.error && isLastMsg;
@@ -962,7 +967,14 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                         if (isLastMsg) lastMessageRef.current = el;
                                     };
 
-                                    const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
+                                    // Separate hidden evidence metadata from the answer text.
+                                    const parsedEvidence = parseEvidencePayload(msg.text || "");
+                                    const visibleText = parsedEvidence.text || "";
+                                    const evidence = msg.evidence?.length > 0
+                                        ? msg.evidence
+                                        : (parsedEvidence.evidence || []);
+
+                                    const parts = visibleText.split(/\*{0,2}Sources:\*{0,2}/);
                                     const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
                                     const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
                                     const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
@@ -1024,7 +1036,20 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                     {isStreamingThisMsg && (
                                                         <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 dark:bg-gray-300/70 ml-0.5 rounded-sm animate-pulse" />
                                                     )}
+                                                    <EvidenceSection
+                                                        evidence={evidence}
+                                                        color={agentConfig.color}
+                                                        onImageClick={setPreviewImage}
+                                                    />
                                                     <SourcesSection sources={sources} color={agentConfig.color} />
+
+                                                    {/* Standalone HITL Buttons Component */}
+                                                    <Buttons
+                                                        message={msg}
+                                                        isLast={isLastMsg}
+                                                        onSend={(text) => sendMessage(text)}
+                                                    />
+
                                                     {msg.formType === 'lifestore' && <LifestoreForm />}
                                                     {msg.formType === 'enterprise' && <EnterpriseForm />}
                                                 </div>
@@ -1039,6 +1064,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                             agentId={agentConfig.id}
                                                             threadId={threadId}
                                                             userId={user.username || "anonymous"}
+                                                            userName={user.name || null}
                                                             existingRating={feedbackMap[index] || null}
                                                             onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
                                                         />
