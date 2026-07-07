@@ -1826,7 +1826,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, delay: 0.12 }}
-                        className="text-xl sm:text-2xl text-gray-500 dark:text-gray-400 mt-2 font-light text-center"
+                        className="text-base sm:text-lg text-gray-500 dark:text-gray-400 mt-2 font-light text-center max-w-2xl"
                     >
                         {agentConfig.idlePrompt || "How can I help you today?"}
                     </motion.p>
