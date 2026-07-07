@@ -30,6 +30,12 @@ const AGENT_CONFIG = {
     placeholder: "Ask about HR, Finance, IT, Admin, Network...",
     formToken: null,
   },
+  aiexpo: {
+    agentId: "aiexpo",
+    title: "Ask AI Expo",
+    placeholder: "Ask about speakers, agenda, partners, or event dates...",
+    formToken: null,
+  },
 };
 
 function createThreadId(agentId) {
@@ -404,6 +410,7 @@ function InvalidIframeRoute() {
                 <ul className="iframe-chat__md-ul">
                   <li className="iframe-chat__md-li">/asklifestore/iframe</li>
                   <li className="iframe-chat__md-li">/askenterprise/iframe</li>
+                  <li className="iframe-chat__md-li">/aiexpo/iframe</li>
                 </ul>
               </div>
             </div>

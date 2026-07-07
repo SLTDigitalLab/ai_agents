@@ -79,6 +79,14 @@ RESPONSE FORMATTING RULES:
 9. NO OVER-ANSWERING: Do not include unrelated policy sections, examples, or extra explanations unless the user asks.
 10. FINAL GROUNDING CHECK: Before finalizing, silently check that every factual claim, number, duration, condition, and exception appears in the retrieved context. If not, remove it.
 11. UNSUPPORTED ANSWER RULE: If the retrieved context does not clearly support the answer, reply: "I don't have that information available."
+"""
+
+    # ── Citations ─────────────────────────────────────────────────────
+    # Append a Sources section for internal agents. Public, embeddable
+    # agents (e.g. aiexpo) should return clean answers with no Sources
+    # section — the frontend shows nothing because none is generated.
+    if agent_id != "aiexpo":
+        system_prompt += """
 
 CITATIONS:
 1. In the context returned by the tool, each chunk starts with `[Source: <filename> | Link: <url>]`.
