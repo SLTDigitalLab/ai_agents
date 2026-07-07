@@ -7,7 +7,7 @@ logging.basicConfig(
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact
 from services.ingestion import router as ingestion_router
 
 app = FastAPI(
@@ -36,6 +36,7 @@ app.include_router(feedback.router)  # Feedback (thumbs up/down)
 app.include_router(finance.router)  # External Finance KB retrieval (voice assistant)
 app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev local → prod vectors)
 app.include_router(ingestion_router)
+app.include_router(contact.router)  # Contact Us email form
 
 @app.get("/")
 def read_root():

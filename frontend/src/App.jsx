@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BrowserRouter, Routes, Route, useParams, useLocation, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useParams, useLocation, Navigate, Link } from 'react-router-dom';
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
 import { PublicClientApplication, InteractionStatus } from "@azure/msal-browser";
 import { msalConfig, loginRequest } from './authConfig';
@@ -15,6 +15,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 import embryoLogo from './assets/embryo-removebg.png';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
+import ContactUsPage from './components/ContactUsPage';
 
 // Initialize MSAL outside the components
 const msalInstance = new PublicClientApplication(msalConfig);
@@ -185,6 +186,17 @@ const UserAvatarMenu = ({ user, onLogout, agentColor, placement = 'upRight' }) =
                 ))}
               </div>
             </div>
+            <Link
+              to="/contact-us"
+              onClick={() => setOpen(false)}
+              className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-800"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500 dark:text-gray-400">
+                <path d="M2.94 6.34A2.5 2.5 0 015.34 4.5h9.32a2.5 2.5 0 012.4 1.84L10 10.58 2.94 6.34z" />
+                <path d="M2.75 7.66v5.59a2.5 2.5 0 002.5 2.5h9.5a2.5 2.5 0 002.5-2.5V7.66l-6.86 4.12a.75.75 0 01-.78 0L2.75 7.66z" />
+              </svg>
+              Contact Us
+            </Link>
 
             {/* Logout */}
             <button
@@ -632,6 +644,8 @@ function App() {
             <Route path="/admin/ingestion" element={<IngestionPanel />} />
             <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
+
+          <Route path="/contact-us" element={<ContactUsPage />} />
 
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
