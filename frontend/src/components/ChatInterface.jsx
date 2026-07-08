@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMsal } from "@azure/msal-react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
@@ -383,6 +384,7 @@ const ScrollToLatestPill = ({ onClick, color }) => (
 const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const { accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
+    const navigate = useNavigate();
 
     // State for thread ID and messages
     const [threadId, setThreadId] = useState('');
@@ -784,6 +786,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const firstName = (user.name || "User").split(" ")[0];
     const isIdle = isIdleForEffects;
 
+    const shouldShowFeedbackLink =
+        !agentConfig.public && messages.some((msg) => msg.type === 'user');
+
     // Pick a fresh greeting whenever we (re-)enter idle, change agent, or start a new thread.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const idleGreeting = useMemo(() => pickGreeting(firstName), [isIdle, agentConfig.id, firstName, threadId]);
@@ -874,7 +879,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="flex-1 flex flex-col min-h-0 w-full overflow-hidden z-10"
+            className="relative flex-1 flex flex-col min-h-0 w-full overflow-hidden z-10"
         >
             {isIdle ? (
                 // ── IDLE LANDING SCREEN ─────────────────────────────────
@@ -1090,7 +1095,39 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     {/* Docked composer — centered, content constrained */}
                     <div className="w-full flex flex-col items-center px-4 sm:px-6 pb-3 pt-1 z-20 shrink-0">
                         <div className="w-full max-w-[820px] flex flex-col items-center">
-                            {renderComposer()}
+                            <div className="relative w-full">
+                                {renderComposer()}
+
+                                {shouldShowFeedbackLink && (
+                                    <div className="hidden sm:flex absolute left-[calc(100%+8rem)] top-1/2 -translate-y-1/2 items-center">
+                                        <motion.button
+                                            type="button"
+                                            onClick={() => navigate('/contact-us')}
+                                            initial={{ opacity: 0, x: 12, scale: 0.96 }}
+                                            animate={{ opacity: 1, x: 0, scale: 1 }}
+                                            exit={{ opacity: 0, x: 12, scale: 0.96 }}
+                                            transition={{ duration: 0.22, ease: 'easeOut' }}
+                                            whileHover={{ scale: 1.04 }}
+                                            whileTap={{ scale: 0.96 }}
+                                            className="flex items-center gap-2 rounded-full bg-white dark:bg-[#1f2937] border border-gray-200 dark:border-[#334155] text-gray-700 dark:text-gray-100 px-4 py-2.5 text-sm font-semibold shadow-[0_8px_24px_-14px_rgba(0,0,0,0.35)] hover:bg-gray-50 hover:border-gray-300 dark:hover:bg-[#263447] dark:hover:border-[#475569] transition-all whitespace-nowrap"
+                                            title="Send feedback"
+                                        >
+                                            <span className={`flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-br ${agentConfig.color} text-white shadow-sm`}>
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    viewBox="0 0 20 20"
+                                                    fill="currentColor"
+                                                    className="w-4 h-4"
+                                                >
+                                                    <path d="M3.505 2.365A1.5 1.5 0 012.25 3.845v10.31a1.5 1.5 0 001.255 1.48l4.745.79V17.5a.75.75 0 001.2.6l2.04-1.53 5.005-.835A1.5 1.5 0 0017.75 14.155V3.845a1.5 1.5 0 00-1.255-1.48A41.052 41.052 0 0010 1.75c-2.196 0-4.364.18-6.495.615z" />
+                                                </svg>
+                                            </span>
+                                            Feedback
+                                            </motion.button>
+                                        </div>
+                                    )}
+                            </div>
+
                             {disclaimerText}
                             <div className="mt-3.5 flex items-center justify-center gap-1.5 pointer-events-auto cursor-default select-none">
                                 <span className="text-[0.65rem] uppercase tracking-wider font-semibold text-gray-500 dark:text-gray-400">Powered by</span>
