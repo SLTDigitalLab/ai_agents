@@ -98,6 +98,26 @@ class Settings(BaseSettings):
 
     LIFESTORE_QDRANT_COLLECTION: str = "lifestore_docs"
 
+    # ── Ask LifeStore cart + PayHere checkout ──────────────────────────────
+    # Public base URLs used to build PayHere return/cancel/notify links.
+    APP_BASE_URL: str = "http://localhost:8000"
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
+
+    # Master switch for the chat-driven cart + payment flow. When False, Ask
+    # LifeStore falls back to the legacy name/address/phone email order form.
+    LIFESTORE_PAYMENTS_ENABLED: bool = True
+
+    # PayHere merchant credentials. Sandbox by default — no real money moves.
+    PAYHERE_MERCHANT_ID: Optional[str] = None
+    PAYHERE_MERCHANT_SECRET: Optional[str] = None
+    PAYHERE_SANDBOX: bool = True
+    # Override when the webhook must reach a local server (e.g. an ngrok URL).
+    PAYHERE_NOTIFY_URL: Optional[str] = None
+    # Optional Business App credentials for the Payment Retrieval API (used as a
+    # server-side reconcile fallback when the webhook can't reach localhost).
+    PAYHERE_APP_ID: Optional[str] = None
+    PAYHERE_APP_SECRET: Optional[str] = None
+
     class Config:
         env_file = ".env"
         extra = "ignore"

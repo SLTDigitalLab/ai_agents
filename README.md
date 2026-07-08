@@ -38,8 +38,47 @@ User Message (React)
 | Ask CIA | `cia` | KB Only | RAG over internal audit / compliance documents |
 | Ask Process | `process` | KB Only | RAG over SOP / process documents |
 | Ask Enterprise | `enterprise` | KB + Form | RAG + generative UI lead capture form (Bitrix24 CRM) |
-| Ask Lifestore | `lifestore` | KB + Form | RAG + generative UI order form (email notification) |
+| Ask Lifestore | `lifestore` | KB + Form | RAG + chat-driven cart & **PayHere checkout** (sandbox demo); legacy email order form as fallback |
 | Ask HR SLM *(demo)* | `askhrslm` | KB + SLM | On-prem inference via Ollama (DeepSeek-R1 1.5B) |
+
+### Ask LifeStore — chat commerce (cart + PayHere)
+
+Customers can add products to a cart and pay, all inside the chat. Scoped to the
+LifeStore agent only — no other agent is affected.
+
+**Flow:** browse → `add_to_cart` → `begin_checkout` → PayHere onsite checkout →
+webhook/reconcile confirms → ✅/❌ pushed into the chat.
+
+```
+React chat ─► /api/v1/chat ─► LifeStore agent (cart tools)
+                                 ├─ cart + order snapshot (Postgres, schema lifestore_payments)
+                                 └─ order_id ──► [RENDER_LIFESTORE_CHECKOUT:<id>]
+React <LifestoreCheckout> ─► GET /api/v1/lifestore/checkout/{id} (amount + signed PayHere payload)
+                          ─► PayHere sandbox (payhere.js) ─► pays
+                          ◄─ POST /api/v1/lifestore/payhere/notify   (md5sig-verified, idempotent — SOURCE OF TRUTH)
+                          ◄─ GET  /api/v1/lifestore/orders/{id}      (frontend polls for settled status)
+```
+
+**Correctness guarantees (customer-facing):**
+- Prices/totals are resolved server-side from the live catalog
+  (`services/lifestore_catalog.py`), never from the LLM. The model only carries
+  an opaque `order_id`; the amount + payment link come from the backend.
+- Payment is marked PAID only by the md5sig-verified webhook (or the
+  server-to-server PayHere Retrieval API reconcile) — never by the browser
+  redirect. Status transitions are idempotent, so webhook retries are safe.
+
+**Setup:** add sandbox credentials to `.env` (`PAYHERE_MERCHANT_ID`,
+`PAYHERE_MERCHANT_SECRET`; keep `PAYHERE_SANDBOX=true`). The `notify_url` must be
+publicly reachable — for local testing set `PAYHERE_NOTIFY_URL` to a tunnel
+(e.g. ngrok), or configure `PAYHERE_APP_ID`/`PAYHERE_APP_SECRET` so the frontend
+can reconcile status via PayHere's Retrieval API. Disable the whole flow with
+`LIFESTORE_PAYMENTS_ENABLED=false` (falls back to the email order form). Every
+checkout card is labelled **Sandbox demo — no real money is charged**.
+
+Key files: `backend/services/lifestore_{catalog,payments_store,payhere}.py`,
+`backend/routers/lifestore_payments.py`,
+`backend/domain/tools/lifestore_cart_tools.py`,
+`frontend/src/components/forms/LifestoreCheckout.jsx`.
 
 ### Five Agent Archetypes (`backend/domain/archetypes/`)
 
