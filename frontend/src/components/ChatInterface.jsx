@@ -8,6 +8,8 @@ import EnterpriseForm from './forms/EnterpriseForm';
 import embryoLogo from '../assets/embryo-removebg.png';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import Buttons from './Buttons';
+import { fetchUserProfile } from '../userProfile';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -15,6 +17,114 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const FORM_TOKENS = {
     '[RENDER_LIFESTORE_FORM]': 'lifestore',
     '[RENDER_ENTERPRISE_FORM]': 'enterprise',
+};
+
+// ── Visual/table evidence emitted by the backend ────────────────────────
+const EVIDENCE_OPEN = '[[EVIDENCE_JSON]]';
+const EVIDENCE_CLOSE = '[[/EVIDENCE_JSON]]';
+
+// Product agents skip client-side PII masking so SKU/model numbers in
+// queries are not corrupted. Mirrors PII_MASK_EXEMPT_AGENTS in the backend.
+const PII_MASK_EXEMPT_AGENTS = ['lifestore', 'enterprise'];
+
+const maskPII = (text = '') => {
+    return text
+        // Email addresses
+        .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[EMAIL]')
+
+        // Sri Lankan mobile numbers: +947XXXXXXXX / 947XXXXXXXX / 07XXXXXXXX
+        .replace(/\b(?:\+?94|0)?7\d{8}\b/g, '[PHONE]')
+
+        // Sri Lankan NIC: old 123456789V / new 12 digits
+        .replace(/\b(?:\d{9}[VXvx]|\d{12})\b/g, '[NIC]')
+
+        // Credit/debit-card-like long numbers
+        .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[CARD_NUMBER]')
+
+        // Common API keys / JWT / bearer-token-like secrets
+        .replace(
+            /\b(?:bearer\s+)?(eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,})\b/gi,
+            '[SECRET]'
+        );
+};
+
+const parseEvidencePayload = (text = '') => {
+    const openIndex = text.indexOf(EVIDENCE_OPEN);
+
+    if (openIndex === -1) {
+        return { text, evidence: null };
+    }
+
+    const closeIndex = text.indexOf(EVIDENCE_CLOSE, openIndex + EVIDENCE_OPEN.length);
+
+    // If evidence JSON is still streaming, hide the partial block from UI
+    if (closeIndex === -1) {
+        return {
+            text: text.slice(0, openIndex).trimEnd(),
+            evidence: null,
+        };
+    }
+
+    const before = text.slice(0, openIndex);
+    const jsonText = text.slice(openIndex + EVIDENCE_OPEN.length, closeIndex);
+    const after = text.slice(closeIndex + EVIDENCE_CLOSE.length);
+
+    try {
+        const payload = JSON.parse(jsonText);
+        const evidence = Array.isArray(payload?.items) ? payload.items : [];
+
+        return {
+            text: `${before}${after}`.trimEnd(),
+            evidence,
+        };
+    } catch (error) {
+        console.error('Failed to parse evidence payload:', error);
+        return {
+            text: `${before}${after}`.trimEnd(),
+            evidence: null,
+        };
+    }
+};
+
+const resolveEvidenceUrl = (url) => {
+    if (!url) return '';
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+
+    const normalizedPath = url.startsWith('/') ? url : `/${url}`;
+    return `${API_URL}${normalizedPath}`;
+};
+
+const ImagePreviewModal = ({ image, onClose }) => {
+    if (!image) return null;
+
+    return (
+        <div
+            className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+            onClick={onClose}
+        >
+            <button
+                type="button"
+                onClick={onClose}
+                className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 text-gray-700 text-2xl leading-none shadow-lg hover:bg-white"
+                aria-label="Close image preview"
+            >
+                ×
+            </button>
+
+            <motion.div
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="max-w-[95vw] max-h-[92vh]"
+                onClick={(e) => e.stopPropagation()}
+            >
+                <img
+                    src={image.url}
+                    alt={image.alt || 'Evidence preview'}
+                    className="max-w-[95vw] max-h-[92vh] object-contain rounded-2xl bg-white shadow-2xl"
+                />
+            </motion.div>
+        </div>
+    );
 };
 
 // Greeting pool for the idle landing screen.
@@ -176,6 +286,148 @@ const SourcesSection = ({ sources, color }) => {
     );
 };
 
+// ── Relevant Evidence (cropped PDF images / extracted tables) ───────────
+const EvidenceImageCard = ({ item, onImageClick }) => {
+    const imageUrl = resolveEvidenceUrl(item.url);
+    const imageAlt = item.title || item.source || 'Evidence image';
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
+        >
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
+                <p className="text-xs font-bold text-gray-700">
+                    {item.title || 'Image reference'}
+                </p>
+                <p className="text-[0.68rem] text-gray-400 mt-0.5">
+                    {item.source}
+                    {item.page ? ` — Page ${item.page}` : ''}
+                </p>
+            </div>
+
+            <div className="p-3 bg-white">
+                <button
+                    type="button"
+                    onClick={() => onImageClick?.({ url: imageUrl, alt: imageAlt })}
+                    className="block w-full cursor-zoom-in"
+                    title="Click to preview image"
+                >
+                    <img
+                        src={imageUrl}
+                        alt={imageAlt}
+                        className="w-full max-h-[420px] object-contain rounded-xl border border-gray-100 bg-gray-50"
+                        loading="lazy"
+                    />
+                </button>
+            </div>
+
+            {item.link && item.link !== '#' && (
+                <div className="px-4 pb-3">
+                    <a
+                        href={item.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs font-semibold text-blue-500 hover:underline"
+                    >
+                        Open original source
+                    </a>
+                </div>
+            )}
+        </motion.div>
+    );
+};
+
+const EvidenceTableCard = ({ item }) => (
+    <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
+    >
+        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
+            <p className="text-xs font-bold text-gray-700">
+                {item.title || 'Table reference'}
+            </p>
+            <p className="text-[0.68rem] text-gray-400 mt-0.5">
+                {item.source}
+                {item.page ? ` — Page ${item.page}` : ''}
+            </p>
+        </div>
+
+        <div className="p-3 max-h-[420px] overflow-auto">
+            <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                    table: ({ node, ...props }) => (
+                        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                            <table className="w-full text-xs text-left border-collapse" {...props} />
+                        </div>
+                    ),
+                    th: ({ node, ...props }) => (
+                        <th className="bg-gray-50 px-3 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />
+                    ),
+                    td: ({ node, ...props }) => (
+                        <td className="px-3 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />
+                    ),
+                    tr: ({ node, ...props }) => (
+                        <tr className="even:bg-gray-50/50" {...props} />
+                    ),
+                    p: ({ node, ...props }) => (
+                        <p className="whitespace-pre-wrap text-xs text-gray-600 mb-0" {...props} />
+                    ),
+                }}
+            >
+                {item.content || ''}
+            </ReactMarkdown>
+        </div>
+
+        {item.link && item.link !== '#' && (
+            <div className="px-4 pb-3">
+                <a
+                    href={item.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-semibold text-blue-500 hover:underline"
+                >
+                    Open original source
+                </a>
+            </div>
+        )}
+    </motion.div>
+);
+
+const EvidenceSection = ({ evidence, color, onImageClick }) => {
+    const items = Array.isArray(evidence)
+        ? evidence.filter(item => item?.type === 'image' || item?.type === 'table')
+        : [];
+
+    if (items.length === 0) return null;
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-4 pt-3 border-t border-gray-100/60"
+        >
+            <div className="flex items-center gap-2 mb-2.5">
+                <div className={`w-1 h-3.5 rounded-full bg-gradient-to-b ${color}`} />
+                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400">
+                    Relevant Evidence
+                </span>
+            </div>
+
+            <div className="space-y-3">
+                {items.map((item, i) => (
+                    item.type === 'image'
+                        ? <EvidenceImageCard key={i} item={item} onImageClick={onImageClick} />
+                        : <EvidenceTableCard key={i} item={item} />
+                ))}
+            </div>
+        </motion.div>
+    );
+};
+
 // ── Copy-to-clipboard helper used by message and code-block buttons ─────────
 const useCopy = () => {
     const [copied, setCopied] = useState(false);
@@ -204,8 +456,8 @@ const CopyMessageButton = ({ text }) => {
             disabled={copied}
             title={copied ? "Copied" : "Copy message"}
             className={`p-1.5 rounded-md transition-all duration-200 ${copied
-                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
+                ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
                 }`}
         >
             {copied ? (
@@ -233,8 +485,8 @@ const CodeBlock = ({ children, ...props }) => {
                 onClick={() => copy(text)}
                 title={copied ? "Copied" : "Copy code"}
                 className={`absolute top-2 right-2 px-2 py-1 rounded-md text-[0.7rem] font-medium transition-all duration-200 opacity-0 group-hover/code:opacity-100 ${copied
-                        ? 'bg-emerald-500 text-white'
-                        : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
+                    ? 'bg-emerald-500 text-white'
+                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
                     }`}
             >
                 {copied ? 'Copied' : 'Copy'}
@@ -247,7 +499,7 @@ const CodeBlock = ({ children, ...props }) => {
 };
 
 // ── Feedback Buttons Component ──────────────────────────────────────
-const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRating, onFeedback }) => {
+const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, existingRating, onFeedback }) => {
     const [rating, setRating] = useState(existingRating || null);
     const [submitting, setSubmitting] = useState(false);
 
@@ -291,6 +543,7 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                         message_index: messageIndex,
                         rating: finalRating,
                         user_id: userId,
+                        user_name: userName || null,
                     }),
                 });
                 if (res.ok) {
@@ -311,8 +564,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                 onClick={() => handleFeedback('up')}
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'up'
-                        ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                        : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
+                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                    : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
                     }`}
                 title="Helpful"
             >
@@ -324,8 +577,8 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, existingRati
                 onClick={() => handleFeedback('down')}
                 disabled={submitting}
                 className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'down'
-                        ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
-                        : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
+                    ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
+                    : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
                     }`}
                 title="Not helpful"
             >
@@ -382,15 +635,32 @@ const ScrollToLatestPill = ({ onClick, color }) => (
 );
 
 const ChatInterface = forwardRef(({ agentConfig }, ref) => {
-    const { accounts } = useMsal();
+    const { instance, accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
     const navigate = useNavigate();
+
+    // Department + job title resolved from Azure AD (Graph /me). Best-effort:
+    // stay null if the directory lacks them or the Graph call fails.
+    const [profile, setProfile] = useState({ department: null, jobTitle: null });
+    useEffect(() => {
+        let active = true;
+        const account = accounts[0];
+        if (!account) {
+            setProfile({ department: null, jobTitle: null });
+            return;
+        }
+        fetchUserProfile(instance, account).then((p) => {
+            if (active) setProfile(p);
+        });
+        return () => { active = false; };
+    }, [instance, accounts]);
 
     // State for thread ID and messages
     const [threadId, setThreadId] = useState('');
     const [messages, setMessages] = useState([]);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const [feedbackMap, setFeedbackMap] = useState({}); // { messageIndex: rating }
+    const [previewImage, setPreviewImage] = useState(null);
 
     // Effect to handle Agent switching:
     // 1. Get/Create thread_id for the specific agent
@@ -643,7 +913,13 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const sendMessage = async (text) => {
         if (!text.trim() || !threadId || isLoadingHistory || isLoading) return;
 
-        const userMessage = { type: 'user', text, timestamp: Date.now() };
+        // Mask PII client-side so it is neither displayed nor sent in the clear.
+        // Product agents (lifestore/enterprise) are exempt so SKU/model numbers survive.
+        const maskedText = PII_MASK_EXEMPT_AGENTS.includes(agentConfig.id)
+            ? text.trim()
+            : maskPII(text.trim());
+
+        const userMessage = { type: 'user', text: maskedText, timestamp: Date.now() };
         setMessages(prev => [...prev, userMessage]);
         setIsLoading(true);
         setLastFailedMessage(null);
@@ -659,10 +935,12 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    message: userMessage.text,
+                    message: maskedText,
                     agent_id: agentConfig.id,
                     user_id: user.username || "anonymous",
-                    user_name: user.name || user.username || "Unknown User",
+                    user_name: user.name || null,
+                    department: profile.department || null,
+                    job_title: profile.jobTitle || null,
                     thread_id: threadId
                 }),
                 signal: controller.signal,
@@ -675,8 +953,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let accumulatedText = "";
+            let evidenceItems = [];
 
-            setMessages(prev => [...prev, { type: 'bot', text: "", formType: null, timestamp: Date.now() }]);
+            setMessages(prev => [...prev, { type: 'bot', text: "", formType: null, evidence: [], timestamp: Date.now() }]);
             botMessageAdded = true;
 
             while (true) {
@@ -686,8 +965,15 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 const chunk = decoder.decode(value, { stream: true }).replace(/\r/g, '');
                 accumulatedText = appendChunkSmartly(accumulatedText, chunk);
 
+                // Detect and strip the hidden evidence metadata block first.
+                const parsedEvidence = parseEvidencePayload(accumulatedText);
+                let cleanText = parsedEvidence.text;
+
+                if (parsedEvidence.evidence) {
+                    evidenceItems = parsedEvidence.evidence;
+                }
+
                 let currentFormType = null;
-                let cleanText = accumulatedText;
                 for (const [token, type] of Object.entries(FORM_TOKENS)) {
                     if (cleanText.includes(token)) {
                         currentFormType = type;
@@ -805,6 +1091,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyDown}
+                    maxLength={1500}
                     placeholder="Ask anything..."
                     className="flex-1 bg-transparent text-gray-800 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 text-[0.9375rem] pl-3 pr-2 py-2 outline-none resize-none leading-relaxed max-h-[150px] overflow-y-auto chat-scrollbar"
                 />
@@ -903,7 +1190,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.45, delay: 0.12 }}
-                        className="text-xl sm:text-2xl text-gray-500 dark:text-gray-400 mt-2 font-light text-center"
+                        className={`${agentConfig.id === 'supervisor' ? 'text-lg sm:text-xl mt-6' : 'text-lg sm:text-2xl mt-3'} text-slate-600 dark:text-slate-300 text-center max-w-5xl mx-auto leading-relaxed`}
                     >
                         {agentConfig.idlePrompt || "How can I help you today?"}
                     </motion.p>
@@ -952,7 +1239,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         >
                             <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
                                 {messages.map((msg, index) => {
-                                    if (!(msg.type === 'user' || msg.text || msg.formType)) return null;
+                                    if (!(msg.type === 'user' || msg.text || msg.formType || (msg.evidence && msg.evidence.length > 0))) return null;
                                     const isLastMsg = index === lastRenderedIdx;
                                     const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
                                     const isErrorMsg = msg.error && isLastMsg;
@@ -962,7 +1249,14 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                         if (isLastMsg) lastMessageRef.current = el;
                                     };
 
-                                    const parts = msg.text.split(/\*{0,2}Sources:\*{0,2}/);
+                                    // Separate hidden evidence metadata from the answer text.
+                                    const parsedEvidence = parseEvidencePayload(msg.text || "");
+                                    const visibleText = parsedEvidence.text || "";
+                                    const evidence = msg.evidence?.length > 0
+                                        ? msg.evidence
+                                        : (parsedEvidence.evidence || []);
+
+                                    const parts = visibleText.split(/\*{0,2}Sources:\*{0,2}/);
                                     const mainText = parts[0].replace(/\s*\*+\s*$/, "").trimEnd();
                                     const sourcesPart = parts.length > 1 ? parts.slice(1).join("") : "";
                                     const sourceMatches = sourcesPart.matchAll(/\[(.*?)\]\((.*?)\)/g);
@@ -1024,7 +1318,20 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                     {isStreamingThisMsg && (
                                                         <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 dark:bg-gray-300/70 ml-0.5 rounded-sm animate-pulse" />
                                                     )}
+                                                    <EvidenceSection
+                                                        evidence={evidence}
+                                                        color={agentConfig.color}
+                                                        onImageClick={setPreviewImage}
+                                                    />
                                                     <SourcesSection sources={sources} color={agentConfig.color} />
+
+                                                    {/* Standalone HITL Buttons Component */}
+                                                    <Buttons
+                                                        message={msg}
+                                                        isLast={isLastMsg}
+                                                        onSend={(text) => sendMessage(text)}
+                                                    />
+
                                                     {msg.formType === 'lifestore' && <LifestoreForm />}
                                                     {msg.formType === 'enterprise' && <EnterpriseForm />}
                                                 </div>
@@ -1039,6 +1346,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                             agentId={agentConfig.id}
                                                             threadId={threadId}
                                                             userId={user.username || "anonymous"}
+                                                            userName={user.name || null}
                                                             existingRating={feedbackMap[index] || null}
                                                             onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
                                                         />
@@ -1137,6 +1445,10 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     </div>
                 </motion.div>
             )}
+            <ImagePreviewModal
+                image={previewImage}
+                onClose={() => setPreviewImage(null)}
+            />
         </motion.div>
     );
 });

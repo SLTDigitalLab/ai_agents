@@ -14,14 +14,15 @@ from langchain_qdrant import QdrantVectorStore, RetrievalMode
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
-from core.config import settings
+from core.config import settings, agent_collection_name
 from core.llm import get_embedding_model
 from domain.tools.rag_tools import _sparse_embeddings
 
 router = APIRouter(prefix="/api/v1/finance", tags=["Finance KB"])
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "finance_docs"
+# Namespaced by embedding provider: "finance_docs" (openai) / "finance_docs_gemini" (vertex).
+COLLECTION_NAME = agent_collection_name("finance")
 
 
 class RetrieveRequest(BaseModel):

@@ -13,6 +13,7 @@ class FeedbackRequest(BaseModel):
     message_index: int  # index of the AI message in the conversation
     rating: Literal["up", "down"]
     user_id: str
+    user_name: Optional[str] = None
 
 
 class FeedbackResponse(BaseModel):
@@ -24,3 +25,4 @@ class FeedbackResponse(BaseModel):
     message_index: int
     rating: str
     user_id: str
+    user_name: Optional[str] = None

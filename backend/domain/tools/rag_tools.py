@@ -15,7 +15,7 @@ Neo4j:
 
 import json
 import logging
-from typing import Annotated, Optional, Any
+from typing import Annotated, Any, Optional
 
 import httpx
 from langchain_core.tools import tool
@@ -23,16 +23,23 @@ from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langgraph.prebuilt import InjectedState
 from qdrant_client import QdrantClient
 
-from core.config import settings
+from core.config import settings, agent_collection_name, collection_suffix
 from core.llm import get_embedding_model
 
 log = logging.getLogger(__name__)
 
 _sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
 
-# Per-thread evidence cache.
-# rag_tools.py collects image/table evidence from retrieved Qdrant chunks.
-# chat.py will consume this cache after the final answer is generated.
+try:
+    from neo4j import GraphDatabase
+except Exception:
+    GraphDatabase = None
+
+# — Per-thread evidence cache -------------------------------------------------
+# search_knowledge_base collects image/table evidence from retrieved Qdrant
+# chunks (attached at ingestion time as doc.metadata["evidence"]). chat.py
+# consumes this cache after the final answer is generated and streams the
+# best matching evidence to the frontend.
 _THREAD_EVIDENCE_CACHE: dict[str, list[dict[str, Any]]] = {}
 
 
@@ -120,15 +127,46 @@ def _add_thread_evidence(
     if cleaned_items:
         _THREAD_EVIDENCE_CACHE.setdefault(thread_id, []).extend(cleaned_items)
 
-try:
-    from neo4j import GraphDatabase
-except Exception:
-    GraphDatabase = None
+def _absolutize_remote_evidence(evidence_items: Any, base_url: str) -> list[dict[str, Any]]:
+    """Rewrite relative evidence image URLs to absolute URLs on the remote host.
 
-async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
+    Evidence PNG crops live on the remote (prod VM) under EVIDENCE_URL_PREFIX
+    and are stored as relative URLs. A local dev reading prod vectors must
+    point <img> at the remote host, so we prefix relative urls with base_url.
+    """
+    if not isinstance(evidence_items, list):
+        return []
+
+    base = (base_url or "").rstrip("/")
+    rewritten: list[dict[str, Any]] = []
+
+    for raw_item in evidence_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        url = item.get("url")
+
+        if url and isinstance(url, str) and not url.startswith(("http://", "https://")):
+            item["url"] = f"{base}{url}" if url.startswith("/") else f"{base}/{url}"
+
+        rewritten.append(item)
+
+    return rewritten
+
+
+async def _search_remote(
+    agent_id: str,
+    query: str,
+    k: int = 10,
+    thread_id: str | None = None,
+) -> str:
     """Proxy retrieval to a remote Ask SLT instance's /api/v1/kb endpoint.
 
     Used by local dev environments to skip ingestion and read prod vectors.
+    Also collects any visual/table evidence returned by the remote so devs
+    pointing at prod can see diagrams (with image URLs rewritten to the
+    remote host where the crops are actually served).
     """
     base = settings.KB_REMOTE_URL.rstrip("/")
     url = f"{base}/api/v1/kb/{agent_id}/retrieve"
@@ -142,6 +180,16 @@ async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
 
     if not chunks:
         return "No relevant documents found."
+
+    for c in chunks:
+        evidence = c.get("evidence")
+        if evidence:
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=_absolutize_remote_evidence(evidence, base),
+                source=c.get("source", "Unknown Source"),
+                link=c.get("link", "#"),
+            )
 
     return "\n\n---\n\n".join(
         f"[Source: {c.get('source', 'Unknown Source')} | Link: {c.get('link', '#')}]\n{c.get('text', '')}"
@@ -170,6 +218,8 @@ def _resolve_collection_name(agent_id: str) -> str:
     - Retrieval must search the real Qdrant collection, not the base name.
     """
     if _is_lifestore_agent(agent_id):
+        # Explicit overrides are used verbatim — the operator names the exact
+        # collection (including any provider suffix) themselves.
         explicit_search_collection = _get_setting(
             "LIFESTORE_QDRANT_SEARCH_COLLECTION",
             None,
@@ -188,12 +238,13 @@ def _resolve_collection_name(agent_id: str) -> str:
 
         base_collection = _get_setting("LIFESTORE_QDRANT_COLLECTION", "lifestore")
 
-        if base_collection.endswith("_docs"):
-            return base_collection
+        if not base_collection.endswith("_docs"):
+            base_collection = f"{base_collection}_docs"
 
-        return f"{base_collection}_docs"
+        # Namespace by embedding provider so gemini/openai collections coexist.
+        return f"{base_collection}{collection_suffix()}"
 
-    return f"{agent_id}_docs"
+    return agent_collection_name(agent_id)
 
 
 def _get_neo4j_driver():
@@ -248,7 +299,7 @@ async def _search_qdrant_knowledge_base(
 
     if settings.KB_REMOTE_URL:
         try:
-            return await _search_remote(agent_id, query, k=10)
+            return await _search_remote(agent_id, query, k=10, thread_id=thread_id)
         except Exception as e:
             log.exception(
                 f"Remote KB retrieval failed for agent='{agent_id}' "
@@ -317,7 +368,18 @@ async def _search_qdrant_knowledge_base(
                 or "#"
             )
 
-            title = doc.metadata.get("title") or "Untitled"
+            # Prefer the section heading captured at ingestion; fall back to
+            # the filename so citations never read "Untitled".
+            title = doc.metadata.get("title") or source or "Untitled"
+
+            # Collect any visual/table evidence attached to this chunk at
+            # ingestion time so chat.py can stream it to the frontend.
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=doc.metadata.get("evidence") or [],
+                source=source,
+                link=link,
+            )
 
             evidence_items = (
                 doc.metadata.get("evidence")

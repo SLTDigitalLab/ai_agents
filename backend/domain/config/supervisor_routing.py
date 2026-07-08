@@ -828,20 +828,66 @@ FOLLOW_UP_PATTERNS: tuple[str, ...] = (
     r"^\s*how much\s*\??$",
 )
 
-# Initial tuning defaults for cosine similarity routing.
-# These should be refined later using real routing logs.
-STRONG_ROUTE_THRESHOLD = 0.40
-LOW_CONFIDENCE_THRESHOLD = 0.25
-OUT_OF_SCOPE_THRESHOLD = 0.18
-MIN_ROUTE_MARGIN = 0.04
+# ── Cosine-similarity routing thresholds (provider-aware) ────────────────
+# Different embedding models produce different cosine-similarity distributions,
+# so the routing thresholds are calibrated per ROUTING_EMBEDDING_PROVIDER:
+#
+#   openai (text-embedding-3-small): scores spread across a low, WIDE band
+#     (~0.2-0.5). Relevant vs irrelevant separate clearly, so low absolute
+#     thresholds + a small margin work well.
+#
+#   gemini / vertex (gemini-embedding-2): scores compress into a high, NARROW
+#     band (~0.65-0.92) where even an irrelevant department scores ~0.70. A
+#     fixed 0.40 "strong" cutoff is met by everything, which made every query
+#     fan out (multi_delegate). We therefore (a) raise the absolute cutoffs into
+#     the Gemini band and (b) gate multi_delegate on the top-vs-second GAP so a
+#     clear winner delegates to a single agent instead of fanning out.
+#
+# MULTI_DELEGATE_MAX_GAP: fan out on "both strongly scored" ONLY when the top
+# two are within this gap (a genuine close call / compound query). For openai
+# it is effectively disabled (1.0) to preserve the original behavior.
+from core.config import settings as _settings
+
+_ROUTING_THRESHOLDS: dict[str, dict[str, float]] = {
+    "openai": {
+        "strong": 0.40,
+        "low_confidence": 0.25,
+        "out_of_scope": 0.18,
+        "min_margin": 0.04,
+        "secondary": 0.25,
+        "max_gap": 1.0,  # gap gate disabled — preserves original behavior
+    },
+    "gemini": {
+        "strong": 0.65,
+        "low_confidence": 0.60,
+        "out_of_scope": 0.55,
+        "min_margin": 0.04,
+        "secondary": 0.60,
+        "max_gap": 0.04,
+    },
+}
+# Vertex shares Gemini's distribution.
+_ROUTING_THRESHOLDS["vertex"] = _ROUTING_THRESHOLDS["gemini"]
+
+_active = _ROUTING_THRESHOLDS.get(
+    _settings.ROUTING_EMBEDDING_PROVIDER.lower().strip(),
+    _ROUTING_THRESHOLDS["openai"],
+)
+
+STRONG_ROUTE_THRESHOLD = _active["strong"]
+LOW_CONFIDENCE_THRESHOLD = _active["low_confidence"]
+OUT_OF_SCOPE_THRESHOLD = _active["out_of_scope"]
+MIN_ROUTE_MARGIN = _active["min_margin"]
 FOLLOW_UP_STICKINESS_BOOST = 0.06
 SHORT_FOLLOW_UP_MAX_WORDS = 6
 
 # Multi-specialist fan-out: when the top match is not strong enough to delegate
 # alone but the runner-up is also plausible, consult both specialists in parallel
 # and synthesize a single answer instead of asking the user to clarify.
-MULTI_DELEGATE_SECONDARY_THRESHOLD = 0.25
+MULTI_DELEGATE_SECONDARY_THRESHOLD = _active["secondary"]
 MULTI_DELEGATE_MAX_AGENTS = 2
+# Only fan out on "both strongly scored" when the top two are this close.
+MULTI_DELEGATE_MAX_GAP = _active["max_gap"]
 
 # Keyword match boost: when a query contains one of a specialist's exact keywords
 # (word-boundary match, case-insensitive), add this to that specialist's cosine

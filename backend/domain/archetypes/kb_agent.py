@@ -13,6 +13,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from core.config import settings
 from core.llm import get_chat_model
+from domain.prompts import LANGUAGE_RULE
 from domain.state import AgentState
 from domain.tools.rag_tools import search_knowledge_base
 
@@ -78,6 +79,14 @@ RESPONSE FORMATTING RULES:
 9. NO OVER-ANSWERING: Do not include unrelated policy sections, examples, or extra explanations unless the user asks.
 10. FINAL GROUNDING CHECK: Before finalizing, silently check that every factual claim, number, duration, condition, and exception appears in the retrieved context. If not, remove it.
 11. UNSUPPORTED ANSWER RULE: If the retrieved context does not clearly support the answer, reply: "I don't have that information available."
+"""
+
+    # ── Citations ─────────────────────────────────────────────────────
+    # Append a Sources section for internal agents. Public, embeddable
+    # agents (e.g. aiexpo) should return clean answers with no Sources
+    # section — the frontend shows nothing because none is generated.
+    if agent_id != "aiexpo":
+        system_prompt += """
 
 CITATIONS:
 1. In the context returned by the tool, each chunk starts with `[Source: <filename> | Link: <url>]`.
@@ -95,6 +104,9 @@ CITATIONS:
 
 TONE ADJUSTMENT:
 The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledge their frustration before answering. Use a warm, understanding tone."""
+
+    # ── Answer in the user's language ─────────────────────────────────
+    system_prompt += f"\n\n{LANGUAGE_RULE}"
 
     # Trim to the last 5 messages + system prompt for the LLM window,
     # but the full history stays in state for the checkpointer to persist.

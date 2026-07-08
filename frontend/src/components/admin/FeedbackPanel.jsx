@@ -372,9 +372,15 @@ const FeedbackPanel = () => {
                                                 <span className="text-red-600 text-lg">👎</span>
                                             )}
                                         </div>
-
-                                        <div className="col-span-2 text-white/55 text-sm truncate">
-                                            {entry.user_id}
+                                        <div className="col-span-2 truncate">
+                                            <span className="block text-white/70 text-sm truncate">
+                                                {entry.user_name || entry.user_id}
+                                            </span>
+                                            {entry.user_name && (
+                                                <span className="block text-white/30 text-xs truncate">
+                                                    {entry.user_id}
+                                                </span>
+                                            )}
                                         </div>
 
                                         <div className="col-span-4 text-white/50 text-sm truncate">

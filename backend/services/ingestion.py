@@ -2,16 +2,16 @@ import os
 import shutil
 import tempfile
 import logging
+import asyncio
 import hashlib
 import re
-import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile
 from pydantic import BaseModel
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_core.documents import Document
-from core.llm import get_embedding_model
+from core.llm import get_ingestion_embedding_model
 from langchain_text_splitters import HTMLHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_unstructured import UnstructuredLoader
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
@@ -25,7 +25,11 @@ if sys.platform == "win32":
 
 from qdrant_client import QdrantClient, models
 
-from core.config import settings
+from core.config import (
+    settings,
+    ingestion_agent_collection_name,
+    ingestion_embedding_dimensions,
+)
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +38,7 @@ router = APIRouter()
 class IngestionService:
     def __init__(self):
         # 1. Initialize the Embedding Model from Factory
-        self.embeddings = get_embedding_model()
+        self.embeddings = get_ingestion_embedding_model()
 
         # 2. Sparse embedding model (BM25) for hybrid search.
         # Combines lexical matching with dense semantic search - essential
@@ -45,11 +49,22 @@ class IngestionService:
         # 3. Initialize Qdrant Client
         self.client = QdrantClient(url=settings.QDRANT_URL)
 
-        # 4. Secondary splitter for chunks that are still too large
+        # 4. Secondary splitter for chunks that are still too large.
+        # chunk_size is aligned with Unstructured's max_characters (1800) so
+        # the two splitters target the same size instead of the recursive
+        # splitter re-cutting Unstructured's semantic chunks by raw character
+        # count. It now only fires for xlsx sheets and web pages, which do not
+        # go through Unstructured's by_title chunking.
         self.recursive_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1600,
+            chunk_size=1800,
             chunk_overlap=300,
         )
+
+        # Tables are kept whole up to this size so the header row is never
+        # orphaned from its data rows. Larger tables are split with the header
+        # repeated in each part. The cap keeps a single table within the
+        # embedding model's input limit.
+        self.TABLE_KEEP_WHOLE_MAX = 6000
 
     def _ensure_collection_exists(self, collection_name: str):
         """Manually checks if a collection exists. If not, creates it safely.
@@ -66,7 +81,7 @@ class IngestionService:
                 collection_name=collection_name,
                 vectors_config={
                     "dense": models.VectorParams(
-                        size=settings.EMBEDDING_DIMENSIONS,
+                        size=ingestion_embedding_dimensions(),
                         distance=models.Distance.COSINE,
                     ),
                 },
@@ -124,12 +139,15 @@ class IngestionService:
             ]
             if headers:
                 breadcrumb = " > ".join(headers)
+                # Surface the section breadcrumb as the chunk title so
+                # citations name the section the answer came from.
+                doc.metadata["title"] = breadcrumb
                 if not doc.page_content.startswith(breadcrumb):
                     doc.page_content = f"[Section: {breadcrumb}]\n{doc.page_content}"
             doc.metadata["link"] = url
 
-        # Define Collection Name
-        collection_name = f"{agent_name}_docs"
+        # Define Collection Name (namespaced by the INGESTION embedding provider)
+        collection_name = ingestion_agent_collection_name(agent_name)
 
         # Create collection manually first
         self._ensure_collection_exists(collection_name)
@@ -182,13 +200,13 @@ class IngestionService:
         loader = UnstructuredLoader(
             file_path=str(file_path),
             chunking_strategy="by_title",
-            max_characters=2500,
+            max_characters=1800,
             combine_text_under_n_chars=500,
             strategy=strategy,
             languages=["eng", "sin"],
         )
         return loader.load()
-    
+
     def _evidence_storage_dir(self) -> Path:
         """Return the local directory used to store generated evidence previews."""
         evidence_dir = Path(settings.EVIDENCE_STORAGE_DIR)
@@ -942,6 +960,138 @@ class IngestionService:
 
         return evidence_items
 
+    def _derive_section_heading(self, text: str) -> str | None:
+        """Best-effort section heading for a chunk.
+
+        Unstructured's ``by_title`` chunking starts each composite chunk at a
+        section Title element, so the first non-empty line of the chunk is
+        usually the heading (e.g. "3.8 Maternity Leave"). We surface that as
+        the chunk ``title`` for citations.
+
+        Returns ``None`` when the first line does not look like a heading
+        (too long / sentence-like / no letters), so callers can fall back to
+        the filename instead of stamping a paragraph as a title.
+        """
+        if not text:
+            return None
+
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            # Only the first non-empty line is a heading candidate; a long
+            # first line is prose, not a title.
+            if len(line) > 120:
+                return None
+
+            # A trailing period signals a sentence or continuation fragment
+            # (a chunk that starts mid-paragraph), not a section heading.
+            if line.endswith("."):
+                return None
+
+            heading = line.rstrip(" :;-")
+
+            # Require at least one letter so we don't title a chunk "1." or "•".
+            if not re.search(r"[A-Za-z]", heading):
+                return None
+
+            return heading
+
+        return None
+
+    def _is_table_doc(self, doc: Document) -> bool:
+        """Decide whether a chunk should be treated as a structured table.
+
+        Uses only precise signals (Unstructured's element category, captured
+        table HTML, or an xlsx sheet) — not the looser keyword heuristic used
+        for evidence — so prose is never mistaken for a table here.
+        """
+        md = doc.metadata or {}
+        category = str(md.get("category", "")).lower()
+        return (
+            category in ("table", "tablechunk")
+            or bool(md.get("text_as_html"))
+            or bool(md.get("sheet"))
+        )
+
+    def _render_html_table(self, html: str) -> str:
+        """Render Unstructured's ``text_as_html`` into a pipe-delimited grid.
+
+        One row per line keeps each value bound to its row, so the flattened
+        cell stream (which can drop a column value into the wrong cell) is
+        replaced with a layout the embedding and the LLM can read row-wise.
+        """
+        try:
+            from bs4 import BeautifulSoup
+        except Exception:
+            return ""
+
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+        except Exception:
+            return ""
+
+        rows_out: list[str] = []
+        for tr in soup.find_all("tr"):
+            cells = tr.find_all(["th", "td"])
+            values = [
+                re.sub(r"\s+", " ", cell.get_text(" ").strip())
+                for cell in cells
+            ]
+            if any(values):
+                rows_out.append(" | ".join(values))
+
+        return "\n".join(rows_out)
+
+    def _apply_table_grid(self, doc: Document) -> None:
+        """Replace a table chunk's flattened text with a structured grid.
+
+        Only acts when the loader captured ``text_as_html``; otherwise the
+        chunk text is left untouched (e.g. OCR tables whose structure was
+        never detected).
+        """
+        html = (doc.metadata or {}).get("text_as_html")
+        if not html:
+            return
+
+        grid = self._render_html_table(html)
+        if grid:
+            doc.page_content = grid
+
+    def _split_table_with_header(self, doc: Document) -> list[Document]:
+        """Split an oversized table, repeating its header in every sub-chunk.
+
+        Prevents the header row from surviving only in the first part. For a
+        single-line flattened table (no row breaks) there is no header to
+        repeat, so it falls back to a plain recursive split.
+        """
+        lines = doc.page_content.splitlines()
+
+        header_lines: list[str] = []
+        for line in lines:
+            if not line.strip():
+                continue
+            header_lines.append(line)
+            # A leading "[Sheet: …]"/"[Section: …]" marker is kept together
+            # with the real header row that follows it.
+            if not line.strip().startswith("["):
+                break
+            if len(header_lines) >= 2:
+                break
+
+        header = "\n".join(header_lines)
+        sub_chunks = self.recursive_splitter.split_documents([doc])
+
+        if not header:
+            return sub_chunks
+
+        for sub in sub_chunks:
+            if not sub.page_content.startswith(header):
+                sub.page_content = f"{header}\n{sub.page_content}"
+
+        return sub_chunks
+
     def _load_and_chunk_file(self, file_path: Path) -> list[Document]:
         """Use unstructured's native semantic chunking by headers and sections.
 
@@ -973,7 +1123,8 @@ class IngestionService:
                 docs = []
 
             total_chars = sum(len(d.page_content) for d in docs)
-            # 2. Fall back to hi_res (OCR) when the text layer is missing or nearly empty
+            # 2a. Whole document has no usable text layer (fully scanned) —
+            # OCR the entire file in one hi_res pass.
             if total_chars < 50:
                 log.info(
                     f"{file_path.name}: fast produced {total_chars} chars — "
@@ -984,6 +1135,11 @@ class IngestionService:
                 except Exception as e:
                     log.error(f"hi_res strategy failed for {file_path.name}: {e}")
                     docs = []
+            # 2b. Partially scanned PDF — the fast pass got text from most
+            # pages, but some scanned pages produced little/none. OCR only
+            # those pages instead of silently dropping them.
+            elif ext == ".pdf":
+                docs = self._ocr_missing_pdf_pages(file_path, docs)
 
         # Re-split any chunks that are still too large after semantic
         # chunking.  Oversized chunks dilute embedding precision because
@@ -992,13 +1148,148 @@ class IngestionService:
         # answers that straddle a boundary are not lost.
         final_docs = []
         for doc in docs:
+            # Tables get structure-aware handling: render the captured grid and
+            # never split by raw character count (which orphans the header row).
+            is_table = self._is_table_doc(doc)
+            if is_table:
+                self._apply_table_grid(doc)
+
+            # Stamp a best-effort section heading as the chunk title BEFORE any
+            # re-split, so oversized chunks propagate it to every sub-chunk
+            # (split_documents copies parent metadata onto each child).
+            if "title" not in doc.metadata:
+                heading = doc.metadata.get("sheet") or self._derive_section_heading(
+                    doc.page_content
+                )
+                if heading:
+                    doc.metadata["title"] = heading
+
+            heading = doc.metadata.get("title")
+
+            if is_table:
+                # Keep small/medium tables whole; split very large ones while
+                # repeating the header row so column labels are never lost.
+                if len(doc.page_content) <= self.TABLE_KEEP_WHOLE_MAX:
+                    final_docs.append(doc)
+                else:
+                    final_docs.extend(self._split_table_with_header(doc))
+                continue
+
             if len(doc.page_content) > self.recursive_splitter._chunk_size:
                 sub_chunks = self.recursive_splitter.split_documents([doc])
+
+                # Re-splitting drops the section heading from every sub-chunk
+                # after the first. Prepend it so each sub-chunk stays
+                # self-describing for both embedding and the LLM (mirrors the
+                # website breadcrumb behaviour and reduces entity confusion
+                # across section boundaries).
+                if heading:
+                    marker = f"[Section: {heading}]"
+                    for sub in sub_chunks:
+                        if not sub.page_content.startswith(
+                            (heading, marker)
+                        ):
+                            sub.page_content = f"{marker}\n{sub.page_content}"
+
                 final_docs.extend(sub_chunks)
             else:
                 final_docs.append(doc)
 
         return final_docs
+
+    def _ocr_missing_pdf_pages(self, file_path: Path, docs: list[Document]) -> list[Document]:
+        """OCR only the scanned pages a 'fast' PDF pass missed.
+
+        The fast text-layer extraction silently produces nothing for scanned
+        (image-only) pages. On a PDF that is mostly digital but has a few
+        scanned pages, the whole-document char gate passes and those pages are
+        lost. This sums chars-per-page from the fast output, finds pages below
+        the threshold, and OCRs just those pages — re-mapping their page
+        numbers back to the original so citations/evidence stay correct.
+        """
+        import fitz  # PyMuPDF
+
+        MIN_CHARS_PER_PAGE = 50
+
+        chars_by_page: dict[int, int] = {}
+        for d in docs:
+            page = self._metadata_page_number(d.metadata or {})
+            if page:
+                chars_by_page[page] = chars_by_page.get(page, 0) + len(d.page_content or "")
+
+        # No page metadata at all → cannot localise sparse pages. The document
+        # already produced text, so leave it as-is rather than OCR everything.
+        if not chars_by_page:
+            return docs
+
+        try:
+            src = fitz.open(str(file_path))
+        except Exception as e:
+            log.debug(f"Per-page OCR skipped, cannot open {file_path.name}: {e}")
+            return docs
+
+        try:
+            total_pages = len(src)
+            missing_pages = [
+                page
+                for page in range(1, total_pages + 1)
+                if chars_by_page.get(page, 0) < MIN_CHARS_PER_PAGE
+            ]
+
+            if not missing_pages:
+                return docs
+
+            # If most of the document is sparse, a single whole-file hi_res
+            # pass is cheaper than many per-page passes.
+            if len(missing_pages) > total_pages * 0.6:
+                log.info(
+                    f"{file_path.name}: {len(missing_pages)}/{total_pages} pages "
+                    f"sparse — running hi_res on the whole file."
+                )
+                try:
+                    return self._load_with_strategy(file_path, "hi_res")
+                except Exception as e:
+                    log.error(f"Whole-file hi_res failed for {file_path.name}: {e}")
+                    return docs
+
+            log.info(
+                f"{file_path.name}: OCR-ing {len(missing_pages)} scanned page(s) "
+                f"{missing_pages} missed by the fast text layer."
+            )
+
+            ocr_docs: list[Document] = []
+
+            for page in missing_pages:
+                single = fitz.open()
+                try:
+                    single.insert_pdf(src, from_page=page - 1, to_page=page - 1)
+                    fd, tmp_name = tempfile.mkstemp(suffix=".pdf")
+                    os.close(fd)
+                    tmp_path = Path(tmp_name)
+                    single.save(str(tmp_path))
+                finally:
+                    single.close()
+
+                try:
+                    page_docs = self._load_with_strategy(tmp_path, "hi_res")
+                except Exception as e:
+                    log.error(
+                        f"hi_res OCR failed for {file_path.name} page {page}: {e}"
+                    )
+                    page_docs = []
+                finally:
+                    tmp_path.unlink(missing_ok=True)
+
+                # The single-page PDF numbers its elements as page 1; re-map
+                # them back to the real page in the source document.
+                for page_doc in page_docs:
+                    page_doc.metadata["page_number"] = page
+
+                ocr_docs.extend(page_docs)
+
+            return docs + ocr_docs
+        finally:
+            src.close()
 
     def _file_already_ingested(self, collection_name: str, onedrive_id: str, last_modified: str) -> bool:
         """Check if a file with this onedrive_id and lastModified timestamp
@@ -1534,8 +1825,8 @@ class IngestionService:
             total_chunks = 0
             processed_files = []
 
-            # Define Collection Name
-            collection_name = f"{agent_name}_docs"
+            # Define Collection Name (namespaced by the INGESTION embedding provider)
+            collection_name = ingestion_agent_collection_name(agent_name)
             self._ensure_collection_exists(collection_name)
 
             # Initialize Vector Store once (hybrid: dense + sparse)
@@ -1551,6 +1842,8 @@ class IngestionService:
 
             skipped_files = []
             failed_files = []
+            # Cache rendered PDF crops per (file, page) so multiple chunks on
+            # the same page reuse the same image instead of re-rendering.
             evidence_cache: dict[tuple[str, int], list[dict]] = {}
 
             for item in matching_items:
@@ -1613,6 +1906,8 @@ class IngestionService:
                         doc.metadata["source_folder"] = folder_id
                         doc.metadata["last_modified"] = last_modified
 
+                        # Attach visual/table evidence (cropped PDF previews)
+                        # so retrieval can surface diagrams alongside answers.
                         evidence_items = []
 
                         table_evidence = self._build_table_evidence(
