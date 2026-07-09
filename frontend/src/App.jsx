@@ -12,6 +12,11 @@ import FeedbackPanel from './components/admin/FeedbackPanel';
 import AdminRoute from './components/admin/AdminRoute';
 import IframeChatPage from './components/admin/IframeChatPage';
 import VoiceAgentPage from './pages/VoiceAgentPage';
+import { LifestoreAuthProvider, useLifestoreAuth } from './auth/lifestoreAuth';
+import LifestoreLogin from './components/LifestoreLogin';
+import { AuthProvider as Wso2AuthProvider } from '@asgardeo/auth-react';
+import { wso2Config } from './auth/wso2Config';
+import Wso2Bridge from './auth/Wso2Bridge';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 import embryoLogo from './assets/embryo-removebg.png';
@@ -299,6 +304,12 @@ const AgentWrapper = () => {
   const isAuthed = accounts.length > 0;
   const isPublicAgent = agentConfig.public === true;
 
+  // Ask LifeStore (customer-facing) is gated behind Google Sign-In.
+  // Other public agents (e.g. Ask Enterprise) stay fully open.
+  const isLifestore = agentConfig.id === "lifestore";
+  const lifestoreAuth = useLifestoreAuth();
+  const lifestoreGateOpen = !isLifestore || lifestoreAuth.isAuthenticated;
+
   // Dark mode only applies in the authenticated chat surface; login stays light.
   // Public agents stay light because they are customer-facing.
   const effectiveTheme =
@@ -457,6 +468,29 @@ const AgentWrapper = () => {
               </AuthenticatedTemplate>
             )}
 
+            {isLifestore && lifestoreAuth.isAuthenticated && (
+              <div className="flex items-center gap-2 mr-2 sm:mr-4">
+                {lifestoreAuth.user?.picture && (
+                  <img
+                    src={lifestoreAuth.user.picture}
+                    alt={lifestoreAuth.user.name || "Account"}
+                    referrerPolicy="no-referrer"
+                    className="h-7 w-7 rounded-full border border-gray-200"
+                  />
+                )}
+                <span className="hidden sm:block text-xs font-medium text-gray-600 max-w-[10rem] truncate">
+                  {lifestoreAuth.user?.name || lifestoreAuth.user?.email}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => lifestoreAuth.signOut()}
+                  className="text-xs font-semibold text-gray-500 hover:text-gray-900 underline underline-offset-2"
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
+
             <img
               src={sltLogo}
               alt="SLTMobitel"
@@ -483,7 +517,11 @@ const AgentWrapper = () => {
               transition={{ duration: 0.4 }}
               className="flex-1 flex flex-col min-h-0 z-10"
             >
-              <ChatInterface ref={chatRef} agentConfig={agentConfig} />
+              {lifestoreGateOpen ? (
+                <ChatInterface ref={chatRef} agentConfig={agentConfig} />
+              ) : (
+                <LifestoreLogin agentConfig={agentConfig} />
+              )}
             </motion.div>
           ) : (
             /*
@@ -666,6 +704,9 @@ function App() {
 
   return (
     <MsalProvider instance={msalInstance}>
+      <Wso2AuthProvider config={wso2Config}>
+      <LifestoreAuthProvider>
+      <Wso2Bridge />
       <ThemeProvider>
       <BrowserRouter>
         <Routes>
@@ -700,6 +741,8 @@ function App() {
         </Routes>
       </BrowserRouter>
       </ThemeProvider>
+      </LifestoreAuthProvider>
+      </Wso2AuthProvider>
     </MsalProvider>
   );
 }

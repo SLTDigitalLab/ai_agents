@@ -1,5 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { useLifestoreAuth } from '../../auth/lifestoreAuth';
+
+// Split a Google display name into first / last for the receipt fields.
+const splitName = (fullName = '') => {
+    const parts = fullName.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return { first: '', last: '' };
+    if (parts.length === 1) return { first: parts[0], last: '' };
+    return { first: parts[0], last: parts.slice(1).join(' ') };
+};
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const PAYHERE_SDK = 'https://www.payhere.lk/lib/payhere.js';
@@ -41,7 +50,27 @@ const LifestoreCheckout = ({ orderId }) => {
     });
     const [customerError, setCustomerError] = useState('');
 
+    const { user } = useLifestoreAuth();
+    const prefilledRef = useRef(false);
+
     const pollRef = useRef(null);
+
+    // ── Prefill name + email from the signed-in Google account ────────────
+    // Runs once when the user becomes available, and only fills fields the
+    // customer hasn't already typed into — so their edits are never clobbered.
+    // Phone isn't part of the Google profile, so it stays empty for them.
+    useEffect(() => {
+        if (prefilledRef.current || !user) return;
+        prefilledRef.current = true;
+
+        const { first, last } = splitName(user.name);
+        setCustomer((prev) => ({
+            ...prev,
+            first_name: prev.first_name || first,
+            last_name: prev.last_name || last,
+            email: prev.email || user.email || '',
+        }));
+    }, [user]);
 
     // ── Fetch the authoritative checkout payload ──────────────────────────
     useEffect(() => {
