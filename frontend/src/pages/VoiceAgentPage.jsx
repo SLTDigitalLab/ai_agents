@@ -464,8 +464,8 @@ const VoiceAgentPage = () => {
     return (
         <div className="h-screen flex bg-[#fafafa] dark:bg-[#111318] text-gray-900 dark:text-gray-100 overflow-hidden">
 
-            {/* ── Slim left sidebar ── */}
-            <div className="w-14 flex-shrink-0 flex flex-col items-center py-4 gap-2 border-r border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#0d0f14]">
+            {/* ── Slim left sidebar (desktop only; mobile uses the top-bar cluster) ── */}
+            <div className="hidden sm:flex w-14 flex-shrink-0 flex-col items-center py-4 gap-2 border-r border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#0d0f14]">
                 <div className="flex-1" />
 
                 {/* Theme toggle */}

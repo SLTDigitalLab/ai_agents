@@ -1,7 +1,7 @@
 """
 Feedback router – handles thumbs-up / thumbs-down ratings on AI responses.
 
-POST /api/v1/feedback        → submit or toggle feedback
+POST /api/v1/feedback                → submit or toggle feedback
 GET  /api/v1/feedback/{agent}/{thread} → get feedback for a conversation
 GET  /api/v1/admin/dashboard/feedback  → aggregate stats for admin panel
 """
@@ -14,22 +14,15 @@ import psycopg
 from psycopg.rows import dict_row
 
 from core.config import settings
-from domain.registry import AGENT_BUILDERS, get_compiled_sync_graph
+from core.checkpointer import get_postgres_checkpointer
+from domain.registry import AGENT_BUILDERS, get_agent_builder
 from schemas.feedback import FeedbackRequest, FeedbackResponse
-from services.sessions import ensure_sessions_table
-
-# --- 1. Import Langfuse ---
-from langfuse import Langfuse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Feedback"])
 
 VALID_AGENTS = set(AGENT_BUILDERS.keys())
-
-# --- 2. Initialize the Langfuse Client ---
-# It will automatically pick up LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY from your .env
-langfuse = Langfuse()
 
 # ── Table Setup ──────────────────────────────────────────────────────────
 
@@ -53,16 +46,10 @@ def _ensure_feedback_table():
                         message_index INTEGER    NOT NULL,
                         rating      VARCHAR(10)  NOT NULL CHECK (rating IN ('up', 'down')),
                         user_id     VARCHAR(255) NOT NULL,
-                        user_name   VARCHAR(255),
                         created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                         updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
                         UNIQUE (agent_id, thread_id, message_index, user_id)
                     )
-                """)
-                # Backfill column for tables created before user_name existed.
-                cur.execute("""
-                    ALTER TABLE public.feedback
-                    ADD COLUMN IF NOT EXISTS user_name VARCHAR(255)
                 """)
         _table_created = True
     except Exception as e:
@@ -75,32 +62,35 @@ def _load_session_messages(agent_id: str, thread_id: str) -> list:
     Returns a list of {"type": "human"|"ai", "content": str} dicts.
     """
     try:
+        builder_fn = get_agent_builder(agent_id)
+        workflow = builder_fn()
         config = {"configurable": {"thread_id": thread_id}}
 
-        graph = get_compiled_sync_graph(agent_id)
-        snapshot = graph.get_state(config)
+        with get_postgres_checkpointer(agent_id) as checkpointer:
+            graph = workflow.compile(checkpointer=checkpointer)
+            snapshot = graph.get_state(config)
 
-        if not snapshot.values:
-            return []
+            if not snapshot.values:
+                return []
 
-        messages = []
-        for msg in snapshot.values.get("messages", []):
-            if msg.type not in ("human", "ai"):
-                continue
-            content = msg.content
-            if isinstance(content, list):
-                parts = []
-                for block in content:
-                    if isinstance(block, str):
-                        parts.append(block)
-                    elif isinstance(block, dict) and "text" in block:
-                        parts.append(block["text"])
-                content = " ".join(parts).strip()
-            elif not isinstance(content, str):
-                content = str(content).strip()
-            if content:
-                messages.append({"type": msg.type, "content": content})
-        return messages
+            messages = []
+            for msg in snapshot.values.get("messages", []):
+                if msg.type not in ("human", "ai"):
+                    continue
+                content = msg.content
+                if isinstance(content, list):
+                    parts = []
+                    for block in content:
+                        if isinstance(block, str):
+                            parts.append(block)
+                        elif isinstance(block, dict) and "text" in block:
+                            parts.append(block["text"])
+                    content = " ".join(parts).strip()
+                elif not isinstance(content, str):
+                    content = str(content).strip()
+                if content:
+                    messages.append({"type": msg.type, "content": content})
+            return messages
     except Exception as e:
         logger.warning(f"Failed to load session {agent_id}/{thread_id}: {e}")
         return []
@@ -123,38 +113,19 @@ async def submit_feedback(req: FeedbackRequest):
         with psycopg.connect(settings.POSTGRES_URL, autocommit=True) as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute("""
-                    INSERT INTO public.feedback (agent_id, thread_id, message_index, rating, user_id, user_name)
-                    VALUES (%(agent_id)s, %(thread_id)s, %(message_index)s, %(rating)s, %(user_id)s, %(user_name)s)
+                    INSERT INTO public.feedback (agent_id, thread_id, message_index, rating, user_id)
+                    VALUES (%(agent_id)s, %(thread_id)s, %(message_index)s, %(rating)s, %(user_id)s)
                     ON CONFLICT (agent_id, thread_id, message_index, user_id)
-                    DO UPDATE SET
-                        rating = %(rating)s,
-                        user_name = COALESCE(%(user_name)s, public.feedback.user_name),
-                        updated_at = NOW()
-                    RETURNING id, agent_id, thread_id, message_index, rating, user_id, user_name
+                    DO UPDATE SET rating = %(rating)s, updated_at = NOW()
+                    RETURNING id, agent_id, thread_id, message_index, rating, user_id
                 """, {
                     "agent_id": req.agent_id,
                     "thread_id": req.thread_id,
                     "message_index": req.message_index,
                     "rating": req.rating,
                     "user_id": req.user_id,
-                    "user_name": req.user_name or None,
                 })
                 row = cur.fetchone()
-
-        # --- 3. Push Score to Langfuse ---
-        # Note: If you want to tie this to a specific Langfuse trace ID rather than the session/thread, 
-        # ensure your frontend passes the `trace_id` generated by Langfuse back to your API.
-        # Otherwise, relying on thread_id works well if thread_id == trace_id in your CallbackHandler.
-        try:
-            score_value = 1.0 if req.rating == "up" else 0.0
-            langfuse.score(
-                trace_id=req.thread_id,  
-                name="user_feedback",
-                value=score_value,
-                comment=f"Rated message index {req.message_index} by {req.user_id}"
-            )
-        except Exception as lf_exc:
-            logger.warning(f"Langfuse scoring failed (non-fatal): {lf_exc}")
 
         return FeedbackResponse(**row)
 
@@ -243,7 +214,6 @@ async def get_feedback_stats(
 ):
     """Return aggregate feedback statistics for the admin dashboard."""
     _ensure_feedback_table()
-    ensure_sessions_table()  # required for the LEFT JOIN below
 
     try:
         with psycopg.connect(settings.POSTGRES_URL, autocommit=True) as conn:
@@ -278,20 +248,12 @@ async def get_feedback_stats(
                 """)
                 per_agent = cur.fetchall()
 
-                # Recent feedback entries (last 50). Backfill the display name
-                # from chat_sessions for rows captured before user_name existed.
-                recent_filter = agent_filter.replace("agent_id", "f.agent_id")
+                # Recent feedback entries (last 50)
                 cur.execute(f"""
-                    SELECT
-                        f.id, f.agent_id, f.thread_id, f.message_index, f.rating,
-                        f.user_id,
-                        COALESCE(f.user_name, cs.user_name) AS user_name,
-                        f.created_at
-                    FROM public.feedback f
-                    LEFT JOIN public.chat_sessions cs
-                        ON cs.agent_id = f.agent_id AND cs.thread_id = f.thread_id
-                    {recent_filter}
-                    ORDER BY f.created_at DESC
+                    SELECT id, agent_id, thread_id, message_index, rating, user_id, created_at
+                    FROM public.feedback
+                    {agent_filter}
+                    ORDER BY created_at DESC
                     LIMIT 50
                 """, params)
                 recent = cur.fetchall()

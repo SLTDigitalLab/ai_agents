@@ -1,7 +1,14 @@
 import React, { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const UserMenu = ({ user, initials, showMenu, onToggle, onLogout }) => {
+const UserMenu = ({ user, initials, showMenu, onToggle, onLogout, placement = 'sidebar' }) => {
+    // `sidebar` → opens above-right (slim rail, desktop). `topbar` → opens
+    // below-right (mobile header).
+    const menuPositionClass = placement === 'topbar'
+        ? 'top-full right-0 mt-2'
+        : 'bottom-0 left-12';
+    const menuInitialX = placement === 'topbar' ? 0 : -6;
+    const menuInitialY = placement === 'topbar' ? -6 : 0;
     useEffect(() => {
         if (!showMenu) return;
         const handler = () => onToggle(false);
@@ -22,12 +29,12 @@ const UserMenu = ({ user, initials, showMenu, onToggle, onLogout }) => {
             <AnimatePresence>
                 {showMenu && (
                     <motion.div
-                        initial={{ opacity: 0, x: -6, scale: 0.96 }}
-                        animate={{ opacity: 1, x: 0, scale: 1 }}
-                        exit={{ opacity: 0, x: -6, scale: 0.96 }}
+                        initial={{ opacity: 0, x: menuInitialX, y: menuInitialY, scale: 0.96 }}
+                        animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, x: menuInitialX, y: menuInitialY, scale: 0.96 }}
                         transition={{ duration: 0.14 }}
                         onClick={e => e.stopPropagation()}
-                        className="absolute bottom-0 left-12 w-52 bg-white dark:bg-[#1a1d24] border border-gray-200 dark:border-white/[0.08] rounded-2xl shadow-2xl p-3 z-50"
+                        className={`absolute ${menuPositionClass} w-52 bg-white dark:bg-[#1a1d24] border border-gray-200 dark:border-white/[0.08] rounded-2xl shadow-2xl p-3 z-50`}
                     >
                         <div className="px-2 py-1.5 mb-2 border-b border-gray-100 dark:border-white/[0.06]">
                             <p className="text-[0.82rem] font-semibold text-gray-900 dark:text-gray-100 truncate">{user.name}</p>

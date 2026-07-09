@@ -78,14 +78,7 @@ const SessionDetail = ({ session, agent, onClose }) => {
                         {/* Header */}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/80 backdrop-blur">
                             <div>
-                                <h3 className="text-white font-semibold text-lg">
-                                    {session.user_name || session.user_id || 'Session Detail'}
-                                </h3>
-                                {(session.user_name && session.user_id) && (
-                                    <p className="text-white/50 text-xs mt-0.5 truncate max-w-md">
-                                        {session.user_id}
-                                    </p>
-                                )}
+                                <h3 className="text-white font-semibold text-lg">Session Detail</h3>
                                 <p className="text-white/40 text-xs font-mono mt-0.5 truncate max-w-md">
                                     {session.session_id}
                                 </p>
@@ -368,10 +361,9 @@ const ChatBrowser = () => {
                     {/* Table Header */}
                     <div className="grid grid-cols-12 gap-4 px-6 py-3 border-b border-white/[0.06] bg-white/[0.02] text-white/40 text-xs uppercase tracking-wider font-semibold">
                         <div className="col-span-1">#</div>
-                        <div className="col-span-3">User</div>
-                        <div className="col-span-3">Session ID</div>
+                        <div className="col-span-4">Session ID</div>
                         <div className="col-span-2 text-center">Messages</div>
-                        <div className="col-span-3">Preview</div>
+                        <div className="col-span-5">Preview</div>
                     </div>
 
                     {/* Loading */}
@@ -421,18 +413,8 @@ const ChatBrowser = () => {
                             <div className="col-span-1 text-white/30 text-sm font-mono">
                                 {skip + i + 1}
                             </div>
-                            <div className="col-span-3 truncate pr-2">
-                                <span className="block text-white/80 text-sm truncate group-hover:text-cyan-400 transition-colors">
-                                    {session.user_name || session.user_id || 'Anonymous'}
-                                </span>
-                                {session.user_name && session.user_id && (
-                                    <span className="block text-white/30 text-xs truncate">
-                                        {session.user_id}
-                                    </span>
-                                )}
-                            </div>
-                            <div className="col-span-3 text-white/50 text-sm font-mono truncate">
-                                {session.session_id.substring(0, 18)}...
+                            <div className="col-span-4 text-white/70 text-sm font-mono truncate group-hover:text-cyan-400 transition-colors">
+                                {session.session_id.substring(0, 20)}...
                             </div>
                             <div className="col-span-2 text-center">
                                 <span className="inline-flex items-center gap-1.5 bg-white/[0.06] text-white/60 px-2.5 py-1 rounded-full text-xs font-medium">
@@ -442,7 +424,7 @@ const ChatBrowser = () => {
                                     {session.message_count}
                                 </span>
                             </div>
-                            <div className="col-span-3 text-white/50 text-sm truncate">
+                            <div className="col-span-5 text-white/50 text-sm truncate">
                                 {session.preview_text}
                             </div>
                         </motion.div>

@@ -1,0 +1,725 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import sys
+import traceback
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
+
+
+router = APIRouter(prefix="/api/v1/lifestore", tags=["LifeStore MCP"])
+
+
+class LifeStoreMCPChatRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    agent_id: str = "ask_lifestore"
+    user_id: str = "anonymous"
+    thread_id: str | None = None
+    use_mcp: bool = True
+    mcp_server: str | None = "mcp_lifestore"
+    tool_name: str | None = "lifestore_hybrid_product_search"
+    preferred_tool: str | None = "lifestore_hybrid_product_search"
+    force_tool_call: bool = True
+    limit: int = 5
+
+
+_MCP_MODULE: Any = None
+
+
+def _safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"true", "1", "yes", "y"}
+
+
+def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = default
+    return max(min(parsed, maximum), minimum)
+
+
+@lru_cache(maxsize=1)
+def _get_lifestore_openai_llm():
+    api_key = os.getenv("LIFESTORE_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+
+    if not api_key:
+        try:
+            from core.config import settings
+
+            api_key = settings.OPENAI_API_KEY
+        except Exception:
+            api_key = None
+
+    if not api_key:
+        return None
+
+    from langchain_openai import ChatOpenAI
+
+    return ChatOpenAI(
+        model=os.getenv("LIFESTORE_OPENAI_MODEL", "gpt-4.1-mini"),
+        api_key=api_key,
+        temperature=0,
+    )
+
+
+def _extract_json_object(text: Any) -> dict[str, Any]:
+    value = _safe_text(text)
+    if not value:
+        return {}
+
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        pass
+
+    start = value.find("{")
+    end = value.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            parsed = json.loads(value[start : end + 1])
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    return {}
+
+
+def _fallback_plan(message: str, requested_limit: int) -> dict[str, Any]:
+    """
+    Used only when OpenAI is unavailable.
+
+    Normal behavior is fully LLM-planned through _plan_lifestore_answer.
+    This fallback is deliberately conservative so single-product queries do not
+    accidentally return 5+ cards.
+    """
+    count = _bounded_int(requested_limit, 1, 1, 8)
+    return {
+        "answer_mode": "single_product",
+        "product_query": message,
+        "comparison_queries": [],
+        "desired_product_count": min(count, 1),
+        "show_product_cards": True,
+        "open_lifestore_form": False,
+        "needs_comparison_table": False,
+    }
+
+
+def _normalize_plan(parsed: dict[str, Any], message: str, requested_limit: int) -> dict[str, Any]:
+    allowed_modes = {
+        "single_product",
+        "availability",
+        "category_browse",
+        "comparison",
+        "purchase",
+        "general",
+    }
+
+    mode = _safe_text(parsed.get("answer_mode")).lower()
+    if mode not in allowed_modes:
+        mode = "single_product"
+
+    comparison_queries = parsed.get("comparison_queries") or []
+    if not isinstance(comparison_queries, list):
+        comparison_queries = []
+
+    comparison_queries = [
+        _safe_text(item)
+        for item in comparison_queries
+        if _safe_text(item)
+    ][:6]
+
+    product_query = _safe_text(parsed.get("product_query"))
+    if not product_query:
+        product_query = message
+
+    desired_default = {
+        "single_product": 1,
+        "availability": 1,
+        "purchase": 1,
+        "comparison": 4,
+        "category_browse": 5,
+        "general": min(max(int(requested_limit or 5), 1), 5),
+    }.get(mode, 1)
+
+    desired_count = _bounded_int(
+        parsed.get("desired_product_count"),
+        desired_default,
+        1,
+        8,
+    )
+
+    if mode in {"single_product", "availability", "purchase"}:
+        desired_count = 1
+    elif mode == "comparison":
+        desired_count = max(min(desired_count, 6), 2)
+
+    # For comparison, the answer should be the table, not a pile of cards.
+    show_cards_default = mode != "comparison"
+
+    return {
+        "answer_mode": mode,
+        "product_query": product_query,
+        "comparison_queries": comparison_queries,
+        "desired_product_count": desired_count,
+        "show_product_cards": _as_bool(parsed.get("show_product_cards"), show_cards_default),
+        "open_lifestore_form": _as_bool(parsed.get("open_lifestore_form"), False),
+        "needs_comparison_table": _as_bool(parsed.get("needs_comparison_table"), mode == "comparison"),
+    }
+
+
+def _plan_lifestore_answer(message: str, requested_limit: int) -> dict[str, Any]:
+    llm = _get_lifestore_openai_llm()
+    if llm is None:
+        return _fallback_plan(message, requested_limit)
+
+    try:
+        response = llm.invoke(
+            [
+                (
+                    "system",
+                    (
+                        "You are the intent and retrieval planner for Ask LifeStore. "
+                        "Return JSON only. Do not answer the user. "
+                        "Do not use keyword-only rules. Read the user's intent semantically. "
+                        "Classify the latest message into exactly one answer_mode: "
+                        "single_product, availability, category_browse, comparison, purchase, or general. "
+                        "Extract product_query as the clean product name, product ID, category, or search phrase that should be sent to retrieval. "
+                        "For a named product or direct availability check, remove wording such as 'is', 'available', 'do you have', 'tell me about', and keep only the product identifier/name. "
+                        "For category browsing, product_query should be the category/search phrase. "
+                        "For comparison, include comparison_queries only when the user clearly names specific products. "
+                        "Set desired_product_count to 1 for single_product, availability, and purchase. "
+                        "Set desired_product_count to 2-6 for comparison. "
+                        "Set desired_product_count to 3-8 for broad category/list/recommendation questions. "
+                        "Set open_lifestore_form true only when the user clearly wants to buy/order/purchase/place an order. "
+                        "Set needs_comparison_table true for comparison. "
+                        "Set show_product_cards false for comparison unless the user explicitly asks to see product cards/images."
+                    ),
+                ),
+                (
+                    "human",
+                    (
+                        f"User message: {message}\n"
+                        f"Frontend requested limit: {requested_limit}\n\n"
+                        "Return exactly this JSON shape:\n"
+                        "{"
+                        "\"answer_mode\":\"single_product|availability|category_browse|comparison|purchase|general\","
+                        "\"product_query\":\"clean retrieval phrase\","
+                        "\"comparison_queries\":[\"optional product name 1\",\"optional product name 2\"],"
+                        "\"desired_product_count\":1,"
+                        "\"show_product_cards\":true,"
+                        "\"open_lifestore_form\":false,"
+                        "\"needs_comparison_table\":false"
+                        "}"
+                    ),
+                ),
+            ]
+        )
+
+        parsed = _extract_json_object(getattr(response, "content", response))
+        return _normalize_plan(parsed, message, requested_limit)
+
+    except Exception:
+        return _fallback_plan(message, requested_limit)
+
+
+def _compact_product_for_llm(product: dict[str, Any]) -> dict[str, Any]:
+    allowed = [
+        "product_id",
+        "name",
+        "seller",
+        "brand",
+        "category",
+        "product_type",
+        "price",
+        "price_value",
+        "currency",
+        "stock_status",
+        "availability",
+        "stock",
+        "url",
+        "description",
+        "key_details",
+        "specs",
+        "vector_evidence",
+    ]
+
+    compact = {
+        key: product.get(key)
+        for key in allowed
+        if product.get(key) not in (None, "", [], {})
+    }
+
+    if isinstance(compact.get("key_details"), list):
+        compact["key_details"] = compact["key_details"][:8]
+
+    if isinstance(compact.get("vector_evidence"), list):
+        compact["vector_evidence"] = compact["vector_evidence"][:3]
+
+    if isinstance(compact.get("specs"), dict):
+        # Keep prompt size under control.
+        compact["specs"] = dict(list(compact["specs"].items())[:12])
+
+    return compact
+
+
+def _format_stock_status(product: dict[str, Any]) -> str:
+    value = _safe_text(product.get("stock_status") or product.get("availability"))
+    return value.replace("_", " ") if value else "Unknown"
+
+
+def _fallback_answer(message: str, plan: dict[str, Any], products: list[dict[str, Any]]) -> str:
+    mode = _safe_text(plan.get("answer_mode"))
+    if not products:
+        return "I could not find enough LifeStore product data to answer that from the current knowledge base."
+
+    if mode == "comparison":
+        rows = [
+            "| Product | Price | Stock status | Category | Product type |",
+            "|---|---:|---|---|---|",
+        ]
+        for product in products:
+            rows.append(
+                "| "
+                + " | ".join(
+                    [
+                        _safe_text(product.get("name")) or "Unknown",
+                        _safe_text(product.get("price")) or "Unknown",
+                        _format_stock_status(product),
+                        _safe_text(product.get("category")) or "Unknown",
+                        _safe_text(product.get("product_type")) or "Unknown",
+                    ]
+                )
+                + " |"
+            )
+        return "\n".join(rows)
+
+    product = products[0]
+    name = _safe_text(product.get("name")) or "This LifeStore product"
+    product_type = _safe_text(product.get("product_type"))
+    brand = _safe_text(product.get("brand"))
+    seller = _safe_text(product.get("seller")) or "the listed seller"
+
+    intro = f"The {name} is"
+    if product_type:
+        intro += f" a {product_type}"
+    if brand:
+        intro += f" from {brand}"
+    intro += f" sold by {seller}."
+
+    lines = [
+        intro,
+        "",
+        f"Product: {name}",
+        f"Brand: {brand or 'Unknown'}",
+        f"Seller: {seller}",
+        f"Price: {_safe_text(product.get('price')) or 'Unknown'}",
+        f"Stock status: {_format_stock_status(product)}",
+        f"Category: {_safe_text(product.get('category')) or 'Unknown'}",
+        f"Product type: {product_type or 'Unknown'}",
+        "",
+        "Key details",
+    ]
+
+    details = product.get("key_details") or []
+    if isinstance(details, list) and details:
+        lines.extend(f"- {_safe_text(detail)}" for detail in details[:6])
+    else:
+        lines.append("- No additional feature details are available in the current LifeStore KB.")
+
+    return "\n".join(lines)
+
+
+def _write_lifestore_answer(
+    message: str,
+    plan: dict[str, Any],
+    products: list[dict[str, Any]],
+    fallback: str,
+) -> str:
+    llm = _get_lifestore_openai_llm()
+    deterministic_fallback = _fallback_answer(message, plan, products) if products else fallback
+
+    if llm is None:
+        return deterministic_fallback
+
+    compact_products = [_compact_product_for_llm(product) for product in products]
+    mode = _safe_text(plan.get("answer_mode")) or "single_product"
+
+    try:
+        response = llm.invoke(
+            [
+                (
+                    "system",
+                    (
+                        "You are Ask LifeStore, a shopping assistant for LifeStore products. "
+                        "Write the final chat answer using ONLY the supplied product facts. "
+                        "Do not invent prices, stock, sellers, categories, links, features, pros, or cons. "
+                        "Do not mention raw image URLs. "
+                        "Do not include a Product link line unless the user specifically asks for a link. "
+                        "\n\n"
+                        "Formatting rules for single_product, availability, and purchase:\n"
+                        "1. Start with one natural sentence, e.g. 'The X is an ADSL router sold by SLT-MOBITEL.'\n"
+                        "2. Add a blank line.\n"
+                        "3. Put each field on its own separate line exactly like:\n"
+                        "Product: ...\nBrand: ...\nSeller: ...\nPrice: ...\nStock status: ...\nCategory: ...\nProduct type: ...\n"
+                        "4. Add a blank line.\n"
+                        "5. Add 'Key details' heading, then concise bullets.\n"
+                        "Never cram field labels into one paragraph.\n"
+                        "\n\n"
+                        "Formatting rules for comparison:\n"
+                        "Put a Markdown table FIRST. Columns: Product, Best for, Price, Stock status, Pros, Cons. "
+                        "After the table, add one short recommendation sentence. "
+                        "Do not render product cards in the text.\n"
+                        "\n\n"
+                        "For category/general questions, summarize the returned products clearly and avoid forcing everything into one product answer."
+                    ),
+                ),
+                (
+                    "human",
+                    (
+                        f"User question: {message}\n"
+                        f"Answer mode: {mode}\n"
+                        f"Planner JSON:\n{json.dumps(plan, ensure_ascii=False, indent=2)}\n\n"
+                        "Product facts JSON:\n"
+                        f"{json.dumps(compact_products, ensure_ascii=False, indent=2)}"
+                    ),
+                ),
+            ]
+        )
+
+        answer = _safe_text(getattr(response, "content", response))
+        return answer or deterministic_fallback
+
+    except Exception:
+        return deterministic_fallback
+
+
+def _project_root() -> Path:
+    """
+    Expected layout:
+
+    ai_agents_mcp_experiment/
+      backend/
+        routers/
+          lifestore_mcp_chat.py
+      mcp_lifestore/
+        server.py
+    """
+    return Path(__file__).resolve().parents[2]
+
+
+def _mcp_server_path() -> Path:
+    env_path = os.getenv("LIFESTORE_MCP_SERVER_PATH", "").strip()
+
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+
+    return _project_root() / "mcp_lifestore" / "server.py"
+
+
+def _load_mcp_module() -> Any:
+    global _MCP_MODULE
+
+    if _MCP_MODULE is not None:
+        return _MCP_MODULE
+
+    root = _project_root()
+    server_path = _mcp_server_path()
+
+    if not server_path.exists():
+        raise FileNotFoundError(
+            f"MCP server.py not found at: {server_path}. "
+            "Set LIFESTORE_MCP_SERVER_PATH in .env if your path is different."
+        )
+
+    for path in [root, root / "backend"]:
+        path_text = str(path)
+        if path_text not in sys.path:
+            sys.path.insert(0, path_text)
+
+    spec = importlib.util.spec_from_file_location(
+        "_ask_lifestore_mcp_server",
+        server_path,
+    )
+
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load MCP server module from: {server_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    if not hasattr(module, "lifestore_hybrid_product_search"):
+        raise AttributeError(
+            "mcp_lifestore/server.py does not define lifestore_hybrid_product_search"
+        )
+
+    _MCP_MODULE = module
+    return _MCP_MODULE
+
+
+def _call_mcp_tool(module: Any, tool_name: str, **kwargs: Any) -> dict[str, Any]:
+    tool = getattr(module, tool_name, None)
+    if not callable(tool):
+        raise AttributeError(f"mcp_lifestore/server.py does not define {tool_name}")
+
+    result = tool(**kwargs)
+
+    if isinstance(result, dict):
+        return result
+
+    return {
+        "status": "success",
+        "answer": str(result),
+        "products": [],
+        "retrieval": {},
+    }
+
+
+def _dedupe_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    output: list[dict[str, Any]] = []
+
+    for product in products:
+        if not isinstance(product, dict):
+            continue
+
+        key = _safe_text(
+            product.get("url")
+            or product.get("product_id")
+            or product.get("sku")
+            or product.get("name")
+        )
+
+        if not key or key in seen:
+            continue
+
+        seen.add(key)
+        output.append(product)
+
+    return output
+
+
+def _extract_products(result: dict[str, Any]) -> list[dict[str, Any]]:
+    products = result.get("products") or []
+
+    if not isinstance(products, list):
+        return []
+
+    return [product for product in products if isinstance(product, dict)]
+
+
+def _retrieve_products(module: Any, message: str, plan: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+    mode = _safe_text(plan.get("answer_mode"))
+    product_query = _safe_text(plan.get("product_query")) or message
+    desired_limit = _bounded_int(plan.get("desired_product_count"), 1, 1, 8)
+
+    if mode in {"single_product", "purchase"}:
+        try:
+            result = _call_mcp_tool(
+                module,
+                "lifestore_precise_product_lookup",
+                product_query=product_query,
+                include_vector_evidence=True,
+            )
+            return result, _extract_products(result)[:1], "lifestore_precise_product_lookup"
+        except Exception:
+            result = _call_mcp_tool(
+                module,
+                "lifestore_hybrid_product_search",
+                query=product_query,
+                product_query=product_query,
+                search_mode=mode,
+                limit=1,
+                include_vector_evidence=True,
+            )
+            return result, _extract_products(result)[:1], "lifestore_hybrid_product_search"
+
+    if mode == "availability":
+        try:
+            result = _call_mcp_tool(
+                module,
+                "lifestore_availability_lookup",
+                product_query=product_query,
+                requested_availability="in_stock",
+            )
+            return result, _extract_products(result)[:1], "lifestore_availability_lookup"
+        except Exception:
+            result = _call_mcp_tool(
+                module,
+                "lifestore_hybrid_product_search",
+                query=product_query,
+                product_query=product_query,
+                search_mode="availability",
+                limit=1,
+                include_vector_evidence=True,
+            )
+            return result, _extract_products(result)[:1], "lifestore_hybrid_product_search"
+
+    if mode == "comparison":
+        comparison_queries = plan.get("comparison_queries") or []
+        try:
+            result = _call_mcp_tool(
+                module,
+                "lifestore_compare_products",
+                query=product_query or message,
+                product_queries=comparison_queries,
+                limit=max(desired_limit, 2),
+                include_vector_evidence=True,
+            )
+            return result, _dedupe_products(_extract_products(result))[:desired_limit], "lifestore_compare_products"
+        except Exception:
+            result = _call_mcp_tool(
+                module,
+                "lifestore_hybrid_product_search",
+                query=product_query or message,
+                search_mode="comparison",
+                limit=max(desired_limit, 2),
+                include_vector_evidence=True,
+            )
+            return result, _dedupe_products(_extract_products(result))[:desired_limit], "lifestore_hybrid_product_search"
+
+    result = _call_mcp_tool(
+        module,
+        "lifestore_hybrid_product_search",
+        query=product_query or message,
+        search_mode=mode or "general",
+        limit=desired_limit,
+        include_vector_evidence=True,
+    )
+
+    return result, _dedupe_products(_extract_products(result))[:desired_limit], "lifestore_hybrid_product_search"
+
+
+@router.get("/mcp-health")
+def lifestore_mcp_health() -> dict[str, Any]:
+    """
+    Browser/backend health check for the LifeStore MCP proxy.
+    """
+    server_path = _mcp_server_path()
+
+    try:
+        module = _load_mcp_module()
+
+        return {
+            "status": "ok",
+            "mcp_server_path": str(server_path),
+            "mcp_server_exists": server_path.exists(),
+            "has_lifestore_hybrid_product_search": callable(getattr(module, "lifestore_hybrid_product_search", None)),
+            "has_lifestore_precise_product_lookup": callable(getattr(module, "lifestore_precise_product_lookup", None)),
+            "has_lifestore_availability_lookup": callable(getattr(module, "lifestore_availability_lookup", None)),
+            "has_lifestore_compare_products": callable(getattr(module, "lifestore_compare_products", None)),
+        }
+
+    except Exception as error:
+        return {
+            "status": "error",
+            "mcp_server_path": str(server_path),
+            "mcp_server_exists": server_path.exists(),
+            "message": str(error),
+            "traceback": traceback.format_exc(),
+        }
+
+
+@router.post("/mcp-chat")
+def lifestore_mcp_chat(request: LifeStoreMCPChatRequest) -> dict[str, Any]:
+    """
+    FastAPI proxy used by the React frontend.
+
+    Browser -> FastAPI /api/v1/lifestore/mcp-chat -> MCP tool function.
+    """
+    try:
+        module = _load_mcp_module()
+        message = request.message.strip()
+
+        plan = _plan_lifestore_answer(message, request.limit)
+        answer_mode = _safe_text(plan.get("answer_mode"))
+
+        result, products, tool_name = _retrieve_products(module, message, plan)
+
+        fallback_answer = str(
+            result.get("answer")
+            or result.get("reply")
+            or result.get("message")
+            or "I could not find enough LifeStore data to answer that."
+        )
+
+        answer = _write_lifestore_answer(
+            message=message,
+            plan=plan,
+            products=products,
+            fallback=fallback_answer,
+        )
+
+        form_payload: dict[str, Any] | None = None
+
+        if bool(plan.get("open_lifestore_form")):
+            form_payload = {
+                "product": (
+                    _safe_text(products[0].get("name"))
+                    if products
+                    else _safe_text(plan.get("product_query"))
+                )
+            }
+            answer = f"{answer}\n\n[RENDER_LIFESTORE_FORM]"
+
+        # Comparisons should be table-first, not a wall of product cards.
+        show_cards = bool(plan.get("show_product_cards", True))
+        if answer_mode == "comparison" and not bool(plan.get("show_product_cards")):
+            show_cards = False
+
+        response_products = products if show_cards else []
+
+        return {
+            "status": str(result.get("status") or "success"),
+            "reply": answer,
+            "answer": answer,
+            "products": response_products,
+            "retrieval": result.get("retrieval") or {},
+            "tool_name": tool_name,
+            "answer_plan": plan,
+            "form_payload": form_payload,
+            "frontend_contract": {
+                "render_as": "assistant_answer_with_product_cards",
+                "answer_field": "answer",
+                "cards_field": "products",
+                "form_payload_field": "form_payload",
+                "image_rule": "Render products[].image_url inside an img tag. Do not show image URLs as plain text.",
+            },
+        }
+
+    except Exception as error:
+        print("LifeStore MCP proxy failed:")
+        print(traceback.format_exc())
+
+        return {
+            "status": "mcp_proxy_failed",
+            "reply": (
+                "Sorry, I could not connect to the LifeStore MCP proxy. "
+                "Please check the FastAPI backend terminal logs."
+            ),
+            "answer": (
+                "Sorry, I could not connect to the LifeStore MCP proxy. "
+                "Please check the FastAPI backend terminal logs."
+            ),
+            "products": [],
+            "retrieval": {},
+            "tool_name": "lifestore_hybrid_product_search",
+            "error": str(error),
+            "traceback": traceback.format_exc(),
+        }

@@ -385,384 +385,105 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
     "network": {
         "display_name": "Network",
         "description": (
-            "The Network domain covers the design, deployment, and operation of telecommunications "
-            "infrastructure, including Core and Transport networks (MPLS, SDH, OTN, 100G core), Primary "
-            "Access (LTE, CDMA, MSAN, OLT), and Secondary Fiber Access (FTTH passive ODN). It involves "
-            "network service assurance (ENSA), fiber rollout procedures (FTC/FDP installation, OTDR "
-            "testing), IP routing operations (OSPF, BGP, RSVP-TE, BRAS, VPNs), and 24/7 NOC/BBNOC "
-            "monitoring of multi-vendor telecom equipment."
+            "This domain handles SLTMobitel's enterprise and corporate network connectivity, "
+            "including WAN/LAN setup, routing and switching protocols, IP address allocation, "
+            "VPN tunnel configurations, firewall rules, transmission or fiber link issues, "
+            "network outages, packet loss, DNS/DHCP settings, port forwarding, and network service requests."
         ),
         "keywords": [
-            "FTTH",
-            "FTTx",
-            "GPON",
-            "MPLS",
-            "SDH",
-            "OTN",
-            "100G core",
-            "OSPF",
-            "BGP",
-            "LDP",
-            "MP-BGP",
-            "RSVP-TE",
-            "FRR",
-            "L2VPN",
-            "L3VPN",
-            "MVPN",
-            "E2E QoS",
-            "IP Multicasting",
-            "IP Transit",
-            "IX Peering",
-            "5G",
-            "LTE base stations",
-            "CDMA base stations",
-            "Core Fiber Network",
-            "Fiber Termination Cabinet",
-            "FTC",
-            "Fiber Distribution Point",
-            "FDP",
-            "Optical Splitter",
-            "Pigtails",
-            "ODF",
-            "MSAN",
-            "OLT",
-            "DSLAM",
-            "BRAS",
-            "CEA Aggregation Network",
-            "L2 SSW",
-            "L3 SW",
-            "AGW",
-            "Cable Landing Station",
-            "ENSA",
-            "NOC",
-            "BBNOC",
-            "OSS",
-            "RFO Management",
-            "Optical PAT",
-            "OTDR test report",
-            "Planned Event (PE)",
-            "Huawei NCE",
-            "Alcatel NSP NFM-P",
-            "Cacti",
-            "Netnumen",
+            "network outage",
+            "WAN connection",
+            "LAN setup",
+            "IP address allocation",
+            "IP routing",
+            "network switch",
+            "router configuration",
+            "firewall rules",
+            "VPN tunnel",
+            "fiber link",
+            "ping failure",
+            "packet loss",
+            "subnet mask",
+            "dns configuration",
+            "dhcp server",
+            "port forwarding",
+            "noc helpdesk",
+            "network service request",
         ],
         "examples": [
-            "What is the procedure for terminating secondary cables in the Fiber Termination Cabinet (FTC)?",
-            "How do we conduct an Optical PAT and generate the OTDR test report for the new fiber deployment?",
-            "What is the minimum ground clearance and sag tolerance for aerial fiber cable drawing?",
-            "How is MP-BGP and RSVP-TE configured on the new 100G core network nodes?",
-            "What are the QoS and VLAN requirements for deploying a new L3VPN service?",
-            "What is the ENSA fault escalation flow for a major D-PREMIUM VPN outage?",
-            "Who handles maintenance and RFO management for the CEA Aggregation Network?",
-            "What is the SLA for resolving a Tier III broadband fault at the BBNOC?",
-            "How do we retrieve configuration backups for the Huawei NCE and Alcatel NSP NFM-P systems?",
-            "Who is the platform engineer responsible for the Nokia MSAN/OLT platforms?",
-            "What is the procedure for replacing a faulty optical splitter inside the ZTT Fiber Distribution Point (FDP)?",
-            "How do we initiate a Planned Event (PE) in OSS for a Class A Core Fiber Network expansion?",
-            "What is the approval workflow for drawing Class D Home Area Fiber to a customer ONT?",
-            "Who prepares the detailed estimation and BOQ for access network planned events?",
-            "Who handles the fiber resource allocation for new LTE and CDMA base stations?",
-            "What are the installation guidelines for connecting an AGW to the primary fiber access network?",
-            "How is QRadar configured to collect logs from our core routers and firewalls?",
+            "How do I request a static IP address allocation for a new server?",
+            "What is the procedure to report a corporate WAN connection outage?",
+            "How can I request opening a port in the core firewall for a vendor?",
+            "Who do I contact to resolve a fiber link issue at the regional office?",
+            "What is the configuration details for setting up a local LAN switch?",
+            "How do I configure the secondary DNS server for the corporate intranet?",
         ],
     },
     "legal": {
         "display_name": "Legal",
         "description": (
-            "The Legal domain manages corporate risk and contractual obligations through frameworks like "
-            "the General Conditions of Contract (GCC), Special Conditions of Contract (SCC), Master "
-            "Service Agreements (MSA), and Bilateral Non-Disclosure Agreements (NDAs). It handles "
-            "regulatory compliance and dispute resolution involving bodies such as the SIAC, ICLP, and "
-            "the Telecommunications Regulatory Commission, ensuring adherence to the Personal Data "
-            "Protection Act No.09 of 2022 and the Anti-Corruption Act of 09 of 2023. Key corporate legal "
-            "processes include intellectual property protection, arbitration proceedings, liability and "
-            "indemnity management, and the execution of legal certifications under directives like GCEO "
-            "Circular 26/2015 and 27/2015."
+            "Handles legal affairs, contract review protocols, Non-Disclosure Agreements (NDAs), "
+            "regulatory compliance, statutory regulations, corporate agreements, intellectual property (IP) rights, "
+            "legal risk assessments, Memorandums of Understanding (MOUs), and official legal counsel requests."
         ),
         "keywords": [
-            "General Conditions of Contract (GCC)",
-            "Special Conditions of Contract (SCC)",
-            "Bilateral Non-Disclosure Agreement (NDA)",
-            "Master Procurement Agreement",
-            "Master Service Agreement (MSA)",
-            "Service Level Agreement (SLA) penalties",
-            "Power of Attorney",
-            "Dispute Resolution Mechanism",
-            "SIAC Arbitration",
-            "UNCITRAL Arbitration Rules",
-            "ICLP Sri Lanka",
-            "Indemnity of Intellectual Property Rights",
-            "Liability caps",
-            "Liquidated Damages Formula",
-            "Trademark registration",
-            "Patent infringement",
-            "Personal Data Protection Act No.09 of 2022",
-            "Anti-Corruption Act of 09 of 2023",
-            "Prevention of Money Laundering Act",
-            "Financial Transaction Reporting Act No.06 of 2006",
-            "Telecommunications Regulatory Commission (TRC)",
-            "Consumer Affairs Authority Act No. 9 of 2003",
-            "GCEO Circular No. 26/2015",
-            "GCEO Circular No. 27/2015",
-            "GCEO Circular No. 34/2015",
-            "Legal Certification Form",
-            "LGLS/FCC/002",
-            "Damage to Third Party Property",
-            "Force Majeure",
-            "Termination for Convenience",
-            "Termination for Default",
-            "Termination for Insolvency",
-            "Indemnity against Claims of Employees",
-            "Transfer of Title",
-            "Non-Solicitation clause",
-            "Warranty of Title",
-            "IRU Capacity Sales Agreement",
-            "Franchise Teleshop Operations",
-            "FCID information disclosure",
-            "Legal risk management",
+            "contract review",
+            "non-disclosure agreement",
+            "NDA form",
+            "legal agreement",
+            "regulatory compliance",
+            "statutory regulations",
+            "liability clause",
+            "indemnification",
+            "corporate legal counsel",
+            "intellectual property rights",
+            "copyright infringement",
+            "legal risk assessment",
+            "terms and conditions",
+            "memorandum of understanding",
+            "MOU",
+            "power of attorney",
+            "statutory audit",
         ],
         "examples": [
-            "Who is authorized to sign a Bilateral Non-Disclosure Agreement on behalf of the company?",
-            "What is the standard exception clause for Confidential Information in our NDAs?",
-            "What is the standard indemnity clause for vendors under the General Conditions of Contract (GCC)?",
-            "How do we draft the Special Conditions of Contract (SCC) for software licenses?",
-            "What are the standard terms for Termination for Convenience in a Master Service Agreement (MSA)?",
-            "How is the limitation of liability structured in the Reciprocal Master Service Agreement?",
-            "What are the regulatory requirements under the Personal Data Protection Act No.09 of 2022 for processing subscriber data?",
-            "How do we ensure compliance with the Anti-Corruption Act of 09 of 2023 in our supplier contracts?",
-            "How do we initiate arbitration for foreign contractors under the SIAC rules?",
-            "When should a dispute be referred to the ICLP Sri Lanka versus a competent local court?",
-            "What is the standard clause for the indemnity of Intellectual Property rights against patent infringement?",
-            "How do we protect our trademarks and logos in a Franchise Teleshop Operations agreement?",
-            "What is the required process for executing sales agreements under GCEO Circular No. 26/2015?",
-            "Which external administrative authorities are permitted to request intercepted messages under GCEO Circular 34/2015?",
-            "What forms are required to submit an LGLS/FCC/002 Legal Certification Form to the Chief Legal Officer?",
-            "What are the drafting requirements to execute a Power of Attorney for bank negotiations?",
-            "What is the legal standard for 'Damage to Third Party Property' in civil works contracts?",
-            "How do we handle liquidated damages and SLA penalties in an OSP Unit Rate Contract?",
+            "What is the standard procedure to submit a vendor agreement for contract review?",
+            "Where can I find the template for a standard Non-Disclosure Agreement (NDA)?",
+            "How does the legal department handle indemnification clauses in supplier contracts?",
+            "What are the legal compliance guidelines for the new digital payment services?",
+            "Who is authorized to sign a Memorandum of Understanding (MOU) on behalf of SLT?",
+            "How do I request power of attorney for representing the company in a legal dispute?",
         ],
     },
     "marketing": {
         "display_name": "Marketing",
         "description": (
-            "The Marketing domain focuses on managing the SLT corporate identity as defined in the "
-            "Corporate Brand Guidelines Version 2012, along with overseeing brand activations, events, "
-            "and sponsorship-related activities. It encompasses the end-to-end campaign and visibility "
-            "management processes, including outdoor branding (hoardings, MSANs, pylons, digital "
-            "displays), vehicle and premises branding, and the production and distribution of Point of "
-            "Sale Materials (POSM) and promotional giveaways."
+            "Handles marketing operations, brand guidelines, promotion approval procedures, "
+            "marketing campaigns, corporate logo usage, public relations (PR), sponsorship requests, "
+            "media planning, social media marketing guidelines, and corporate branding standards."
         ),
         "keywords": [
-            "Corporate Brand Guidelines Version 2012",
-            "Brand Activations & Events",
-            "Procedure No - 01",
-            "Concept paper approval",
-            "Post-event evaluation",
-            "Outdoor Branding",
-            "Hoardings",
-            "Procedure No - 02",
-            "Artwork designs",
-            "Brand Marketing division",
-            "BM division",
-            "MSANS Branding",
-            "Procedure No - 03",
-            "POSM Production",
-            "Procedure No - 04",
-            "Giveaway items",
-            "Pylons Branding",
-            "Procedure No - 05",
-            "Vehicle Branding",
-            "Procedure No - 06",
-            "Premises Branding",
-            "Procedure No - 07",
-            "Outdoor digital display",
-            "LED & TV Screen",
-            "Procedure No - 08",
-            "TVC",
-            "Television Commercials",
-            "Digital screen agencies",
-            "Distribution of POSM",
-            "Procedure No - 09",
-            "Sponsorship-related activations",
-            "Crowd pullers",
-            "ESG events giveaways",
-            "Product launches giveaways",
-            "Corporate gifts",
-            "Strategic importance of location",
-            "Visibility",
-            "Marketing Services Section",
-            "CMO approval",
-            "One Country. One Voice.",
+            "brand guidelines",
+            "marketing campaign",
+            "promotion approval",
+            "corporate logo",
+            "sponsorship request",
+            "media planning",
+            "public relations",
+            "branding standards",
+            "advertising guidelines",
+            "social media marketing",
+            "press release template",
+            "marketing budget request",
+            "flyer design approval",
+            "SLT logo colors",
         ],
         "examples": [
-            "What is the approval process for a brand activation concept paper under Procedure No - 01?",
-            "Who authorizes a brand activation or event request according to Procedure No - 01?",
-            "What are the brand guidelines for utilizing the One Country One Voice tagline in the Corporate Brand Guidelines Version 2012?",
-            "What are the guidelines for using the company logo on vehicle branding per the Corporate Brand Guidelines Version 2012?",
-            "What is the approval process for acquiring new hoarding sites under Procedure No - 02?",
-            "Who do we coordinate with to get artwork designs for outdoor hoardings from the Brand Marketing division?",
-            "What is the process for submitting TVCs to digital screen agencies under Procedure No - 08?",
-            "Who provides the approved TVCs for outdoor digital displays from Brand Marketing?",
-            "What is the approval process for POSM production and giveaway items under Procedure No - 04?",
-            "What are the guidelines for distributing POSM at sponsorship-related activations under Procedure No - 09?",
-            "How do we evaluate the ROI and customer segment for ESG event giveaways in Procedure No - 09?",
-            "What is the process for executing premises branding with the Marketing Services Section?",
-            "Who is responsible for inspecting the quality of a pylon branding installation for Marketing Services?",
-            "What is the approval process for MSAN branding quotations?",
-            "What are the guidelines for ensuring the visibility and strategic importance of outdoor branding locations?",
-            "Who authorizes the distribution of promotional items for product launches?",
-            "What is the procedure for obtaining post-event evaluations after a brand activation?",
-            "How does the user division request new artwork creation from the BM division?",
-        ],
-    },
-    "enterprise_business": {
-        "display_name": "Enterprise Business",
-        "description": (
-            "The Enterprise Business domain manages B2B corporate product lines including IP VPN, "
-            "Internet Leased Lines (ILL), iDC hosting, managed Security Operations Centres (MSOC), "
-            "and IoT platforms. Operational governance and commercial frameworks are overseen by bodies "
-            "such as the Enterprise Investment Management Committee (EIMC) and the Enterprise Solutions "
-            "Governance Board (ESGB), managing strategic partnerships, unit rate contracts, and "
-            "enterprise service deployments. B2B portfolios also include enterprise CPE/NTU "
-            "standardization, UC VoIP upgrades, and tailored digital solutions for corporate tiers like "
-            "SME, MB, LB, and GI."
-        ),
-        "keywords": [
-            "Enterprise Investment Management Committee (EIMC)",
-            "Enterprise Solutions Governance Board (ESGB)",
-            "Enterprise Solutions Techno Commercial Evaluation Team (ES-TCET)",
-            "Managed Security Operations Centre (MSOC)",
-            "IP VPN and Ethernet VPN links",
-            "Internet Leased Lines (ILL)",
-            "iDC hosting services and colocation",
-            "DIOD lines (E1)",
-            "SIP trunk monthly rentals",
-            "10G fiber with geo redundancy",
-            "Entgra IoT Platform",
-            "Enterprise Mobility Management (EMM) Solution",
-            "IBM PartnerWorld Business Program",
-            "Enterprise CPE Solutions (Project No.190504)",
-            "Direct Delivery Purchase (DDP) unit rate contract",
-            "Cisco Routers for SLT managed Networks",
-            "Enterprise Digital Lead Management System",
-            "SME, MB, LB, GI corporate tiers",
-            "Enterprise Services Request Form",
-            "Material Standardization Committee",
-            "CPE/Material Standardization Process",
-            "UC upgrade of VOIP services",
-            "Microsoft Skype Integration for Enterprise",
-            "Datacenter co-network switches",
-            "On-premise managed firewalls",
-            "Revenue share model partnership",
-            "Enterprise Business Development procurement",
-            "Financial Feasibility Approvals (Project Appraisal)",
-            "Five year managed services agreement",
-            "DGM/SME Business account management",
-            "Sales Implementation and Delivery Service Provisioning (DSP)",
-            "Deactivation Service Ticket (DST) process",
-            "Technical Feasibility assessment",
-            "BPET process evaluation",
-            "Grandstream WP820 enterprise IP Phones",
-            "Active network switches for LAN solution",
-            "iDC cloud infrastructure",
-            "Customer Requirement Gathering",
-            "Draft Agreement and Legal Sign-off",
-        ],
-        "examples": [
-            "What are the standard terms for the Managed Security Operations Centre (MSOC) forensics and event correlation?",
-            "What is the commercial framework for establishing an MSOC tailored for a large banking client?",
-            "How do we calculate the pricing framework for a 10G fiber Internet Leased Line (ILL) with geo redundancy?",
-            "What are the eligibility criteria for providing Ethernet VPN links to a corporate ATM network?",
-            "What is the revenue share model for the Entgra IoT Platform deployed for enterprise facility management?",
-            "How do we initiate a POC for an Enterprise Mobility Management solution using the Entgra IoT platform?",
-            "What is the process to evaluate the SLT-IBM partnership under the BPET process for enterprise customers?",
-            "Who approves the discount matrices when reselling IBM IT Infrastructure and Security Solutions via the PartnerWorld program?",
-            "What is the governance process under the Material Standardization Committee for purchasing new enterprise CPEs and NTUs?",
-            "How do we apply the DDP unit rate amendment for Cisco Routers used in SLT managed networks?",
-            "What is the escalation matrix for Technical Feasibility approval when designing a corporate network solution?",
-            "What are the steps for an account manager to initiate a DST in the deactivation process for a corporate client?",
-            "Who approves the Enterprise Services Request Form for setting up internal corporate cloud resources?",
-            "What is the pricing framework for upgrading a corporate client to a UC VOIP system with Microsoft Skype Integration?",
-            "What are the standard commercial terms for SIP trunk monthly rentals and DIOD lines?",
-            "What is the threshold for requiring an EIMC Stage 1 submission for a new enterprise managed service?",
-            "How does the ES-TCET evaluate the CAPEX procurement of goods for enterprise product requirements?",
-        ],
-    },
-    "consumer_business": {
-        "display_name": "Consumer Business",
-        "description": (
-            "The Consumer Business domain focuses on B2C telecommunications products and services, "
-            "including PSTN (Mega Line), ADSL, FTTH broadband, LTE mobile, and Peo TV packages "
-            "(Single, Double, and Triple Play). It governs mass-market retail operations such as "
-            "consumer sales dealer registrations, commission payouts, and loyalty promotions like the "
-            "RAM Loyalty Offer. Additionally, it covers B2C operational frameworks including consumer "
-            "pricing guidelines, pro-forma invoice collections, Late Payment Fees (LPF) for fiber "
-            "customers, disconnection cancellations, and Condominium Product Tariffs for Multi-Tenant "
-            "Buildings."
-        ),
-        "keywords": [
-            "Consumer Business Sales",
-            "Freelance officer commission",
-            "Sales Dealer Registration",
-            "Broadband New Connection ADSL",
-            "MEGA LINE new connection",
-            "SLT RAM Loyalty Offer",
-            "Free cordless phone promo",
-            "Free PEO TV signup",
-            "Free extra 100GB data",
-            "Fibre Late Payment Fee (LPF)",
-            "Fiber Credit Class",
-            "Minimum Past Due Amount",
-            "FTTH Web Application leads",
-            "35% Sales Dealer Commission",
-            "Peo TV startup fee",
-            "75% partial bill settlement",
-            "SLT e-bill Service",
-            "AB-Fiber Access Bearer",
-            "FTTH New Connection Standard",
-            "FTTH 3 Installments Plan",
-            "FTTH 12 Installments Plan",
-            "FTTH Migration Standard",
-            "PSTN Single Play",
-            "PSTN Double Play BB",
-            "PSTN Triple Play",
-            "Condominium Product Tariff",
-            "Multi-Tenant Building (MTB) FTTH discount",
-            "LTE Voice only package",
-            "LTE BB Double Play",
-            "FTTH Double play Peo",
-            "PeoTV over LTE",
-            "PeoTV Go App",
-            "Videsa program",
-            "M-cash/Ezy cash integration",
-            "Copper-to-Fiber Migration",
-            "Disconnection order cancellation",
-            "Consumer compliance registration",
-            "Selling CPE to Consumer Segment",
-            "Pro-forma invoice initiation payment",
-            "MINT CRM bill dispute",
-        ],
-        "examples": [
-            "What is the price of the FTTH New Connection Standard package?",
-            "What is the customer charge for the FTTH 3 Installments Plan?",
-            "How much is the Peo TV startup fee for a new registration?",
-            "What are the conditions for the SLT RAM Loyalty Offer?",
-            "Who is eligible to receive the free cordless phone or the 50% discount?",
-            "What is the standard dealer commission on completing an FTTH lead?",
-            "How do freelance sales officers receive their monthly commission payments?",
-            "What is the fixed charge for the Fibre Late Payment Fee?",
-            "Which Fiber Credit Class applies to a monthly bill value of Rs. 4,500?",
-            "Who is eligible for the Condominium Product Tariff?",
-            "What are the discount terms for FTTH services in Multi-Tenant Buildings?",
-            "What is the minimum partial bill settlement required to cancel a disconnection order?",
-            "What are the rules for reinitiating a cancelled sales order without violating the pro-forma invoice?",
-            "Can you explain the billing options for the FTTH 12 Installments Plan?",
-            "Are customers allowed to use M-cash or Ezy cash for bill settlements?",
-            "What is the process for registering a new customer for the SLT e-bill Service?",
-            "What is the difference between PSTN Double Play BB and PSTN Triple Play bundles?",
-            "Are LTE routers and PeoTV Set Top Boxes treated as OPEX or CAPEX when sold to consumers?",
-            "How do I process a bill dispute for a home broadband customer in MINT CRM?",
-            "Is the Videsa educational program available on the PeoTV platforms?",
+            "Where can I download the official SLTMobitel brand guidelines and logo formats?",
+            "What is the approval process for launching a new retail promotion campaign?",
+            "How do I submit a sponsorship request for a national university event?",
+            "What are the corporate branding rules for printing co-branded flyers?",
+            "Who approves social media marketing posts before they go live on our accounts?",
+            "Where do I submit a press release template for PR team review?",
         ],
     },
 }
@@ -812,8 +533,6 @@ CLARIFICATION_CHOICE_ALIASES: dict[str, tuple[str, ...]] = {
     "network": ("network", "networks", "noc", "networking"),
     "legal": ("legal", "law", "contracts", "agreements"),
     "marketing": ("marketing", "branding", "promotions", "PR"),
-    "enterprise_business": ("enterprise business", "enterprise", "corporate", "b2b", "ebu", "enterprise solutions"),
-    "consumer_business": ("consumer business", "consumer", "retail", "residential", "cbu", "home"),
 }
 
 FOLLOW_UP_PATTERNS: tuple[str, ...] = (
@@ -828,66 +547,20 @@ FOLLOW_UP_PATTERNS: tuple[str, ...] = (
     r"^\s*how much\s*\??$",
 )
 
-# ── Cosine-similarity routing thresholds (provider-aware) ────────────────
-# Different embedding models produce different cosine-similarity distributions,
-# so the routing thresholds are calibrated per ROUTING_EMBEDDING_PROVIDER:
-#
-#   openai (text-embedding-3-small): scores spread across a low, WIDE band
-#     (~0.2-0.5). Relevant vs irrelevant separate clearly, so low absolute
-#     thresholds + a small margin work well.
-#
-#   gemini / vertex (gemini-embedding-2): scores compress into a high, NARROW
-#     band (~0.65-0.92) where even an irrelevant department scores ~0.70. A
-#     fixed 0.40 "strong" cutoff is met by everything, which made every query
-#     fan out (multi_delegate). We therefore (a) raise the absolute cutoffs into
-#     the Gemini band and (b) gate multi_delegate on the top-vs-second GAP so a
-#     clear winner delegates to a single agent instead of fanning out.
-#
-# MULTI_DELEGATE_MAX_GAP: fan out on "both strongly scored" ONLY when the top
-# two are within this gap (a genuine close call / compound query). For openai
-# it is effectively disabled (1.0) to preserve the original behavior.
-from core.config import settings as _settings
-
-_ROUTING_THRESHOLDS: dict[str, dict[str, float]] = {
-    "openai": {
-        "strong": 0.40,
-        "low_confidence": 0.25,
-        "out_of_scope": 0.18,
-        "min_margin": 0.04,
-        "secondary": 0.25,
-        "max_gap": 1.0,  # gap gate disabled — preserves original behavior
-    },
-    "gemini": {
-        "strong": 0.65,
-        "low_confidence": 0.60,
-        "out_of_scope": 0.55,
-        "min_margin": 0.04,
-        "secondary": 0.60,
-        "max_gap": 0.04,
-    },
-}
-# Vertex shares Gemini's distribution.
-_ROUTING_THRESHOLDS["vertex"] = _ROUTING_THRESHOLDS["gemini"]
-
-_active = _ROUTING_THRESHOLDS.get(
-    _settings.ROUTING_EMBEDDING_PROVIDER.lower().strip(),
-    _ROUTING_THRESHOLDS["openai"],
-)
-
-STRONG_ROUTE_THRESHOLD = _active["strong"]
-LOW_CONFIDENCE_THRESHOLD = _active["low_confidence"]
-OUT_OF_SCOPE_THRESHOLD = _active["out_of_scope"]
-MIN_ROUTE_MARGIN = _active["min_margin"]
+# Initial tuning defaults for cosine similarity routing.
+# These should be refined later using real routing logs.
+STRONG_ROUTE_THRESHOLD = 0.40
+LOW_CONFIDENCE_THRESHOLD = 0.25
+OUT_OF_SCOPE_THRESHOLD = 0.18
+MIN_ROUTE_MARGIN = 0.04
 FOLLOW_UP_STICKINESS_BOOST = 0.06
 SHORT_FOLLOW_UP_MAX_WORDS = 6
 
 # Multi-specialist fan-out: when the top match is not strong enough to delegate
 # alone but the runner-up is also plausible, consult both specialists in parallel
 # and synthesize a single answer instead of asking the user to clarify.
-MULTI_DELEGATE_SECONDARY_THRESHOLD = _active["secondary"]
+MULTI_DELEGATE_SECONDARY_THRESHOLD = 0.25
 MULTI_DELEGATE_MAX_AGENTS = 2
-# Only fan out on "both strongly scored" when the top two are this close.
-MULTI_DELEGATE_MAX_GAP = _active["max_gap"]
 
 # Keyword match boost: when a query contains one of a specialist's exact keywords
 # (word-boundary match, case-insensitive), add this to that specialist's cosine
