@@ -76,13 +76,16 @@ jobs:
       # WARNING: If you add proper pytest tests (def test_*()) in future, replace
       #          this step with: pytest backend/ -v
       - name: Smoke-test — verify main module imports without error
-        env:
-          QDRANT_URL: "http://localhost:6333"
-          POSTGRES_URL: "postgresql://user:pass@localhost:5432/db"
-          GOOGLE_API_KEY: "dummy"
-          OPENAI_API_KEY: "dummy"
         run: |
+          cat > .env << 'EOF'
+          QDRANT_URL=http://localhost:6333
+          POSTGRES_URL=postgresql://user:pass@localhost:5432/db
+          GOOGLE_API_KEY=dummy
+          OPENAI_API_KEY=dummy
+          EOF
           cd backend && python -c "import main; print('Import OK')"
+
+
 
   # ============================================================
   # JOB 2 — build-and-push
