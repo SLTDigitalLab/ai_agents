@@ -69,20 +69,29 @@ jobs:
           python -m pip install --upgrade pip
           pip install --timeout 300 -r backend/requirements.txt
 
-      # test_rag_sources.py exists but contains no pytest-style test functions;
-      # running pytest on it would collect 0 tests and exit 5 (no tests found).
-      # Instead we verify that the main application module can be imported
-      # without runtime errors — a lightweight smoke test.
+      # Smoke-test: verify the main FastAPI module can be imported without error.
+      #
+      # WHY step-level env: vars instead of a .env file:
+      #   config.py resolves ROOT_DIR as 3 parents above config.py → repo root,
+      #   then calls load_dotenv(ROOT_DIR / ".env"). That part works fine.
+      #   BUT pydantic_settings also has `class Config: env_file = ".env"`, which
+      #   it resolves relative to CWD *at Settings() instantiation time*.
+      #   After `cd backend`, CWD = backend/ so pydantic looks for backend/.env
+      #   (not the repo-root .env) → file not found → QDRANT_URL / POSTGRES_URL
+      #   fail validation (they have no default values in Settings).
+      #
+      #   pydantic_settings always reads os.environ BEFORE env_file, so exporting
+      #   the two required fields as step-level env vars is the cleanest fix —
+      #   no file path ambiguity, no heredoc indentation issues.
       # WARNING: If you add proper pytest tests (def test_*()) in future, replace
       #          this step with: pytest backend/ -v
       - name: Smoke-test — verify main module imports without error
+        env:
+          QDRANT_URL: "http://localhost:6333"
+          POSTGRES_URL: "postgresql://user:pass@localhost:5432/db"
+          GOOGLE_API_KEY: "dummy"
+          OPENAI_API_KEY: "dummy"
         run: |
-          cat > .env << 'EOF'
-          QDRANT_URL=http://localhost:6333
-          POSTGRES_URL=postgresql://user:pass@localhost:5432/db
-          GOOGLE_API_KEY=dummy
-          OPENAI_API_KEY=dummy
-          EOF
           cd backend && python -c "import main; print('Import OK')"
 
 
