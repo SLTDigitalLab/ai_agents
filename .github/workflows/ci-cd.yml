@@ -201,7 +201,7 @@ jobs:
           # Any non-zero exit code aborts the deploy.
           script: |
             # 1. Write the .env file from the GitHub secret
-            echo "${{ secrets.ENV_FILE }}" > /opt/slt-app/.env
+            echo "${{ secrets.ENV_FILE }}" > /root/slt-app/.env
 
             # 2. Log in to GHCR on the VM so docker pull can authenticate
             echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -223,7 +223,7 @@ jobs:
               -e POSTGRES_USER=slt \
               -e POSTGRES_PASSWORD=slt123 \
               -e POSTGRES_DB=slt_db \
-              -v /opt/slt-app/data/postgres:/var/lib/postgresql/data \
+              -v /root/slt-app/data/postgres:/var/lib/postgresql/data \
               --restart always \
               ankane/pgvector:latest
 
@@ -236,7 +236,7 @@ jobs:
             # 8. Start Qdrant
             docker run -d --name slt_qdrant \
               --network slt-network \
-              -v /opt/slt-app/data/qdrant:/qdrant/storage \
+              -v /root/slt-app/data/qdrant:/qdrant/storage \
               --restart always \
               qdrant/qdrant:latest
 
@@ -244,7 +244,7 @@ jobs:
             docker run -d --name slt_backend \
               --network slt-network \
               -p 127.0.0.1:8100:8000 \
-              --env-file /opt/slt-app/.env \
+              --env-file /root/slt-app/.env \
               -e PYTHONUNBUFFERED=1 \
               -e POSTGRES_URL=postgresql://slt:slt123@slt_postgres:5432/slt_db \
               -e QDRANT_URL=http://slt_qdrant:6333 \
@@ -256,7 +256,7 @@ jobs:
             docker run -d --name slt_frontend \
               --network slt-network \
               -p 127.0.0.1:3100:3000 \
-              --env-file /opt/slt-app/.env \
+              --env-file /root/slt-app/.env \
               --restart always \
               ghcr.io/sltdigitallab/ai_agents/frontend:latest
 
