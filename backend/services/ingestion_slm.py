@@ -7,7 +7,6 @@ model (768d for nomic-embed-text), so the existing 3072d collections are
 untouched.
 """
 
-import asyncio
 import logging
 import tempfile
 from pathlib import Path
@@ -32,7 +31,7 @@ class SLMIngestionService:
         # Re-use chunking + file-loading helpers from the existing service.
         self._helpers = _shared_ingestion_service
 
-    def _ensure_collection_exists(self, collection_name: str):
+    async def _ensure_collection_exists(self, collection_name: str):
         try:
             self.client.get_collection(collection_name)
         except Exception:
@@ -54,15 +53,6 @@ class SLMIngestionService:
             )
 
     async def process_onedrive_ingestion(
-        self, folder_id: str, access_token: str, agent_name: str, force: bool = False
-    ):
-        """Async wrapper — offloads the blocking ingestion to a worker thread
-        so the event loop stays free to serve chat during ingestion."""
-        return await asyncio.to_thread(
-            self._process_onedrive_sync, folder_id, access_token, agent_name, force
-        )
-
-    def _process_onedrive_sync(
         self, folder_id: str, access_token: str, agent_name: str, force: bool = False
     ):
         import requests
@@ -116,7 +106,7 @@ class SLMIngestionService:
             processed_files, skipped_files, failed_files = [], [], []
 
             collection_name = f"{agent_name}_docs"
-            self._ensure_collection_exists(collection_name)
+            await self._ensure_collection_exists(collection_name)
 
             vector_store = QdrantVectorStore(
                 client=self.client,

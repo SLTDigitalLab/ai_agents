@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, useParams, useLocation, Navigate } from 'react-router-dom';
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
 import { PublicClientApplication, InteractionStatus } from "@azure/msal-browser";
-import { msalConfig, loginRequest } from './authConfig';
+import { msalConfig, loginRequest, authFlowStorage } from './authConfig';
 import { AGENTS } from './config/agents';
 import ChatInterface from './components/ChatInterface';
 import ChatBrowser from './components/admin/ChatBrowser';
@@ -11,6 +11,7 @@ import IngestionPanel from './components/admin/IngestionPanel';
 import FeedbackPanel from './components/admin/FeedbackPanel';
 import AdminRoute from './components/admin/AdminRoute';
 import IframeChatPage from './components/admin/IframeChatPage';
+import VoiceAgentPage from './pages/VoiceAgentPage';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 import embryoLogo from './assets/embryo-removebg.png';
@@ -78,9 +79,6 @@ const COLOR_RGB = {
   teal:    '20, 184, 166',
   amber:   '245, 158, 11',
   pink:    '236, 72, 153',
-  violet:  '124, 58, 237',
-  green:   '22, 163, 74',
-  red:     '220, 38, 38',
 };
 const getAgentRGB = (colorStr) => {
   const m = colorStr?.match(/from-(\w+)-/);
@@ -105,10 +103,14 @@ const getInitials = (name) => {
 };
 
 // ── User Avatar + Popover Menu ─────────────────────────────────────────
-// `placement` controls where the popover opens relative to the avatar.
-//   "upRight"   → opens above-right (sidebar/desktop default).
-//   "downLeft"  → opens below-left (mobile top-right header).
-const UserAvatarMenu = ({ user, onLogout, agentColor, placement = 'upRight' }) => {
+// `placement` controls where the popover opens relative to the trigger.
+//   "upRight"    → opens above-right (sidebar/desktop default).
+//   "downLeft"   → opens below-left (mobile top-right header).
+//   "downRight"  → opens below-right (mobile top-left hamburger).
+// `triggerVariant` picks the trigger element: "avatar" (initials circle) or
+// "hamburger" (menu icon). When `onNewChat` is provided a "New chat" action is
+// added to the top of the menu (used by the mobile hamburger).
+const UserAvatarMenu = ({ user, onLogout, agentColor, placement = 'upRight', triggerVariant = 'avatar', onNewChat }) => {
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const menuRef = useRef(null);
@@ -129,11 +131,12 @@ const UserAvatarMenu = ({ user, onLogout, agentColor, placement = 'upRight' }) =
     };
   }, [open]);
 
-  const popoverPositionClass = placement === 'downLeft'
-    ? 'top-full right-0 mt-2'
+  const popoverPositionClass =
+    placement === 'downLeft' ? 'top-full right-0 mt-2'
+    : placement === 'downRight' ? 'top-full left-0 mt-2'
     : 'bottom-0 left-full ml-3';
-  const popoverInitialX = placement === 'downLeft' ? 0 : -8;
-  const popoverInitialY = placement === 'downLeft' ? -8 : 0;
+  const popoverInitialX = placement === 'upRight' ? -8 : 0;
+  const popoverInitialY = placement === 'upRight' ? 0 : -8;
 
   return (
     <div ref={menuRef} className="relative">
@@ -156,6 +159,21 @@ const UserAvatarMenu = ({ user, onLogout, agentColor, placement = 'upRight' }) =
                 <p className="text-[0.7rem] text-gray-500 dark:text-gray-400 truncate">{user.username}</p>
               </div>
             </div>
+
+            {/* New chat (mobile hamburger only) */}
+            {onNewChat && (
+              <button
+                type="button"
+                onClick={() => { setOpen(false); onNewChat(); }}
+                className="w-full flex items-center gap-2.5 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors border-b border-gray-100 dark:border-gray-800"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 text-gray-500 dark:text-gray-400">
+                  <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
+                  <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
+                </svg>
+                New chat
+              </button>
+            )}
 
             {/* Theme toggle */}
             <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800">
@@ -203,19 +221,38 @@ const UserAvatarMenu = ({ user, onLogout, agentColor, placement = 'upRight' }) =
         )}
       </AnimatePresence>
 
-      <motion.button
-        type="button"
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.4, delay: 0.4 }}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setOpen(v => !v)}
-        title={user.name}
-        className={`w-10 h-10 rounded-full bg-gradient-to-br ${agentColor} text-white text-sm font-semibold flex items-center justify-center shadow-md hover:shadow-lg transition-shadow ring-2 ring-white dark:ring-gray-900`}
-      >
-        {initials}
-      </motion.button>
+      {triggerVariant === 'hamburger' ? (
+        <motion.button
+          type="button"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setOpen(v => !v)}
+          title="Menu"
+          aria-label="Menu"
+          className="flex items-center justify-center w-9 h-9 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition-colors shrink-0"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+            <path fillRule="evenodd" d="M2 4.75A.75.75 0 012.75 4h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 4.75zM2 10a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75A.75.75 0 012 10zm0 5.25a.75.75 0 01.75-.75h14.5a.75.75 0 010 1.5H2.75a.75.75 0 01-.75-.75z" clipRule="evenodd" />
+          </svg>
+        </motion.button>
+      ) : (
+        <motion.button
+          type="button"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4, delay: 0.4 }}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setOpen(v => !v)}
+          title={user.name}
+          className={`w-10 h-10 rounded-full bg-gradient-to-br ${agentColor} text-white text-sm font-semibold flex items-center justify-center shadow-md hover:shadow-lg transition-shadow ring-2 ring-white dark:ring-gray-900`}
+        >
+          {initials}
+        </motion.button>
+      )}
     </div>
   );
 };
@@ -291,8 +328,8 @@ const AgentWrapper = () => {
 
   const handleLogin = () => {
     // 1. Set flags so the app knows this is a legitimate user action, not a back-button loop.
-    sessionStorage.setItem("intentionalLogin", "true");
-    sessionStorage.setItem("lastAgent", location.pathname);
+    authFlowStorage.setItem("intentionalLogin", "true");
+    authFlowStorage.setItem("lastAgent", location.pathname);
 
     // 2. Use Redirect, NOT popup.
     instance.loginRedirect(loginRequest).catch((e) => console.error(e));
@@ -345,27 +382,19 @@ const AgentWrapper = () => {
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           className="relative z-20 flex items-center gap-2 sm:gap-4 px-3 sm:px-14 py-3 sm:py-4"
         >
-          {/* Mobile-only new chat button: internal authenticated agents only */}
+          {/* Mobile-only hamburger menu (New chat + user menu): internal authenticated agents only */}
           {!isPublicAgent && (
             <AuthenticatedTemplate>
-              <motion.button
-                type="button"
-                onClick={() => chatRef.current?.clearChat()}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                title="New chat"
-                className="sm:hidden flex items-center justify-center w-9 h-9 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 shrink-0"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 20 20"
-                  fill="currentColor"
-                  className="w-5 h-5"
-                >
-                  <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
-                  <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
-                </svg>
-              </motion.button>
+              <div className="sm:hidden shrink-0">
+                <UserAvatarMenu
+                  user={user}
+                  onLogout={handleLogout}
+                  agentColor={agentConfig.color}
+                  placement="downRight"
+                  triggerVariant="hamburger"
+                  onNewChat={() => chatRef.current?.clearChat()}
+                />
+              </div>
             </AuthenticatedTemplate>
           )}
 
@@ -384,26 +413,55 @@ const AgentWrapper = () => {
             )}
           </div>
 
-          {/* Right cluster: SLT logo + mobile avatar for internal authenticated agents */}
+          {/* Right cluster: Voice Agent (pill on desktop, mic button on mobile) + SLT logo */}
           <div className="flex items-center gap-2 sm:gap-0 shrink-0">
+            {!isPublicAgent && (
+              <AuthenticatedTemplate>
+                {/* Voice Agent — full pill on desktop */}
+                <motion.button
+                  type="button"
+                  onClick={() => { window.location.href = '/voice'; }}
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.97 }}
+                  title="Voice Agent"
+                  className={`hidden sm:flex items-center gap-2 mr-4 bg-gradient-to-r ${agentConfig.color} text-white px-4 py-2 rounded-full text-sm font-semibold shadow-md hover:shadow-lg transition-shadow`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                    <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
+                    <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
+                  </svg>
+                  Voice Agent
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+                  </svg>
+                </motion.button>
+
+                {/* Voice Agent — compact mic + arrow button on mobile */}
+                <motion.button
+                  type="button"
+                  onClick={() => { window.location.href = '/voice'; }}
+                  whileHover={{ scale: 1.04 }}
+                  whileTap={{ scale: 0.95 }}
+                  title="Voice Agent"
+                  aria-label="Voice Agent"
+                  className={`sm:hidden flex items-center gap-1 bg-gradient-to-r ${agentConfig.color} text-white pl-2.5 pr-2 py-1.5 rounded-full shadow-md`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+                    <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
+                    <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
+                  </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+                  </svg>
+                </motion.button>
+              </AuthenticatedTemplate>
+            )}
+
             <img
               src={sltLogo}
               alt="SLTMobitel"
-              className="h-7 sm:h-10 w-auto drop-shadow-sm"
+              className="h-7 sm:h-10 w-auto drop-shadow-sm sm:ml-0 ml-1"
             />
-
-            {!isPublicAgent && (
-              <AuthenticatedTemplate>
-                <div className="sm:hidden">
-                  <UserAvatarMenu
-                    user={user}
-                    onLogout={handleLogout}
-                    agentColor={agentConfig.color}
-                    placement="downLeft"
-                  />
-                </div>
-              </AuthenticatedTemplate>
-            )}
           </div>
         </motion.header>
 
@@ -559,11 +617,12 @@ function App() {
     msalInstance.initialize().then(() => {
       msalInstance.handleRedirectPromise().then((response) => {
         // Grab the agent the user originally wanted to log into
-        const targetRoute = sessionStorage.getItem('lastAgent') || '/';
+        const targetRoute = authFlowStorage.getItem('lastAgent') || '/';
 
         if (response) {
           // 1. Legitimate, intentional login. 
-          sessionStorage.removeItem('intentionalLogin');
+          authFlowStorage.removeItem('intentionalLogin');
+          authFlowStorage.removeItem('lastAgent');
           window.location.replace(targetRoute);
           return;
         }
@@ -574,6 +633,8 @@ function App() {
         if (window.location.pathname === '/auth/callback') {
           // Wipe the local session storage so React forgets the authenticated state
           sessionStorage.clear();
+          authFlowStorage.removeItem('intentionalLogin');
+          authFlowStorage.removeItem('lastAgent');
 
           // Send you cleanly to the unauthenticated view
           window.location.replace(targetRoute);
@@ -634,6 +695,7 @@ function App() {
             <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
 
+          <Route path="/voice" element={<VoiceAgentPage />} />
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
       </BrowserRouter>
