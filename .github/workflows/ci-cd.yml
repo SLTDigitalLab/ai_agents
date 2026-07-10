@@ -147,7 +147,7 @@ jobs:
       # Build and push the backend image.
       # The --mount=type=cache layer inside the Dockerfile is handled transparently by BuildKit.
       - name: Build & push backend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./backend
           file: ./backend/Dockerfile
@@ -156,12 +156,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ghcr.io/${{ github.repository_owner }}/ai_agents/backend:latest
-            ghcr.io/${{ github.repository_owner }}/ai_agents/backend:${{ steps.sha.outputs.short }}
+            ghcr.io/sltdigitallab/ai_agents/backend:latest
+            ghcr.io/sltdigitallab/ai_agents/backend:${{ steps.sha.outputs.short }}
 
       # Build and push the frontend image (node:22-alpine, runs npm run dev).
       - name: Build & push frontend image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./frontend
           file: ./frontend/Dockerfile
@@ -169,8 +169,8 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ghcr.io/${{ github.repository_owner }}/ai_agents/frontend:latest
-            ghcr.io/${{ github.repository_owner }}/ai_agents/frontend:${{ steps.sha.outputs.short }}
+            ghcr.io/sltdigitallab/ai_agents/frontend:latest
+            ghcr.io/sltdigitallab/ai_agents/frontend:${{ steps.sha.outputs.short }}
 
   # ============================================================
   # JOB 3 — deploy
