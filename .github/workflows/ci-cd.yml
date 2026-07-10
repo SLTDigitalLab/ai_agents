@@ -197,8 +197,9 @@ jobs:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
-          # Each line is executed over SSH in order.
-          # Any non-zero exit code aborts the deploy.
+          # Give the full deploy script enough time to pull images + start containers.
+          # Default is 10m which is not enough if images are large or Postgres is slow.
+          command_timeout: 20m
           script: |
             # 1. Write the .env file from the GitHub secret
             echo "${{ secrets.ENV_FILE }}" > /root/slt-app/.env
@@ -210,14 +211,19 @@ jobs:
             docker pull ghcr.io/sltdigitallab/ai_agents/backend:latest
             docker pull ghcr.io/sltdigitallab/ai_agents/frontend:latest
 
-            # 4. Create Docker network if not exists
+            # 4. Create Docker network if it doesn't already exist
             docker network create slt-network 2>/dev/null || true
 
-            # 5. Stop and remove old slt containers
+            # 5. Stop and remove old slt containers (ignore errors if not running)
             docker stop slt_backend slt_frontend slt_postgres slt_qdrant 2>/dev/null || true
-            docker rm slt_backend slt_frontend slt_postgres slt_qdrant 2>/dev/null || true
+            docker rm   slt_backend slt_frontend slt_postgres slt_qdrant 2>/dev/null || true
 
             # 6. Start Postgres
+            #    NOTE: If this container keeps crashing, it is almost always because the
+            #    data directory (/root/slt-app/data/postgres) was written by a different
+            #    Postgres major version. Fix on the VM with:
+            #      rm -rf /root/slt-app/data/postgres   (wipes existing data — do a pg_dump first!)
+            #    Then re-run the pipeline.
             docker run -d --name slt_postgres \
               --network slt-network \
               -e POSTGRES_USER=slt \
@@ -227,11 +233,20 @@ jobs:
               --restart always \
               ankane/pgvector:latest
 
-            # 7. Wait for Postgres to be healthy
-            until docker exec slt_postgres pg_isready -U slt -d slt_db; do
-              echo "Waiting for postgres..."
+            # 7. Wait for Postgres — bounded retry (30 attempts × 3 s = 90 s max).
+            #    On failure, print logs so the Actions log shows WHY it crashed.
+            RETRIES=30
+            until docker exec slt_postgres pg_isready -U slt -d slt_db 2>/dev/null; do
+              RETRIES=$((RETRIES - 1))
+              if [ "$RETRIES" -le 0 ]; then
+                echo "ERROR: Postgres did not become ready in time. Container logs:"
+                docker logs slt_postgres --tail 50
+                exit 1
+              fi
+              echo "Waiting for postgres... ($RETRIES retries left)"
               sleep 3
             done
+            echo "Postgres is ready."
 
             # 8. Start Qdrant
             docker run -d --name slt_qdrant \
@@ -241,6 +256,8 @@ jobs:
               qdrant/qdrant:latest
 
             # 9. Start Backend
+            #    Evidence volume is mounted so uploaded PDF previews survive restarts.
+            mkdir -p /root/slt-app/data/evidence
             docker run -d --name slt_backend \
               --network slt-network \
               -p 127.0.0.1:8100:8000 \
@@ -248,6 +265,7 @@ jobs:
               -e PYTHONUNBUFFERED=1 \
               -e POSTGRES_URL=postgresql://slt:slt123@slt_postgres:5432/slt_db \
               -e QDRANT_URL=http://slt_qdrant:6333 \
+              -v /root/slt-app/data/evidence:/app/storage/evidence \
               --restart always \
               ghcr.io/sltdigitallab/ai_agents/backend:latest \
               uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info
@@ -260,11 +278,16 @@ jobs:
               --restart always \
               ghcr.io/sltdigitallab/ai_agents/frontend:latest
 
-            # 11. Wait for containers to fully start
+            # 11. Wait for application containers to initialise
             sleep 20
 
-            # 12. Print container status
-            docker ps | grep slt
+            # 12. Print status for the Actions log
+            docker ps --filter name=slt
 
-            # 13. Fail if any slt container is not running
-            docker ps | grep slt | grep -v "Up" && echo "ERROR: Unhealthy container detected!" && exit 1 || echo "All containers healthy"
+            # 13. Fail if any slt_ container is not in "Up" state
+            if docker ps --filter name=slt --format '{{.Names}} {{.Status}}' | grep -v "^$" | grep -qv "Up"; then
+              echo "ERROR: One or more slt containers are not healthy:"
+              docker ps -a --filter name=slt --format 'table {{.Names}}\t{{.Status}}'
+              exit 1
+            fi
+            echo "All slt containers are Up and healthy."
