@@ -112,7 +112,7 @@ jobs:
   # overrides this with a production-safe command. If you bake the image for
   # production use WITHOUT compose, remove --reload from the Dockerfile CMD:
   #   CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
-  # ============================================================
+  # =============================================================
   build-and-push:
     name: Build & Push Docker Images to GHCR
     runs-on: ubuntu-latest
