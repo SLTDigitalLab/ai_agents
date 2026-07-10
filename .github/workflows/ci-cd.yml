@@ -1,0 +1,213 @@
+# ============================================================
+# CI/CD Pipeline — ai_agents (Ask SLT)
+# Triggers on every push to the `cicd` branch only.
+#
+# Jobs:
+#   1. test           — Install Python deps, run existing pytest file
+#   2. build-and-push — Build backend + frontend Docker images, push to GHCR
+#   3. deploy         — SSH into VM, pull new images, restart compose stack
+# ============================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - cicd   # Only run on the cicd branch
+
+jobs:
+
+  # ============================================================
+  # JOB 1 — test
+  # Sets up Python 3.11 (matches FROM python:3.11-slim in backend/Dockerfile),
+  # installs all backend dependencies, then runs the existing pytest test file.
+  # NOTE: test_rag_sources.py does NOT use pytest test functions (no test_*
+  # functions decorated for pytest), so we fall back to the import-check
+  # approach to avoid a "no tests collected" exit-code failure.
+  # If you add proper pytest tests later, replace the run step with:
+  #   pytest backend/ -v
+  # ============================================================
+  test:
+    name: Run Tests / Import Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Cache pip packages keyed on requirements.txt content.
+      # This avoids re-downloading all heavy LangChain / unstructured packages on every run.
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # System dependencies required by 'unstructured' (OCR, PDF parsing)
+      # These mirror the apt-get installs in backend/Dockerfile so that
+      # pip packages such as pytesseract and PyMuPDF install cleanly.
+      - name: Install system dependencies (OCR / PDF)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libxcb1 \
+            poppler-utils \
+            tesseract-ocr \
+            libmagic-dev \
+            libgl1 \
+            libglib2.0-0
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --timeout 300 -r backend/requirements.txt
+
+      # test_rag_sources.py exists but contains no pytest-style test functions;
+      # running pytest on it would collect 0 tests and exit 5 (no tests found).
+      # Instead we verify that the main application module can be imported
+      # without runtime errors — a lightweight smoke test.
+      # WARNING: If you add proper pytest tests (def test_*()) in future, replace
+      #          this step with: pytest backend/ -v
+      - name: Smoke-test — verify main module imports without error
+        run: |
+          cd backend && python -c "import main; print('Import OK')"
+
+  # ============================================================
+  # JOB 2 — build-and-push
+  # Runs only after the test job passes.
+  # Builds backend and frontend Docker images, then pushes them to GHCR
+  # with two tags each:
+  #   :latest        — always points to the newest successful build
+  #   :<git-sha>     — immutable, traceable to the exact commit
+  #
+  # NOTE: The backend Dockerfile uses --mount=type=cache for pip. This is
+  # preserved exactly as-is; GitHub's BuildKit support handles it correctly.
+  #
+  # PRODUCTION NOTE: The backend/Dockerfile CMD currently includes --reload
+  # which enables hot-reloading (dev mode). The docker-compose.prod.yml already
+  # overrides this with a production-safe command. If you bake the image for
+  # production use WITHOUT compose, remove --reload from the Dockerfile CMD:
+  #   CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
+  # ============================================================
+  build-and-push:
+    name: Build & Push Docker Images to GHCR
+    runs-on: ubuntu-latest
+    needs: test   # Only runs if the test job succeeds
+
+    permissions:
+      contents: read
+      packages: write   # Required to push to ghcr.io
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # Enable Docker BuildKit (required for --mount=type=cache in Dockerfile)
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Authenticate with GitHub Container Registry using the auto-provisioned GITHUB_TOKEN.
+      # No extra secret needed for pushing — GITHUB_TOKEN has packages:write above.
+      - name: Log in to GitHub Container Registry (GHCR)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derive a short (7-char) SHA for the image tag
+      - name: Compute short SHA
+        id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      # Build and push the backend image.
+      # The --mount=type=cache layer inside the Dockerfile is handled transparently by BuildKit.
+      - name: Build & push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          # BuildKit cache keeps the pip layer warm across GitHub-hosted runner runs
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ai_agents/backend:latest
+            ghcr.io/${{ github.repository_owner }}/ai_agents/backend:${{ steps.sha.outputs.short }}
+
+      # Build and push the frontend image (node:22-alpine, runs npm run dev).
+      - name: Build & push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/ai_agents/frontend:latest
+            ghcr.io/${{ github.repository_owner }}/ai_agents/frontend:${{ steps.sha.outputs.short }}
+
+  # ============================================================
+  # JOB 3 — deploy
+  # Runs only after build-and-push succeeds.
+  # SSHs into the production VM, writes the .env file from a secret,
+  # logs into GHCR using CR_PAT (a PAT with read:packages scope),
+  # pulls the new images, and restarts the Docker Compose stack.
+  #
+  # Required GitHub Secrets (Settings -> Secrets -> Actions):
+  #   VM_HOST     — IP or hostname of the production server
+  #   VM_USER     — SSH user (e.g. ubuntu, deploy)
+  #   VM_SSH_KEY  — Private SSH key (PEM format, entire file contents)
+  #   ENV_FILE    — Full contents of the .env file the app needs
+  #   CR_PAT      — GitHub Personal Access Token with read:packages scope
+  # ============================================================
+  deploy:
+    name: Deploy to Production VM
+    runs-on: ubuntu-latest
+    needs: build-and-push   # Only runs if images were built and pushed
+
+    steps:
+      - name: SSH into VM and deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          # Each line is executed over SSH in order.
+          # Any non-zero exit code aborts the deploy.
+          script: |
+            # 1. Navigate to the app directory on the VM
+            cd /opt/slt-app
+
+            # 2. Write the .env file from the GitHub secret so compose can
+            #    pick up all API keys and connection strings at startup.
+            echo "${{ secrets.ENV_FILE }}" > .env
+
+            # 3. Log in to GHCR on the VM so docker compose pull can
+            #    authenticate. CR_PAT must have the read:packages scope.
+            echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+            # 4. Pull the newly-built images (backend + frontend)
+            docker compose pull
+
+            # 5. Recreate containers in detached mode.
+            #    --remove-orphans cleans up containers for removed services.
+            docker compose up -d --remove-orphans
+
+            # 6. Wait for containers to fully start before checking health
+            sleep 20
+
+            # 7. Print the current compose status for visibility in the Actions log
+            docker compose ps
+
+            # 8. Fail the deployment if any container exited or is unhealthy.
+            #    If grep finds "Exit" or "unhealthy" we abort with exit 1.
+            docker compose ps | grep -E "(Exit|unhealthy)" && echo "ERROR: Unhealthy container detected!" && exit 1 || echo "All containers healthy"
