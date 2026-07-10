@@ -185,7 +185,7 @@ jobs:
   #   VM_SSH_KEY  — Private SSH key (PEM format, entire file contents)
   #   ENV_FILE    — Full contents of the .env file the app needs
   #   CR_PAT      — GitHub Personal Access Token with read:packages scope
-  # ============================================================
+  # =============================================================
   deploy:
     name: Deploy to Production VM
     runs-on: ubuntu-latest
