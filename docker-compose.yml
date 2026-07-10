@@ -1,16 +1,15 @@
 version: '3.8'
-
 services:
   db_postgres:
     image: ankane/pgvector:latest
     container_name: slt_postgres
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U slt -d slt_db" ]
+      test: ["CMD-SHELL", "pg_isready -U slt -d slt_db"]
       interval: 10s
       timeout: 5s
       retries: 10
-    ports:
-      - "5433:5432"
+    expose:
+      - "5432"
     environment:
       POSTGRES_USER: slt
       POSTGRES_PASSWORD: slt123
@@ -22,18 +21,18 @@ services:
   db_qdrant:
     image: qdrant/qdrant:latest
     container_name: slt_qdrant
-    ports:
-      - "6333:6333"
+    expose:
+      - "6333"
     volumes:
       - ./data/qdrant:/qdrant/storage
     restart: always
 
   backend:
-    build:
-      context: ./backend
+    image: ghcr.io/sltdigitallab/ai_agents/backend:latest
     container_name: slt_backend
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8100:8000"
     depends_on:
       db_postgres:
         condition: service_healthy
@@ -42,25 +41,22 @@ services:
     environment:
       PYTHONUNBUFFERED: 1
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
-      QDRANT_URL: http://slt_qdrant:6333
+      QDRANT_URL: http://db_qdrant:6333
     env_file:
       - ./.env
-    volumes:
-      - ./backend:/app
-      - ./backend/routers/service-account.json:/service-account.json:ro
     restart: always
 
   frontend:
-    build:
-      context: ./frontend
+    image: ghcr.io/sltdigitallab/ai_agents/frontend:latest
     container_name: slt_frontend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3100:3000"
     depends_on:
       - backend
     env_file:
       - ./.env
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
     restart: always
+
+volumes:
+  pgdata:
+  qdrantdata:

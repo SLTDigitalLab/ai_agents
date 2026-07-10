@@ -175,9 +175,8 @@ jobs:
   # ============================================================
   # JOB 3 — deploy
   # Runs only after build-and-push succeeds.
-  # SSHs into the production VM, writes the .env file from a secret,
-  # logs into GHCR using CR_PAT (a PAT with read:packages scope),
-  # pulls the new images, and restarts the Docker Compose stack.
+  # SSHs into the VM and deploys using docker run commands directly
+  # (docker compose is unavailable due to snap Docker on this VM).
   #
   # Required GitHub Secrets (Settings -> Secrets -> Actions):
   #   VM_HOST     — IP or hostname of the production server
@@ -201,30 +200,71 @@ jobs:
           # Each line is executed over SSH in order.
           # Any non-zero exit code aborts the deploy.
           script: |
-            # 1. Navigate to the app directory on the VM
-            cd /opt/slt-app
+            # 1. Write the .env file from the GitHub secret
+            echo "${{ secrets.ENV_FILE }}" > /opt/slt-app/.env
 
-            # 2. Write the .env file from the GitHub secret so compose can
-            #    pick up all API keys and connection strings at startup.
-            echo "${{ secrets.ENV_FILE }}" > .env
-
-            # 3. Log in to GHCR on the VM so docker compose pull can
-            #    authenticate. CR_PAT must have the read:packages scope.
+            # 2. Log in to GHCR on the VM so docker pull can authenticate
             echo "${{ secrets.CR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # 4. Pull the newly-built images (backend + frontend)
-            docker compose pull
+            # 3. Pull the newly-built images
+            docker pull ghcr.io/sltdigitallab/ai_agents/backend:latest
+            docker pull ghcr.io/sltdigitallab/ai_agents/frontend:latest
 
-            # 5. Recreate containers in detached mode.
-            #    --remove-orphans cleans up containers for removed services.
-            docker compose up -d --remove-orphans
+            # 4. Create Docker network if not exists
+            docker network create slt-network 2>/dev/null || true
 
-            # 6. Wait for containers to fully start before checking health
+            # 5. Stop and remove old slt containers
+            docker stop slt_backend slt_frontend slt_postgres slt_qdrant 2>/dev/null || true
+            docker rm slt_backend slt_frontend slt_postgres slt_qdrant 2>/dev/null || true
+
+            # 6. Start Postgres
+            docker run -d --name slt_postgres \
+              --network slt-network \
+              -e POSTGRES_USER=slt \
+              -e POSTGRES_PASSWORD=slt123 \
+              -e POSTGRES_DB=slt_db \
+              -v /opt/slt-app/data/postgres:/var/lib/postgresql/data \
+              --restart always \
+              ankane/pgvector:latest
+
+            # 7. Wait for Postgres to be healthy
+            until docker exec slt_postgres pg_isready -U slt -d slt_db; do
+              echo "Waiting for postgres..."
+              sleep 3
+            done
+
+            # 8. Start Qdrant
+            docker run -d --name slt_qdrant \
+              --network slt-network \
+              -v /opt/slt-app/data/qdrant:/qdrant/storage \
+              --restart always \
+              qdrant/qdrant:latest
+
+            # 9. Start Backend
+            docker run -d --name slt_backend \
+              --network slt-network \
+              -p 127.0.0.1:8100:8000 \
+              --env-file /opt/slt-app/.env \
+              -e PYTHONUNBUFFERED=1 \
+              -e POSTGRES_URL=postgresql://slt:slt123@slt_postgres:5432/slt_db \
+              -e QDRANT_URL=http://slt_qdrant:6333 \
+              --restart always \
+              ghcr.io/sltdigitallab/ai_agents/backend:latest \
+              uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info
+
+            # 10. Start Frontend
+            docker run -d --name slt_frontend \
+              --network slt-network \
+              -p 127.0.0.1:3100:3000 \
+              --env-file /opt/slt-app/.env \
+              --restart always \
+              ghcr.io/sltdigitallab/ai_agents/frontend:latest
+
+            # 11. Wait for containers to fully start
             sleep 20
 
-            # 7. Print the current compose status for visibility in the Actions log
-            docker compose ps
+            # 12. Print container status
+            docker ps | grep slt
 
-            # 8. Fail the deployment if any container exited or is unhealthy.
-            #    If grep finds "Exit" or "unhealthy" we abort with exit 1.
-            docker compose ps | grep -E "(Exit|unhealthy)" && echo "ERROR: Unhealthy container detected!" && exit 1 || echo "All containers healthy"
+            # 13. Fail if any slt container is not running
+            docker ps | grep slt | grep -v "Up" && echo "ERROR: Unhealthy container detected!" && exit 1 || echo "All containers healthy"
