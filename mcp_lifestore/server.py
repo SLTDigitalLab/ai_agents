@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import uvicorn
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP  # type: ignore
 
@@ -30,6 +34,40 @@ mcp = FastMCP(
     stateless_http=True,
     json_response=True,
 )
+
+
+class MCPBearerAuthMiddleware(BaseHTTPMiddleware):
+    """
+    Bearer-token authentication for LifeStore MCP Streamable HTTP.
+
+    If LIFESTORE_MCP_TOKEN is set, every HTTP request to the MCP server must include:
+
+        Authorization: Bearer <token>
+
+    If LIFESTORE_MCP_TOKEN is not set, authentication is skipped. This keeps local
+    development flexible while allowing secured staging/production deployments.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        expected_token = os.getenv("LIFESTORE_MCP_TOKEN", "").strip()
+
+        if not expected_token:
+            return await call_next(request)
+
+        auth_header = request.headers.get("authorization", "").strip()
+        expected_header = f"Bearer {expected_token}"
+
+        if auth_header != expected_header:
+            return JSONResponse(
+                {
+                    "error": "Unauthorized MCP request",
+                    "detail": "Missing or invalid bearer token.",
+                },
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        return await call_next(request)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -242,6 +280,264 @@ CATEGORY_ALIASES = {
 
 def normalize_space_lower(value: Any) -> str:
     return re.sub(r"\s+", " ", safe_text(value).lower()).strip()
+
+
+# ---------------------------------------------------------------------
+# Strict MCP input validation
+# ---------------------------------------------------------------------
+# These helpers validate tool inputs before the MCP server uses them.
+# The goal is not to decide whether a product exists; search/retrieval does that.
+# The goal is to reject unsafe, oversized, or unexpected values at the tool boundary.
+
+MAX_QUERY_LENGTH = int(os.getenv("LIFESTORE_MAX_QUERY_LENGTH", "240"))
+MAX_CATEGORY_LENGTH = int(os.getenv("LIFESTORE_MAX_CATEGORY_LENGTH", "120"))
+MAX_PRODUCT_QUERY_LENGTH = int(os.getenv("LIFESTORE_MAX_PRODUCT_QUERY_LENGTH", "240"))
+MAX_COMPARE_ITEMS = int(os.getenv("LIFESTORE_MAX_COMPARE_ITEMS", "6"))
+MAX_PRICE_VALUE = float(os.getenv("LIFESTORE_MAX_PRICE_VALUE", "10000000"))
+
+ALLOWED_SORT_VALUES = {
+    "relevance",
+    "price_asc",
+    "price_desc",
+    "price-low-high",
+    "price-high-low",
+    "low_to_high",
+    "high_to_low",
+    "name_asc",
+    "name",
+}
+
+ALLOWED_SEARCH_MODES = {
+    "auto",
+    "general",
+    "single_product",
+    "availability",
+    "purchase",
+    "exact",
+    "comparison",
+    "category",
+}
+
+AVAILABILITY_ALIASES = {
+    "in_stock": "in_stock",
+    "in stock": "in_stock",
+    "available": "in_stock",
+    "yes": "in_stock",
+    "out_stock": "out_of_stock",
+    "out_of_stock": "out_of_stock",
+    "out of stock": "out_of_stock",
+    "unavailable": "out_of_stock",
+    "sold out": "out_of_stock",
+    "no": "out_of_stock",
+}
+
+SUSPICIOUS_TEXT_MARKERS = (
+    "\x00",
+    "../",
+    "..\\",
+    "file://",
+    "javascript:",
+    "data:text",
+    "data:application",
+    "<script",
+    "</script",
+    "<?php",
+    "$(",
+    "`",
+)
+
+
+def invalid_input_response(field: str, message: str) -> dict[str, Any]:
+    return {
+        "status": "invalid_input",
+        "message": f"Invalid {field}: {message}",
+        "products": [],
+    }
+
+
+def validate_text_input(
+    value: Any,
+    field_name: str,
+    *,
+    max_length: int,
+    allow_blank: bool = False,
+    allow_lifestore_product_url: bool = True,
+) -> tuple[str, dict[str, Any] | None]:
+    text = safe_text(value)
+
+    if not text:
+        if allow_blank:
+            return "", None
+        return "", invalid_input_response(field_name, "value cannot be empty.")
+
+    if len(text) > max_length:
+        return "", invalid_input_response(
+            field_name,
+            f"value is too long. Maximum allowed length is {max_length} characters.",
+        )
+
+    lowered = text.lower()
+
+    for marker in SUSPICIOUS_TEXT_MARKERS:
+        if marker in lowered:
+            return "", invalid_input_response(
+                field_name,
+                f"value contains unsupported pattern: {marker}",
+            )
+
+    # Product lookup can accept a LifeStore product URL, but not arbitrary URLs.
+    if lowered.startswith(("http://", "https://")):
+        if not allow_lifestore_product_url:
+            return "", invalid_input_response(field_name, "URLs are not allowed here.")
+
+        if "lifestore.lk/product/" not in lowered:
+            return "", invalid_input_response(
+                field_name,
+                "only LifeStore product URLs are allowed.",
+            )
+
+    return text, None
+
+
+def bounded_int(
+    value: Any,
+    *,
+    default: int,
+    min_value: int,
+    max_value: int,
+) -> int:
+    try:
+        number = int(value)
+    except Exception:
+        number = default
+
+    return max(min(number, max_value), min_value)
+
+
+def validate_price_value(
+    value: Any,
+    field_name: str,
+) -> tuple[float | None, dict[str, Any] | None]:
+    if value is None or safe_text(value) == "":
+        return None, None
+
+    try:
+        number = float(value)
+    except Exception:
+        return None, invalid_input_response(field_name, "must be a valid number.")
+
+    if number < 0:
+        return None, invalid_input_response(field_name, "cannot be negative.")
+
+    if number > MAX_PRICE_VALUE:
+        return None, invalid_input_response(
+            field_name,
+            f"cannot exceed {MAX_PRICE_VALUE}.",
+        )
+
+    return number, None
+
+
+def validate_price_range(
+    min_price: Any,
+    max_price: Any,
+) -> tuple[float | None, float | None, dict[str, Any] | None]:
+    cleaned_min, error = validate_price_value(min_price, "min_price")
+    if error:
+        return None, None, error
+
+    cleaned_max, error = validate_price_value(max_price, "max_price")
+    if error:
+        return None, None, error
+
+    if cleaned_min is not None and cleaned_max is not None and cleaned_min > cleaned_max:
+        return None, None, invalid_input_response(
+            "price_range",
+            "min_price cannot be greater than max_price.",
+        )
+
+    return cleaned_min, cleaned_max, None
+
+
+def normalize_sort_value(sort: Any) -> tuple[str, dict[str, Any] | None]:
+    value = safe_text(sort).lower() or "relevance"
+
+    if value not in ALLOWED_SORT_VALUES:
+        return "relevance", invalid_input_response(
+            "sort",
+            f"unsupported sort value '{value}'.",
+        )
+
+    return value, None
+
+
+def normalize_search_mode(search_mode: Any) -> tuple[str, dict[str, Any] | None]:
+    value = safe_text(search_mode).lower() or "auto"
+
+    if value not in ALLOWED_SEARCH_MODES:
+        return "auto", invalid_input_response(
+            "search_mode",
+            f"unsupported search mode '{value}'.",
+        )
+
+    return value, None
+
+
+def normalize_requested_availability(
+    requested_availability: Any,
+) -> tuple[str, dict[str, Any] | None]:
+    value = normalize_space_lower(requested_availability or "in_stock")
+
+    if value not in AVAILABILITY_ALIASES:
+        return "in_stock", invalid_input_response(
+            "requested_availability",
+            f"unsupported availability value '{value}'.",
+        )
+
+    return AVAILABILITY_ALIASES[value], None
+
+
+def validate_product_query_list(
+    value: Any,
+) -> tuple[list[str], dict[str, Any] | None]:
+    parsed = parse_json_string_if_needed(value)
+
+    if parsed is None or parsed == "":
+        return [], None
+
+    if isinstance(parsed, str):
+        raw_items = [item for item in parsed.split(",")]
+    elif isinstance(parsed, list):
+        raw_items = parsed
+    else:
+        return [], invalid_input_response(
+            "product_queries",
+            "must be a list or comma-separated string.",
+        )
+
+    if len(raw_items) > MAX_COMPARE_ITEMS:
+        return [], invalid_input_response(
+            "product_queries",
+            f"too many products. Maximum allowed is {MAX_COMPARE_ITEMS}.",
+        )
+
+    cleaned_items: list[str] = []
+
+    for item in raw_items:
+        cleaned, error = validate_text_input(
+            item,
+            "product_queries item",
+            max_length=MAX_PRODUCT_QUERY_LENGTH,
+            allow_blank=True,
+            allow_lifestore_product_url=True,
+        )
+        if error:
+            return [], error
+
+        if cleaned:
+            cleaned_items.append(cleaned)
+
+    return cleaned_items, None
 
 
 def canonical_category_query(query: str) -> str:
@@ -746,9 +1042,41 @@ def lifestore_search_products(
         max_price = parsed_q.get("max_price", max_price)
         in_stock_only = bool(parsed_q.get("in_stock_only", in_stock_only))
         sort = str(parsed_q.get("sort", sort))
-        limit = int(parsed_q.get("limit", limit))
-        cursor = int(parsed_q.get("cursor", cursor))
+        limit = parsed_q.get("limit", limit)
+        cursor = parsed_q.get("cursor", cursor)
         currency = str(parsed_q.get("currency", currency))
+
+    q, error = validate_text_input(
+        q,
+        "q",
+        max_length=MAX_QUERY_LENGTH,
+        allow_blank=True,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    category, error = validate_text_input(
+        category,
+        "category",
+        max_length=MAX_CATEGORY_LENGTH,
+        allow_blank=True,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    min_price, max_price, error = validate_price_range(min_price, max_price)
+    if error:
+        return error
+
+    sort, error = normalize_sort_value(sort)
+    if error:
+        return error
+
+    limit = bounded_int(limit, default=10, min_value=1, max_value=24)
+    cursor = bounded_int(cursor, default=0, min_value=0, max_value=5000)
+    currency = "LKR"
 
     products = [normalize_product(product) for product in load_products()]
     requested_family = _family_requested_by_query(q, category)
@@ -840,35 +1168,6 @@ def lifestore_search_products(
         ),
     }
 
-
-@mcp.tool()
-def lifestore_get_product(product_id: str, currency: str = "LKR") -> dict[str, Any]:
-    """
-    Get full details for a LifeStore product by product ID, SKU, exact name, partial name, or URL.
-    """
-    parsed_product_id = parse_json_string_if_needed(product_id)
-    if isinstance(parsed_product_id, dict):
-        product_id = str(parsed_product_id.get("product_id", product_id))
-        currency = str(parsed_product_id.get("currency", currency))
-
-    product = find_product_by_id_or_name(product_id)
-
-    if not product:
-        return {
-            "status": "not_found",
-            "message": "No matching LifeStore product was found.",
-            "product_id": product_id,
-            "currency": currency,
-        }
-
-    return {
-        "status": "success",
-        "product_id": product_id,
-        "currency": currency,
-        "product": product,
-    }
-
-
 @mcp.tool()
 def lifestore_list_categories(depth: int = 1) -> dict[str, Any]:
     """
@@ -876,6 +1175,8 @@ def lifestore_list_categories(depth: int = 1) -> dict[str, Any]:
 
     The depth parameter is accepted for compatibility, but the local LifeStore JSON currently stores flat categories.
     """
+    depth = bounded_int(depth, default=1, min_value=1, max_value=3)
+
     products = [normalize_product(product) for product in load_products()]
     category_counts: dict[str, int] = {}
 
@@ -924,8 +1225,21 @@ def lifestore_strict_category_products(
     if isinstance(parsed_category, dict):
         category = str(parsed_category.get("category", parsed_category.get("query", category)))
         in_stock_only = bool(parsed_category.get("in_stock_only", in_stock_only))
-        limit = int(parsed_category.get("limit", limit))
+        limit = parsed_category.get("limit", limit)
         currency = str(parsed_category.get("currency", currency))
+
+    category, error = validate_text_input(
+        category,
+        "category",
+        max_length=MAX_CATEGORY_LENGTH,
+        allow_blank=False,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    limit = bounded_int(limit, default=24, min_value=1, max_value=50)
+    currency = "LKR"
 
     canonical = canonical_category_query(category)
     products = [normalize_product(product) for product in load_products()]
@@ -956,7 +1270,7 @@ def lifestore_strict_category_products(
 
     matched.sort(key=lambda item: safe_text(item.get("name")).lower())
 
-    bounded_limit = max(min(int(limit), 50), 1)
+    bounded_limit = limit
 
     return {
         "status": "success",
@@ -968,488 +1282,6 @@ def lifestore_strict_category_products(
         "returned_products": matched[:bounded_limit],
         "retrieval_policy": "strict_category_only_no_qdrant",
     }
-
-
-@mcp.tool()
-def lifestore_check_item_availability(
-    product_id_or_name: str,
-    availability: str = "in_stock",
-) -> dict[str, Any]:
-    """
-    Check LifeStore item availability using the parameter in_stock or out_stock.
-
-    availability examples:
-    - in_stock
-    - out_stock
-    - out_of_stock
-    """
-    parsed_value = parse_json_string_if_needed(product_id_or_name)
-    if isinstance(parsed_value, dict):
-        product_id_or_name = str(
-            parsed_value.get(
-                "product_id_or_name",
-                parsed_value.get("product_id", parsed_value.get("name", product_id_or_name)),
-            )
-        )
-        availability = str(parsed_value.get("availability", availability))
-
-    product = find_product_by_id_or_name(product_id_or_name)
-
-    if not product:
-        return {
-            "status": "not_found",
-            "message": "No matching LifeStore product was found.",
-            "product_id_or_name": product_id_or_name,
-            "requested_availability": availability,
-        }
-
-    matches = product_matches_availability(product, availability)
-
-    return {
-        "status": "success",
-        "product_id_or_name": product_id_or_name,
-        "requested_availability": availability,
-        "matches_requested_availability": matches,
-        "actual_availability": product.get("availability"),
-        "stock": product.get("stock"),
-        "product": {
-            "product_id": product.get("product_id"),
-            "name": product.get("name"),
-            "brand": product.get("brand"),
-            "category": product.get("category"),
-            "price": product.get("price"),
-            "availability": product.get("availability"),
-            "stock": product.get("stock"),
-            "url": product.get("url"),
-        },
-    }
-
-
-@mcp.tool()
-def lifestore_create_order(
-    cart: Any,
-    recipient: Any = None,
-    delivery: Any = None,
-    sender: Any = None,
-    gift_message: str = "",
-    currency: str = "LKR",
-) -> dict[str, Any]:
-    """
-    Create a local LifeStore draft order.
-
-    Important:
-    This does not place a real LifeStore order and does not create a real payment link.
-    It only validates products from the local LifeStore catalog and stores a local draft order for project demonstration.
-    """
-    parsed_cart = parse_json_string_if_needed(cart)
-    parsed_recipient = parse_json_string_if_needed(recipient)
-    parsed_delivery = parse_json_string_if_needed(delivery)
-    parsed_sender = parse_json_string_if_needed(sender)
-
-    if isinstance(parsed_cart, dict):
-        currency = str(parsed_cart.get("currency", currency))
-        gift_message = str(parsed_cart.get("gift_message", gift_message))
-        parsed_recipient = parsed_cart.get("recipient", parsed_recipient)
-        parsed_delivery = parsed_cart.get("delivery", parsed_delivery)
-        parsed_sender = parsed_cart.get("sender", parsed_sender)
-        
-        if isinstance(parsed_cart.get("cart"), list):
-            parsed_cart = parsed_cart.get("cart")
-        else:
-            # If user passes a single product object, treat it as one cart item.
-            parsed_cart = [parsed_cart]
-
-    if not isinstance(parsed_cart, list):
-        return {
-            "status": "invalid_cart",
-            "message": "Cart must be a list of items. Each item should include product_id or name and quantity.",
-        }
-
-    order_items = []
-    unavailable_items = []
-    subtotal = 0.0
-
-    for item in parsed_cart:
-        if not isinstance(item, dict):
-            continue
-
-        product_lookup = safe_text(
-            item.get("product_id")
-            or item.get("product_id_or_name")
-            or item.get("name")
-            or item.get("product")
-        )
-
-        quantity = int(item.get("quantity", 1))
-
-        product = find_product_by_id_or_name(product_lookup)
-
-        if not product:
-            unavailable_items.append(
-                {
-                    "requested_item": product_lookup,
-                    "reason": "Product not found in local LifeStore catalog.",
-                }
-            )
-            continue
-
-        if not product_matches_availability(product, "in_stock"):
-            unavailable_items.append(
-                {
-                    "requested_item": product_lookup,
-                    "product_id": product.get("product_id"),
-                    "name": product.get("name"),
-                    "reason": "Product is not in stock.",
-                    "availability": product.get("availability"),
-                }
-            )
-
-        price_value = product.get("price_value")
-        line_total = float(price_value or 0) * quantity
-        subtotal += line_total
-
-        order_items.append(
-            {
-                "product_id": product.get("product_id"),
-                "name": product.get("name"),
-                "quantity": quantity,
-                "unit_price": product.get("price"),
-                "unit_price_value": price_value,
-                "line_total_value": line_total,
-                "availability": product.get("availability"),
-                "url": product.get("url"),
-            }
-        )
-
-    order_id = f"LIFESTORE-DRAFT-{uuid.uuid4().hex[:10].upper()}"
-
-    parsed_gift_message = parse_json_string_if_needed(gift_message)
-
-    if isinstance(parsed_gift_message, (dict, list)):
-        gift_message = json.dumps(parsed_gift_message, ensure_ascii=False)
-    else:
-        gift_message = safe_text(parsed_gift_message)
-
-    order = {
-        "order_id": order_id,
-        "status": "draft_created_not_submitted",
-        "created_at": datetime.utcnow().isoformat() + "Z",
-        "currency": currency,
-        "items": order_items,
-        "unavailable_items": unavailable_items,
-        "subtotal_value": subtotal,
-        "recipient": parsed_recipient if isinstance(parsed_recipient, dict) else {},
-        "delivery": parsed_delivery if isinstance(parsed_delivery, dict) else {},
-        "sender": parsed_sender if isinstance(parsed_sender, dict) else {},
-        "gift_message": gift_message,
-        "note": "This is a local MCP draft order only. It was not submitted to LifeStore and no real payment link was generated.",
-    }
-
-    save_local_order(order)
-
-    return {
-        "status": "draft_order_created",
-        "message": "Local LifeStore draft order created for MCP demonstration. This is not a real LifeStore order.",
-        "order": order,
-    }
-
-
-@mcp.tool()
-def get_ingestion_status() -> dict[str, Any]:
-    """
-    Check the existing backend ingestion status.
-
-    This connects to:
-    GET /api/v1/admin/ingestion-status
-    """
-    url = f"{ADMIN_BASE_URL}/api/v1/admin/ingestion-status"
-
-    try:
-        response = httpx.get(url, timeout=30)
-        response.raise_for_status()
-
-        return {
-            "status": "success",
-            "admin_base_url": ADMIN_BASE_URL,
-            "ingestion_status": response.json(),
-        }
-
-    except Exception as error:
-        return {
-            "status": "backend_connection_failed",
-            "message": str(error),
-            "url": url,
-            "hint": "Make sure your copied project's backend is running before using this MCP tool.",
-        }
-
-
-@mcp.tool()
-def refresh_lifestore_kb() -> dict[str, Any]:
-    """
-    Trigger the existing LifeStore KB ingestion endpoint.
-
-    This is disabled by default for safety.
-    Set ALLOW_REFRESH=true in mcp_lifestore/.env only after testing.
-    """
-    if not ALLOW_REFRESH:
-        return {
-            "status": "disabled",
-            "message": "LifeStore KB refresh is disabled. Set ALLOW_REFRESH=true in mcp_lifestore/.env when you are ready to allow MCP to trigger ingestion.",
-        }
-
-    url = f"{ADMIN_BASE_URL}/api/v1/admin/ingest-url"
-
-    payload = {
-        "urls": [LIFESTORE_SOURCE_URL],
-        "agent_name": LIFESTORE_AGENT_NAME,
-        "collection_name": LIFESTORE_QDRANT_COLLECTION,
-        "crawl": True,
-        "max_pages": LIFESTORE_INGEST_MAX_PAGES,
-        "max_depth": LIFESTORE_INGEST_MAX_DEPTH,
-        "user_email": ADMIN_USER_EMAIL,
-    }
-
-    try:
-        response = httpx.post(url, json=payload, timeout=60)
-        response.raise_for_status()
-
-        return {
-            "status": "success",
-            "message": "LifeStore KB refresh started.",
-            "payload": payload,
-            "backend_response": response.json(),
-        }
-
-    except Exception as error:
-        return {
-            "status": "backend_connection_failed",
-            "message": str(error),
-            "url": url,
-            "payload": payload,
-        }
-    
-@mcp.tool()
-def lifestore_graph_summary() -> dict[str, Any]:
-    """
-    Return a summary of the LifeStore Neo4j graph.
-
-    This checks Product, Brand, Category, Availability nodes and relationship counts.
-    """
-    driver = neo4j_driver()
-
-    if driver is None:
-        return {
-            "status": "neo4j_not_configured",
-            "message": "Neo4j is not configured. Add NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD to mcp_lifestore/.env.",
-        }
-
-    query = """
-    MATCH (p:Product)
-    WITH count(p) AS product_count
-    MATCH (b:Brand)
-    WITH product_count, count(b) AS brand_count
-    MATCH (c:Category)
-    WITH product_count, brand_count, count(c) AS category_count
-    MATCH (a:Availability)
-    WITH product_count, brand_count, category_count, count(a) AS availability_count
-    MATCH ()-[r]->()
-    RETURN
-        product_count,
-        brand_count,
-        category_count,
-        availability_count,
-        count(r) AS relationship_count
-    """
-
-    try:
-        with driver.session() as session:
-            row = session.run(query).single()
-
-        driver.close()
-
-        if row is None:
-            return {
-                "status": "empty_graph",
-                "message": "Neo4j connected, but no LifeStore graph data was found.",
-            }
-
-        return {
-            "status": "success",
-            "graph_summary": {
-                "products": row["product_count"],
-                "brands": row["brand_count"],
-                "categories": row["category_count"],
-                "availability_nodes": row["availability_count"],
-                "relationships": row["relationship_count"],
-            },
-        }
-
-    except Exception as error:
-        driver.close()
-        return {
-            "status": "neo4j_query_failed",
-            "message": str(error),
-        }
-    
-@mcp.tool()
-def lifestore_get_product_graph(product_name: Any = "", limit: Any = 5) -> dict[str, Any]:
-    """
-    Get LifeStore graph relationships for a product from Neo4j.
-
-    Returns:
-    - Product node
-    - Brand relationship
-    - Category relationship
-    - Availability relationship
-
-    Relationship types:
-    - Product -[:MADE_BY]-> Brand
-    - Product -[:BELONGS_TO]-> Category
-    - Product -[:HAS_AVAILABILITY]-> Availability
-    """
-
-    parsed_value = parse_json_string_if_needed(product_name)
-
-    if isinstance(parsed_value, dict):
-        product_name = str(
-            parsed_value.get(
-                "product_name",
-                parsed_value.get("name", parsed_value.get("query", "")),
-            )
-        )
-        limit = parsed_value.get("limit", limit)
-    else:
-        product_name = safe_text(parsed_value)
-
-    try:
-        limit = int(limit)
-    except Exception:
-        limit = 5
-
-    if not product_name:
-        return {
-            "status": "missing_product_name",
-            "message": "Please provide a product name, product ID, or search text.",
-        }
-
-    driver = neo4j_driver()
-
-    if driver is None:
-        return {
-            "status": "neo4j_not_configured",
-            "message": "Neo4j is not configured. Add NEO4J_URI, NEO4J_USERNAME or NEO4J_USER, and NEO4J_PASSWORD to mcp_lifestore/.env.",
-            "product_name": product_name,
-        }
-
-    query = """
-    MATCH (p:Product)
-    WHERE toLower(toString(coalesce(
-        p.name,
-        p.title,
-        p.product_name,
-        p.product_id,
-        p.url,
-        ""
-    ))) CONTAINS toLower($product_name)
-
-    OPTIONAL MATCH (p)-[:MADE_BY]->(b:Brand)
-    OPTIONAL MATCH (p)-[:BELONGS_TO]->(c:Category)
-    OPTIONAL MATCH (p)-[:HAS_AVAILABILITY]->(a:Availability)
-
-    WITH
-        p,
-        collect(DISTINCT b) AS brands,
-        collect(DISTINCT c) AS categories,
-        collect(DISTINCT a) AS availability_nodes
-
-    RETURN
-        properties(p) AS product,
-        labels(p) AS product_labels,
-        [x IN brands WHERE x IS NOT NULL | properties(x)] AS brands,
-        [x IN categories WHERE x IS NOT NULL | properties(x)] AS categories,
-        [x IN availability_nodes WHERE x IS NOT NULL | properties(x)] AS availability_nodes
-    LIMIT $limit
-    """
-
-    try:
-        with driver.session() as session:
-            rows = list(
-                session.run(
-                    query,
-                    product_name=product_name,
-                    limit=max(limit, 1),
-                )
-            )
-
-        results = []
-
-        for row in rows:
-            product = make_json_safe(row["product"] or {})
-            brands = make_json_safe(row["brands"] or [])
-            categories = make_json_safe(row["categories"] or [])
-            availability_nodes = make_json_safe(row["availability_nodes"] or [])
-
-            product_display = node_display_name(product)
-
-            edges = []
-
-            for brand in brands:
-                edges.append(
-                    {
-                        "source": product_display,
-                        "relationship": "MADE_BY",
-                        "target": node_display_name(brand),
-                        "target_label": "Brand",
-                    }
-                )
-
-            for category in categories:
-                edges.append(
-                    {
-                        "source": product_display,
-                        "relationship": "BELONGS_TO",
-                        "target": node_display_name(category),
-                        "target_label": "Category",
-                    }
-                )
-
-            for availability in availability_nodes:
-                edges.append(
-                    {
-                        "source": product_display,
-                        "relationship": "HAS_AVAILABILITY",
-                        "target": node_display_name(availability),
-                        "target_label": "Availability",
-                    }
-                )
-
-            results.append(
-                {
-                    "product": product,
-                    "product_labels": make_json_safe(row["product_labels"]),
-                    "brands": brands,
-                    "categories": categories,
-                    "availability": availability_nodes,
-                    "edges": edges,
-                }
-            )
-
-        return {
-            "status": "success",
-            "product_name": product_name,
-            "matched_products": len(results),
-            "results": results,
-        }
-
-    except Exception as error:
-        return {
-            "status": "neo4j_query_failed",
-            "message": str(error),
-            "product_name": product_name,
-        }
-
-    finally:
-        driver.close()
 
 
 # ============================================================
@@ -2498,100 +2330,6 @@ def _build_answer_summary(query: str, products: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 @mcp.tool()
-def lifestore_resolve_product_image(
-    product_url: str,
-    current_image_url: str = "",
-) -> dict[str, Any]:
-    """
-    Resolve a real product image URL for frontend rendering.
-
-    Use this when the graph/local product image is a fallback payment/logo image
-    such as union-pay.jpg.
-    """
-    return _resolve_product_image(product_url, current_image_url)
-
-
-@mcp.tool()
-def lifestore_verified_image_lookup_status(limit: int = 10) -> dict[str, Any]:
-    """
-    Inspect the verified product-image lookup file used by the hybrid search.
-
-    Use this when product cards show no images even though you generated a
-    separate image scraper output with 161 valid image URLs.
-    """
-    lookup = _load_verified_image_lookup()
-    examples = []
-
-    for index, (product_url, image_url) in enumerate(lookup.items()):
-        if index >= max(int(limit), 1):
-            break
-        examples.append(
-            {
-                "product_url": product_url,
-                "image_url": image_url,
-            }
-        )
-
-    return {
-        "status": "success",
-        "image_lookup_path": str(IMAGE_LOOKUP_JSON_PATH),
-        "image_lookup_exists": IMAGE_LOOKUP_JSON_PATH.exists(),
-        "image_lookup_count": len(lookup),
-        "examples": examples,
-    }
-
-
-@mcp.tool()
-def lifestore_validate_product_images(limit: int = 500) -> dict[str, Any]:
-    """
-    Check how many local LifeStore products still have missing or fallback image URLs.
-
-    This does not update Neo4j. It is a safe diagnostic tool.
-    It also reports whether the verified image lookup file is visible to MCP.
-    """
-    products = [normalize_product(product) for product in load_products()]
-    checked = products[: max(int(limit), 1)]
-    verified_lookup = _load_verified_image_lookup()
-
-    bad = []
-    good_count = 0
-    resolvable_from_verified_lookup = 0
-
-    for product in checked:
-        product_url = safe_text(product.get("url"))
-        image_url = safe_text(product.get("image_url"))
-        verified_image = _lookup_verified_product_image(product_url)
-
-        if verified_image:
-            resolvable_from_verified_lookup += 1
-
-        if _bad_image_url(image_url):
-            bad.append(
-                {
-                    "product_id": product.get("product_id"),
-                    "name": product.get("name"),
-                    "url": product_url,
-                    "image_url": image_url,
-                    "verified_lookup_image_url": verified_image,
-                    "verified_lookup_available": bool(verified_image),
-                }
-            )
-        else:
-            good_count += 1
-
-    return {
-        "status": "success",
-        "checked_products": len(checked),
-        "good_graph_or_local_image_count": good_count,
-        "bad_or_missing_graph_or_local_image_count": len(bad),
-        "verified_image_lookup_path": str(IMAGE_LOOKUP_JSON_PATH),
-        "verified_image_lookup_exists": IMAGE_LOOKUP_JSON_PATH.exists(),
-        "verified_image_lookup_count": len(verified_lookup),
-        "resolvable_from_verified_lookup_count": resolvable_from_verified_lookup,
-        "bad_examples": bad[:20],
-    }
-
-@mcp.tool()
 def lifestore_hybrid_product_search(
     query: str,
     limit: int = 5,
@@ -2615,7 +2353,7 @@ def lifestore_hybrid_product_search(
 
     if isinstance(parsed_query, dict):
         query = str(parsed_query.get("query", parsed_query.get("q", query)))
-        limit = int(parsed_query.get("limit", limit))
+        limit = parsed_query.get("limit", limit)
         include_vector_evidence = bool(
             parsed_query.get("include_vector_evidence", include_vector_evidence)
         )
@@ -2624,16 +2362,37 @@ def lifestore_hybrid_product_search(
     else:
         query = safe_text(parsed_query)
 
-    query = safe_text(query)
-    product_query = safe_text(product_query)
-    search_mode = safe_text(search_mode or "auto") or "auto"
+    query, error = validate_text_input(
+        query,
+        "query",
+        max_length=MAX_QUERY_LENGTH,
+        allow_blank=False,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    product_query, error = validate_text_input(
+        product_query,
+        "product_query",
+        max_length=MAX_PRODUCT_QUERY_LENGTH,
+        allow_blank=True,
+        allow_lifestore_product_url=True,
+    )
+    if error:
+        return error
+
+    search_mode, error = normalize_search_mode(search_mode)
+    if error:
+        return error
+
+    limit = bounded_int(limit, default=5, min_value=1, max_value=8)
 
     # Important: for direct product or availability questions, the FastAPI proxy
     # passes a clean product_query extracted by the OpenAI planner. Searching the
     # full user sentence can accidentally match a whole category such as "router".
     retrieval_query = product_query or query
 
-    limit = max(int(limit), 1)
     if search_mode in {"single_product", "availability", "purchase", "exact"}:
         limit = min(limit, 1)
 
@@ -2700,14 +2459,15 @@ def lifestore_precise_product_lookup(
     This tool intentionally returns only one frontend-ready product card so the
     chat does not show a whole category for a single-product question.
     """
-    product_query = safe_text(product_query)
-
-    if not product_query:
-        return {
-            "status": "missing_product_query",
-            "message": "Please provide a product name, product ID, SKU, or product URL.",
-            "products": [],
-        }
+    product_query, error = validate_text_input(
+        product_query,
+        "product_query",
+        max_length=MAX_PRODUCT_QUERY_LENGTH,
+        allow_blank=False,
+        allow_lifestore_product_url=True,
+    )
+    if error:
+        return error
 
     return lifestore_hybrid_product_search(
         query=product_query,
@@ -2729,6 +2489,20 @@ def lifestore_availability_lookup(
     This avoids the old behavior where asking "is A available?" could return every
     product in A's category.
     """
+    product_query, error = validate_text_input(
+        product_query,
+        "product_query",
+        max_length=MAX_PRODUCT_QUERY_LENGTH,
+        allow_blank=False,
+        allow_lifestore_product_url=True,
+    )
+    if error:
+        return error
+
+    requested_availability, error = normalize_requested_availability(requested_availability)
+    if error:
+        return error
+
     lookup = lifestore_precise_product_lookup(
         product_query=product_query,
         include_vector_evidence=False,
@@ -2777,18 +2551,33 @@ def lifestore_compare_products(
     If it is not provided, the tool searches the query and returns up to `limit`
     products for a category-style comparison.
     """
-    parsed_queries = parse_json_string_if_needed(product_queries)
-    query = safe_text(query)
-    limit = max(min(int(limit or 4), 6), 2)
+    query, error = validate_text_input(
+        query,
+        "query",
+        max_length=MAX_QUERY_LENGTH,
+        allow_blank=True,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    parsed_queries, error = validate_product_query_list(product_queries)
+    if error:
+        return error
+
+    if not query and not parsed_queries:
+        return invalid_input_response(
+            "query",
+            "provide either a comparison query or product_queries.",
+        )
+
+    limit = bounded_int(limit, default=4, min_value=2, max_value=6)
 
     collected: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    if isinstance(parsed_queries, list):
-        for item in parsed_queries:
-            item_query = safe_text(item)
-            if not item_query:
-                continue
+    if parsed_queries:
+        for item_query in parsed_queries:
 
             result = lifestore_precise_product_lookup(
                 product_query=item_query,
@@ -2823,7 +2612,7 @@ def lifestore_compare_products(
     return {
         "status": "success" if collected else "not_found",
         "query": query,
-        "product_queries": parsed_queries if isinstance(parsed_queries, list) else [],
+        "product_queries": parsed_queries,
         "products": collected,
         "answer": answer,
         "retrieval": {
@@ -2871,25 +2660,21 @@ Existing project:
 - Qdrant vector database
 - Neo4j product graph
 - LifeStore product ingestion
-- KB refresh automation
+- KB refresh automation handled outside the public MCP tool set
 
 MCP role:
-- Expose safe tools to MCP-compatible AI clients.
+- Expose safe customer-facing LifeStore product tools to MCP-compatible AI clients.
 - Search local LifeStore product data.
-- Get full product details.
-- List categories.
-- Check item availability by in_stock / out_stock parameter.
+- List LifeStore categories.
+- Run exact category/offer product searches.
 - Run lifestore_hybrid_product_search for Neo4j + Qdrant answers.
-- Return frontend-ready product cards with image_url fields.
-- Resolve images from the verified image lookup file before falling back to scraping.
-- Create local draft orders for demonstration.
-- Check backend ingestion status.
-- Optionally trigger LifeStore KB refresh.
+- Resolve frontend-ready product image_url fields through the internal image resolver.
+- Return product cards with safe image URLs for frontend rendering.
 
-Important:
-- This MCP server does not replace the existing backend.
-- lifestore_create_order creates a local draft order only.
-- It does not place a real LifeStore order.
+Security:
+- MCP is private inside the Docker network.
+- MCP Streamable HTTP access is protected with Bearer-token authentication.
+- Admin/demo/write tools are not exposed in the public LifeStore MCP server.
 """
 
 
@@ -2908,12 +2693,11 @@ Use MCP tools when needed:
 - Always call lifestore_hybrid_product_search first for normal user product queries and final answer generation.
 - lifestore_hybrid_product_search combines Neo4j graph facts, Qdrant semantic retrieval, and product image resolution.
 - lifestore_search_products is only a fallback/simple catalogue search tool.
-- lifestore_get_product is only for direct product detail lookup.
 - lifestore_list_categories is only for category browsing.
-- lifestore_check_item_availability is only for direct in_stock / out_stock checks.
-- lifestore_create_order is only for local draft order creation.
-- get_ingestion_status is for KB ingestion status.
-- refresh_lifestore_kb is only when refresh is intentionally enabled.
+- lifestore_strict_category_products is only for exact category or offer-based browsing.
+- lifestore_precise_product_lookup is only for one specific named product.
+- lifestore_availability_lookup is only for direct stock or availability questions.
+- lifestore_compare_products is only for comparing multiple products.
 
 Answer based only on available LifeStore data.
 Do not print raw image URLs in the chat answer. Put product image URLs only inside the structured products[].image_url field so the frontend can render them as images.
@@ -2922,4 +2706,19 @@ If the data is missing, say that the current LifeStore KB does not contain enoug
 
 
 if __name__ == "__main__":
-    mcp.run(transport=os.getenv("MCP_TRANSPORT", "streamable-http"))
+    transport = os.getenv("MCP_TRANSPORT", "streamable-http").strip().lower()
+    host = os.getenv("MCP_HOST", "0.0.0.0").strip()
+    port = int(os.getenv("MCP_PORT", "8001"))
+
+    if transport in {"streamable-http", "streamable_http", "http"}:
+        app = mcp.streamable_http_app()
+        app.add_middleware(MCPBearerAuthMiddleware)
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level=os.getenv("MCP_LOG_LEVEL", "info").lower(),
+        )
+    else:
+        mcp.run(transport=transport)
+

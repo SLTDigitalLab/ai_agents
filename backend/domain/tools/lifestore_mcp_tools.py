@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 try:
-    from langchain_mcp_adapters.client import MultiServerMCPClient # type: ignore
+    from langchain_mcp_adapters.client import MultiServerMCPClient  # type: ignore
 except Exception:  # pragma: no cover
     MultiServerMCPClient = None
 
@@ -35,6 +35,29 @@ _MCP_TOOLS_CACHE: dict[str, Any] | None = None
 # ---------------------------------------------------------------------
 # MCP client setup
 # ---------------------------------------------------------------------
+def _mcp_auth_headers() -> dict[str, str]:
+    """
+    Build optional authentication headers for backend -> MCP communication.
+
+    In staging/production, set:
+        LIFESTORE_MCP_TOKEN=<strong-random-token>
+
+    The backend will send:
+        Authorization: Bearer <token>
+
+    If the token is not configured, no auth header is sent. This keeps local
+    development flexible, while allowing secured staging/production deployments.
+    """
+    token = os.getenv("LIFESTORE_MCP_TOKEN", "").strip()
+
+    if not token:
+        return {}
+
+    return {
+        "Authorization": f"Bearer {token}",
+    }
+
+
 def _get_mcp_client() -> Any:
     """
     Create the real MCP client used by the LangGraph tool wrappers.
@@ -42,6 +65,10 @@ def _get_mcp_client() -> Any:
     Supports two production modes:
     1. stdio: backend launches the MCP server through lifestore_mcp_launcher.py
     2. streamable_http: backend connects to a persistent MCP server URL
+
+    Security:
+    - For streamable_http mode, if LIFESTORE_MCP_TOKEN is set, the backend sends
+      it as a Bearer token to the MCP server.
     """
     global _MCP_CLIENT
 
@@ -58,12 +85,19 @@ def _get_mcp_client() -> Any:
 
     if transport in {"streamable_http", "streamable-http", "http"}:
         mcp_url = os.getenv("LIFESTORE_MCP_URL", "http://127.0.0.1:8001/mcp").strip()
+
+        server_config: dict[str, Any] = {
+            "transport": "streamable_http",
+            "url": mcp_url,
+        }
+
+        auth_headers = _mcp_auth_headers()
+        if auth_headers:
+            server_config["headers"] = auth_headers
+
         _MCP_CLIENT = MultiServerMCPClient(
             {
-                "lifestore": {
-                    "transport": "streamable_http",
-                    "url": mcp_url,
-                }
+                "lifestore": server_config,
             }
         )
         return _MCP_CLIENT
@@ -84,6 +118,7 @@ def _get_mcp_client() -> Any:
     )
 
     return _MCP_CLIENT
+
 
 async def _get_mcp_tool_map() -> dict[str, Any]:
     """
@@ -284,7 +319,6 @@ def _compact_product(product: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-
 BAD_PRODUCT_CARD_IMAGE_MARKERS = {
     "970_90",
     "inline-images/970_90",
@@ -355,6 +389,7 @@ def _build_product_cards(products: list[dict[str, Any]], limit: int) -> list[dic
         if len(cards) >= max(int(limit), 1):
             break
     return cards
+
 
 def _extract_products(result: dict[str, Any], limit: int = 5) -> list[dict[str, Any]]:
     """
