@@ -50,34 +50,6 @@ services:
       - ./backend/routers/service-account.json:/service-account.json:ro
     restart: always
 
-  mcp_lifestore:
-    build:
-      context: .
-      dockerfile: mcp_lifestore/Dockerfile
-    container_name: slt_mcp_lifestore
-    working_dir: /app
-    env_file:
-      - ./.env
-    environment:
-      MCP_TRANSPORT: streamable-http
-      MCP_HOST: 0.0.0.0
-      MCP_PORT: 8001
-      PYTHONPATH: /app/backend:/app
-      QDRANT_URL: http://db_qdrant:6333
-      ADMIN_BASE_URL: http://backend:8000
-    expose:
-      - "8001"
-    depends_on:
-      db_qdrant:
-        condition: service_started
-      db_postgres:
-        condition: service_healthy
-      backend:
-        condition: service_started
-    volumes:
-      - ./backend/data/real:/app/backend/data/real:ro
-    restart: always
-
   frontend:
     build:
       context: ./frontend
