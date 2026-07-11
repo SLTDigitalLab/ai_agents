@@ -1,11 +1,11 @@
-version: '3.8'
+version: "3.8"
 
 services:
   db_postgres:
     image: ankane/pgvector:latest
     container_name: slt_postgres
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U slt -d slt_db" ]
+      test: ["CMD-SHELL", "pg_isready -U slt -d slt_db"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -33,7 +33,7 @@ services:
       context: ./backend
     container_name: slt_backend
     ports:
-      - "8000:8000"
+      - "8100:8000"
     depends_on:
       db_postgres:
         condition: service_healthy
@@ -55,7 +55,7 @@ services:
       context: ./frontend
     container_name: slt_frontend
     ports:
-      - "3000:3000"
+      - "3100:3000"
     depends_on:
       - backend
     env_file:
@@ -64,3 +64,26 @@ services:
       - ./frontend:/app
       - /app/node_modules
     restart: always
+
+  mcp_lifestore:
+    build:
+      context: .
+      dockerfile: mcp_lifestore/Dockerfile
+    container_name: slt_mcp_lifestore
+    working_dir: /app
+    env_file:
+      - .env
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8001
+      PYTHONPATH: /app/backend:/app
+      QDRANT_URL: http://db_qdrant:6333
+      ADMIN_BASE_URL: http://backend:8000
+    expose:
+      - "8001"
+    depends_on:
+      - db_qdrant
+      - db_postgres
+    volumes:
+      - ./backend/data/real:/app/backend/data/real:ro
