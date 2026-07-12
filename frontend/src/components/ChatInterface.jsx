@@ -1194,6 +1194,14 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     >
                         {agentConfig.idlePrompt || "How can I help you today?"}
                     </motion.p>
+                    <motion.p
+                        initial={{ opacity: 0, y: 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.45, delay: 0.16 }}
+                        className="mt-3 text-sm sm:text-base text-slate-500 dark:text-slate-400 text-center max-w-3xl mx-auto leading-relaxed"
+                    >
+                        You can ask questions in Sinhala, English, or Tamil.
+                    </motion.p>
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -1407,7 +1415,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                 {renderComposer()}
 
                                 {shouldShowFeedbackLink && (
-                                    <div className="hidden sm:flex absolute left-[calc(100%+8rem)] top-1/2 -translate-y-1/2 items-center">
+                                    <div className="flex absolute right-0 -top-14 xl:right-auto xl:left-[calc(100%+8rem)] xl:top-1/2 xl:-translate-y-1/2 items-center z-30">
                                         <motion.button
                                             type="button"
                                             onClick={() => navigate('/contact-us')}
