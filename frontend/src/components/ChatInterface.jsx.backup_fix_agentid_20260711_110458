@@ -269,11 +269,8 @@ const hasRenderableProductImage = (product) => {
 
 const prepareProductCardsForDisplay = (cards, maxItems = PRODUCT_CARD_MAX_ITEMS) => {
     const values = Array.isArray(cards) ? cards : [];
-
-    // Keep the product card even when the image is missing or filtered.
-    // ProductImage already hides invalid images, but the rest of the card
-    // still contains useful price, seller, category, stock status, and details.
     return dedupeProductCards(values)
+        .filter(hasRenderableProductImage)
         .slice(0, maxItems);
 };
 
@@ -1499,7 +1496,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         abortControllerRef.current = controller;
         let botMessageAdded = false;
 
-        const chatEndpoint = getChatEndpoint(agentConfig.id);
+        const chatEndpoint = getChatEndpoint(agentId);
 
         try {
             const response = await fetch(chatEndpoint, {

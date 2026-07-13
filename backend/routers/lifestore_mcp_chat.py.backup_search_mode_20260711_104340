@@ -346,87 +346,6 @@ def _fallback_answer(message: str, plan: dict[str, Any], products: list[dict[str
     return "\n".join(lines)
 
 
-
-def _markdown_cell(value: Any) -> str:
-    text = _safe_text(value) or "-"
-    return text.replace("|", "\\|").replace("\n", " ").strip()
-
-
-def _best_for_product(product: dict[str, Any]) -> str:
-    details = product.get("key_details") or []
-
-    if isinstance(details, list):
-        for detail in details:
-            text = _safe_text(detail)
-            if text:
-                return text[:110]
-
-    description = _safe_text(product.get("description"))
-    if description:
-        return description[:110]
-
-    product_type = _safe_text(product.get("product_type"))
-    category = _safe_text(product.get("category"))
-
-    if product_type and category:
-        return f"{product_type} use under {category}"
-
-    return category or product_type or "General LifeStore product"
-
-
-def _write_category_markdown_answer(
-    message: str,
-    plan: dict[str, Any],
-    products: list[dict[str, Any]],
-) -> str:
-    query = _safe_text(plan.get("product_query")) or message
-    count = len(products)
-
-    lines = [
-        f"Here are the **{query}** products currently found in LifeStore.",
-        "",
-        "**Overview**",
-        f"- Category/search: **{query}**",
-        f"- Products found: **{count}**",
-        "",
-        "**Products**",
-        "",
-        "| Product | Seller | Price | Stock status | Best for |",
-        "|---|---|---:|---|---|",
-    ]
-
-    for product in products[:8]:
-        lines.append(
-            "| "
-            + " | ".join(
-                [
-                    _markdown_cell(product.get("name")),
-                    _markdown_cell(product.get("seller")),
-                    _markdown_cell(product.get("price")),
-                    _markdown_cell(_format_stock_status(product)),
-                    _markdown_cell(_best_for_product(product)),
-                ]
-            )
-            + " |"
-        )
-
-    in_stock = [
-        product for product in products
-        if "in_stock" in _format_stock_status(product).lower()
-        or "in stock" in _format_stock_status(product).lower()
-    ]
-
-    lines.extend(
-        [
-            "",
-            "**Important notes**",
-            f"- **{len(in_stock)}** of these products are currently marked as in stock.",
-            "- Use the product slideshow below to review the matched items with product details.",
-        ]
-    )
-
-    return "\n".join(lines)
-
 def _write_lifestore_answer(
     message: str,
     plan: dict[str, Any],
@@ -441,11 +360,6 @@ def _write_lifestore_answer(
 
     compact_products = [_compact_product_for_llm(product) for product in products]
     mode = _safe_text(plan.get("answer_mode")) or "single_product"
-
-    # Product-list/category answers should be deterministic and table-first.
-    # This avoids raw paragraph formatting from the LLM and keeps the UI clean.
-    if mode in {"category_browse", "general"} and len(products) > 1:
-        return _write_category_markdown_answer(message, plan, products)
 
     try:
         response = llm.invoke(
@@ -615,14 +529,6 @@ def _retrieve_products(module: Any, message: str, plan: dict[str, Any]) -> tuple
     product_query = _safe_text(plan.get("product_query")) or message
     desired_limit = _bounded_int(plan.get("desired_product_count"), 1, 1, 8)
 
-    # Planner answer modes are not always valid MCP search_mode values.
-    # For category/general browsing, let the MCP tool auto-detect the best retrieval path.
-    retrieval_search_mode = (
-        mode
-        if mode in {"single_product", "availability", "comparison", "general", "auto"}
-        else "auto"
-    )
-
     if mode in {"single_product", "purchase"}:
         try:
             result = _call_mcp_tool(
@@ -692,7 +598,7 @@ def _retrieve_products(module: Any, message: str, plan: dict[str, Any]) -> tuple
         module,
         "lifestore_hybrid_product_search",
         query=product_query or message,
-        search_mode=retrieval_search_mode,
+        search_mode=mode or "general",
         limit=desired_limit,
         include_vector_evidence=True,
     )

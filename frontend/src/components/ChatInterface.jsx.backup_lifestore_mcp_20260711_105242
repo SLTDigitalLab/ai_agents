@@ -13,10 +13,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 // All agents now use the normal LangGraph chat route.
 // LifeStore MCP tools are selected inside the backend LangGraph agent,
 // not forced from the frontend.
-const getChatEndpoint = (agentId) =>
-  agentId === "lifestore"
-    ? `${API_URL}/api/v1/lifestore/mcp-chat`
-    : `${API_URL}/api/v1/chat`;
+const getChatEndpoint = () => `${API_URL}/api/v1/chat`;
 
 const HISTORY_TIMEOUT_MS = 8000;
 
@@ -269,11 +266,8 @@ const hasRenderableProductImage = (product) => {
 
 const prepareProductCardsForDisplay = (cards, maxItems = PRODUCT_CARD_MAX_ITEMS) => {
     const values = Array.isArray(cards) ? cards : [];
-
-    // Keep the product card even when the image is missing or filtered.
-    // ProductImage already hides invalid images, but the rest of the card
-    // still contains useful price, seller, category, stock status, and details.
     return dedupeProductCards(values)
+        .filter(hasRenderableProductImage)
         .slice(0, maxItems);
 };
 
@@ -1499,7 +1493,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         abortControllerRef.current = controller;
         let botMessageAdded = false;
 
-        const chatEndpoint = getChatEndpoint(agentConfig.id);
+        const chatEndpoint = getChatEndpoint();
 
         try {
             const response = await fetch(chatEndpoint, {

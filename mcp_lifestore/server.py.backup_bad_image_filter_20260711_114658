@@ -1369,11 +1369,7 @@ BAD_IMAGE_MARKERS = {
     "no-image",
     "no_image",
     "noimage",
-    "icon",    "970_90",
-    "inline-images/970_90",
-    "eteleshop",
-    "teleshop",
-
+    "icon",
 }
 
 
