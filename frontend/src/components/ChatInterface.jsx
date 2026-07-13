@@ -27,6 +27,617 @@ const EVIDENCE_CLOSE = '[[/EVIDENCE_JSON]]';
 // queries are not corrupted. Mirrors PII_MASK_EXEMPT_AGENTS in the backend.
 const PII_MASK_EXEMPT_AGENTS = ['lifestore', 'enterprise'];
 
+// ── Ask LifeStore product cards ─────────────────────────────────────────
+// The LifeStore MCP endpoint returns a structured `products` array. These
+// helpers normalize that payload and the components render it as an image
+// card / slideshow below the assistant's answer text.
+const PRODUCT_CARDS_START = '[LIFESTORE_PRODUCT_CARDS]';
+const PRODUCT_CARDS_END = '[/LIFESTORE_PRODUCT_CARDS]';
+const PRODUCT_CARD_MAX_ITEMS = 24;
+
+const isBadLifeStoreImageUrl = (url) => {
+    const value = String(url || '').toLowerCase();
+
+    if (!value) return true;
+
+    const badHints = [
+        '970_90',
+        'inline-images/970_90',
+        'eteleshop',
+        'teleshop',
+        '/themes/shop/images/',
+        'union-pay',
+        'visa',
+        'master',
+        'american',
+        'payment',
+        'logo',
+        'sltmobitel',
+        'chat',
+        'footer',
+        'header',
+        'banner',
+        'sprite',
+        'loader',
+        'ajax-loader',
+        'placeholder',
+        'default-image',
+        'no-image',
+    ];
+
+    if (badHints.some((hint) => value.includes(hint))) return true;
+    if (value.startsWith('data:')) return true;
+    if (value.endsWith('.svg')) return true;
+
+    return false;
+};
+
+const isLikelyImageUrl = (url) => {
+    const value = String(url || '').toLowerCase();
+
+    if (!value.startsWith('http://') && !value.startsWith('https://')) return false;
+    if (isBadLifeStoreImageUrl(value)) return false;
+
+    return (
+        value.includes('/sites/default/files/') ||
+        value.match(/\.(jpg|jpeg|png|webp|gif)(\?|$)/)
+    );
+};
+
+const cleanProductText = (value) => {
+    if (value === null || value === undefined) return '';
+    return String(value).replace(/\s+/g, ' ').trim();
+};
+
+const normalizeProductCard = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const name = cleanProductText(
+        raw.name ||
+        raw.title ||
+        raw.product_name ||
+        raw.productName ||
+        raw.product ||
+        raw.item_name
+    );
+
+    const url = cleanProductText(
+        raw.url ||
+        raw.product_url ||
+        raw.productUrl ||
+        raw.link ||
+        raw.source_url
+    );
+
+    const imageUrl = cleanProductText(
+        raw.image_url ||
+        raw.imageUrl ||
+        raw.image ||
+        raw.thumbnail ||
+        raw.thumbnail_url ||
+        raw.photo
+    );
+
+    if (!name && !url && !imageUrl) return null;
+
+    return {
+        id: cleanProductText(raw.product_id || raw.id || raw.sku || url || name),
+        name: name || 'LifeStore product',
+        url,
+        image_url: isLikelyImageUrl(imageUrl) ? imageUrl : '',
+        price: cleanProductText(raw.price || raw.unit_price || raw.price_text),
+        price_value: raw.price_value ?? raw.unit_price_value ?? null,
+        currency: cleanProductText(raw.currency || 'LKR'),
+        stock_status: cleanProductText(raw.stock_status || raw.availability || raw.status),
+        category: cleanProductText(raw.category || raw.category_name),
+        product_type: cleanProductText(raw.product_type || raw.productType || raw.type),
+        brand: cleanProductText(raw.brand),
+        seller: cleanProductText(raw.seller || raw.sold_by),
+        description: cleanProductText(raw.short_description || raw.summary || raw.description),
+        key_details: Array.isArray(raw.key_details)
+            ? raw.key_details.map(cleanProductText).filter(Boolean).slice(0, 6)
+            : [],
+    };
+};
+
+const collectProductObjects = (value, output = [], depth = 0) => {
+    if (!value || depth > 5) return output;
+
+    if (Array.isArray(value)) {
+        value.forEach((item) => collectProductObjects(item, output, depth + 1));
+        return output;
+    }
+
+    if (typeof value !== 'object') return output;
+
+    const hasProductShape =
+        value.image_url ||
+        value.imageUrl ||
+        value.product_url ||
+        value.productUrl ||
+        value.price ||
+        value.price_value ||
+        value.stock_status ||
+        value.availability ||
+        value.category ||
+        value.brand;
+
+    const maybeCard = normalizeProductCard(value);
+    if (hasProductShape && maybeCard) {
+        output.push(maybeCard);
+    }
+
+    const likelyContainers = [
+        'products',
+        'items',
+        'results',
+        'matches',
+        'recommendations',
+        'data',
+        'product',
+        'tool_result',
+        'tool_results',
+        'metadata',
+    ];
+
+    for (const key of likelyContainers) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+            collectProductObjects(value[key], output, depth + 1);
+        }
+    }
+
+    return output;
+};
+
+const dedupeProductCards = (cards) => {
+    const seen = new Set();
+    const deduped = [];
+
+    for (const card of cards) {
+        if (!card) continue;
+        const key = card.url || card.id || card.name;
+        if (!key || seen.has(key)) continue;
+
+        seen.add(key);
+        deduped.push(card);
+    }
+
+    return deduped;
+};
+
+const prepareProductCardsForDisplay = (cards, maxItems = PRODUCT_CARD_MAX_ITEMS) => {
+    const values = Array.isArray(cards) ? cards : [];
+
+    // Keep the product card even when the image is missing or filtered.
+    // ProductImage already hides invalid images, but the rest of the card
+    // still contains useful price, seller, category, stock status, and details.
+    return dedupeProductCards(values)
+        .slice(0, maxItems);
+};
+
+const normalizeProductDisplay = (display, productCount = 0) => {
+    const value = String(display || '').toLowerCase().trim();
+
+    if (['comparison', 'compare', 'comparison_grid', 'comparison-image-grid', 'comparison_image_grid'].includes(value)) {
+        return 'comparison';
+    }
+
+    if (['carousel', 'slideshow', 'slider', 'multi', 'multiple'].includes(value)) {
+        return 'carousel';
+    }
+
+    if (['single', 'card', 'product'].includes(value)) {
+        return 'single';
+    }
+
+    if (productCount > 1) return 'carousel';
+    if (productCount === 1) return 'single';
+    return null;
+};
+
+const mergeProductDisplay = (...displays) => {
+    const normalized = displays
+        .map((display) => normalizeProductDisplay(display))
+        .filter(Boolean);
+
+    if (normalized.includes('comparison')) return 'comparison';
+    if (normalized.includes('carousel')) return 'carousel';
+    if (normalized.includes('single')) return 'single';
+    return null;
+};
+
+const inferProductDisplayFromJsonResponse = (data, cardCount = 0) => {
+    if (!data || typeof data !== 'object') {
+        return normalizeProductDisplay(null, cardCount);
+    }
+
+    const frontendContract = data.frontend_contract || data.frontendContract || {};
+    const renderAs = String(frontendContract.render_as || data.render_as || data.renderAs || '').toLowerCase();
+    const display = data.display || data.card_display || data.productCardDisplay || frontendContract.display;
+
+    if (renderAs.includes('comparison')) {
+        return 'comparison';
+    }
+
+    return normalizeProductDisplay(display, cardCount);
+};
+
+const extractProductCardPayloadFromJsonResponse = (data) => {
+    if (!data || typeof data !== 'object') {
+        return { cards: [], display: null };
+    }
+
+    const explicitProducts = data.product_cards || data.cards || data.products;
+    let cards = [];
+
+    if (explicitProducts) {
+        const values = Array.isArray(explicitProducts) ? explicitProducts : [explicitProducts];
+        cards = prepareProductCardsForDisplay(values.map(normalizeProductCard).filter(Boolean));
+    } else {
+        cards = prepareProductCardsForDisplay(collectProductObjects(data));
+    }
+
+    return {
+        cards,
+        display: inferProductDisplayFromJsonResponse(data, cards.length),
+    };
+};
+
+const removeBadImageUrlLines = (text) => {
+    if (!text) return '';
+
+    return String(text)
+        .split('\n')
+        .filter((line) => {
+            // Preserve blank lines — they carry the Markdown block structure
+            // (paragraphs, tables, lists). Only drop lines that are actually
+            // raw image URLs / image-field dumps.
+            if (!line.trim()) return true;
+
+            const low = line.toLowerCase();
+            const hasDirectImageUrl = /https?:\/\/\S+\.(jpg|jpeg|png|webp|gif)(\?\S*)?/i.test(line);
+            const looksLikeImageField = /(^|\b)(image[_\s-]*url|image url|thumbnail[_\s-]*url)(\b|\s*:)/i.test(line);
+
+            if (looksLikeImageField) return false;
+            if (hasDirectImageUrl && low.includes('image')) return false;
+
+            return true;
+        })
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+};
+
+const extractEmbeddedProductCardsFromText = (text) => {
+    const sourceText = String(text || '');
+    let cleanText = sourceText;
+    const extractedCards = [];
+    let extractedDisplay = null;
+
+    while (true) {
+        const startIdx = cleanText.indexOf(PRODUCT_CARDS_START);
+        if (startIdx === -1) break;
+
+        const payloadStart = startIdx + PRODUCT_CARDS_START.length;
+        const endIdx = cleanText.indexOf(PRODUCT_CARDS_END, payloadStart);
+
+        // Hide an incomplete metadata block while the stream is still arriving.
+        if (endIdx === -1) {
+            cleanText = cleanText.slice(0, startIdx).trimEnd();
+            break;
+        }
+
+        const rawPayload = cleanText.slice(payloadStart, endIdx).trim();
+        const before = cleanText.slice(0, startIdx);
+        const after = cleanText.slice(endIdx + PRODUCT_CARDS_END.length);
+
+        try {
+            const parsed = JSON.parse(rawPayload);
+            const payload = extractProductCardPayloadFromJsonResponse(parsed);
+            extractedCards.push(...payload.cards);
+            extractedDisplay = mergeProductDisplay(extractedDisplay, payload.display);
+        } catch (error) {
+            console.warn('Failed to parse LifeStore product cards payload:', error);
+        }
+
+        cleanText = `${before}${after}`;
+    }
+
+    const productCards = prepareProductCardsForDisplay(extractedCards);
+
+    return {
+        text: removeBadImageUrlLines(cleanText).trim(),
+        productCards,
+        productCardDisplay: mergeProductDisplay(extractedDisplay, normalizeProductDisplay(null, productCards.length)),
+    };
+};
+
+const extractTextFromJsonResponse = (data) => {
+    if (!data) return '';
+
+    let text =
+        data.reply ||
+        data.response ||
+        data.answer ||
+        data.message ||
+        data.content ||
+        data.text ||
+        '';
+
+    if (typeof text !== 'string') {
+        text = JSON.stringify(text, null, 2);
+    }
+
+    return removeBadImageUrlLines(text);
+};
+
+// Turn the LifeStore MCP JSON response into a full bot message object.
+const buildBotMessageFromJsonResponse = (data) => {
+    const directPayload = extractProductCardPayloadFromJsonResponse(data);
+    let text = extractTextFromJsonResponse(data);
+    const embedded = extractEmbeddedProductCardsFromText(text);
+    text = embedded.text;
+
+    let formType = null;
+
+    for (const [token, type] of Object.entries(FORM_TOKENS)) {
+        if (text.includes(token)) {
+            formType = type;
+            text = text.replace(token, '').trim();
+            break;
+        }
+    }
+
+    const productCards = prepareProductCardsForDisplay([...directPayload.cards, ...embedded.productCards]);
+
+    return {
+        type: 'bot',
+        text,
+        productCards,
+        productCardDisplay: mergeProductDisplay(
+            directPayload.display,
+            embedded.productCardDisplay,
+            normalizeProductDisplay(null, productCards.length),
+        ),
+        formType,
+        formData: data.form_payload || data.formData || null,
+        timestamp: Date.now(),
+    };
+};
+
+const ProductImage = ({ src, name }) => {
+    const [failed, setFailed] = useState(false);
+
+    if (!src || failed || !isLikelyImageUrl(src)) {
+        return null;
+    }
+
+    return (
+        <img
+            src={src}
+            alt={name || "LifeStore product"}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setFailed(true)}
+            className="w-full h-full object-contain bg-white"
+        />
+    );
+};
+
+const ProductCard = ({ product, color, compact = false }) => {
+    const availability = product.stock_status || '';
+    const isInStock = availability.toLowerCase().includes('in_stock') || availability.toLowerCase().includes('in stock');
+
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="overflow-hidden rounded-3xl border border-gray-200/80 dark:border-gray-700/80 bg-white/95 dark:bg-gray-900/80 shadow-[0_18px_60px_-28px_rgba(0,0,0,0.35)]"
+        >
+            <div className={`${compact ? 'h-48' : 'h-56'} w-full bg-white dark:bg-gray-950 border-b border-gray-100 dark:border-gray-800`}>
+                <ProductImage src={product.image_url} name={product.name} />
+            </div>
+
+            <div className="p-4 sm:p-5">
+                <h3 className="text-sm sm:text-base font-semibold text-gray-900 dark:text-gray-100 leading-snug">
+                    {product.name}
+                </h3>
+
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                    {product.price && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+                            {product.price}
+                        </span>
+                    )}
+
+                    {availability && (
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${isInStock
+                                ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                                : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300'
+                            }`}>
+                            {availability.replaceAll('_', ' ')}
+                        </span>
+                    )}
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
+                    {product.brand && <p><span className="font-medium text-gray-600 dark:text-gray-300">Brand:</span> {product.brand}</p>}
+                    {product.category && <p><span className="font-medium text-gray-600 dark:text-gray-300">Category:</span> {product.category}</p>}
+                    {product.product_type && <p><span className="font-medium text-gray-600 dark:text-gray-300">Product type:</span> {product.product_type}</p>}
+                    {product.seller && <p><span className="font-medium text-gray-600 dark:text-gray-300">Seller:</span> {product.seller}</p>}
+                </div>
+
+                {Array.isArray(product.key_details) && product.key_details.length > 0 && (
+                    <ul className="mt-3 list-disc pl-4 text-xs leading-relaxed text-gray-500 dark:text-gray-400 space-y-1">
+                        {product.key_details.slice(0, 3).map((detail, detailIndex) => (
+                            <li key={detailIndex}>{detail}</li>
+                        ))}
+                    </ul>
+                )}
+
+                {product.description && (!product.key_details || product.key_details.length === 0) && (
+                    <p className="mt-3 text-xs leading-relaxed text-gray-500 dark:text-gray-400 line-clamp-3">
+                        {product.description}
+                    </p>
+                )}
+
+                {product.url && (
+                    <a
+                        href={product.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`mt-4 inline-flex items-center justify-center rounded-full bg-gradient-to-tr ${color} px-4 py-2 text-xs font-semibold text-white shadow-sm hover:opacity-95`}
+                    >
+                        View product
+                    </a>
+                )}
+            </div>
+        </motion.div>
+    );
+};
+
+const ComparisonProductCards = ({ products, color }) => {
+    const safeProducts = useMemo(() => prepareProductCardsForDisplay(products, 6), [products]);
+
+    if (safeProducts.length === 0) return null;
+
+    return (
+        <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mt-5 mb-1"
+        >
+            <div className="mb-3">
+                <p className="text-[0.7rem] uppercase tracking-[0.18em] font-bold text-gray-400 dark:text-gray-500">
+                    Visual comparison
+                </p>
+                <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                    Compared LifeStore products with images
+                </h3>
+            </div>
+
+            <div className={`grid grid-cols-1 ${safeProducts.length === 2 ? 'md:grid-cols-2' : 'md:grid-cols-2 xl:grid-cols-3'} gap-4`}>
+                {safeProducts.map((product, index) => (
+                    <div key={product.id || product.url || product.name || index} className="relative">
+                        <div className={`absolute -top-2 left-4 z-10 rounded-full bg-gradient-to-tr ${color} px-3 py-1 text-[0.65rem] font-bold uppercase tracking-wide text-white shadow-sm`}>
+                            Product {index + 1}
+                        </div>
+                        <ProductCard product={product} color={color} compact />
+                    </div>
+                ))}
+            </div>
+        </motion.section>
+    );
+};
+
+const ProductCards = ({ products, color, display = null }) => {
+    const safeProducts = useMemo(() => prepareProductCardsForDisplay(products), [products]);
+    const [activeIndex, setActiveIndex] = useState(0);
+
+    useEffect(() => {
+        setActiveIndex((prev) => {
+            if (safeProducts.length === 0) return 0;
+            return Math.min(prev, safeProducts.length - 1);
+        });
+    }, [safeProducts.length]);
+
+    if (safeProducts.length === 0) return null;
+
+    const displayMode = normalizeProductDisplay(display, safeProducts.length);
+
+    if (displayMode === 'comparison' && safeProducts.length > 1) {
+        return <ComparisonProductCards products={safeProducts} color={color} />;
+    }
+
+    const isCarousel = safeProducts.length > 1;
+    const activeProduct = safeProducts[Math.min(activeIndex, safeProducts.length - 1)];
+
+    const goPrevious = () => {
+        setActiveIndex((prev) => (prev - 1 + safeProducts.length) % safeProducts.length);
+    };
+
+    const goNext = () => {
+        setActiveIndex((prev) => (prev + 1) % safeProducts.length);
+    };
+
+    return (
+        <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mt-5 mb-1"
+        >
+            <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                    <p className="text-[0.7rem] uppercase tracking-[0.18em] font-bold text-gray-400 dark:text-gray-500">
+                        {isCarousel ? 'Product slideshow' : 'Product card'}
+                    </p>
+                    <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                        {isCarousel ? 'Matched LifeStore products with images' : 'Matched LifeStore product'}
+                    </h3>
+                </div>
+
+                {isCarousel && (
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-400 dark:text-gray-500">
+                            {activeIndex + 1} / {safeProducts.length}
+                        </span>
+                        <button
+                            type="button"
+                            onClick={goPrevious}
+                            className="h-8 w-8 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-500 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white shadow-sm"
+                            title="Previous product"
+                        >
+                            ‹
+                        </button>
+                        <button
+                            type="button"
+                            onClick={goNext}
+                            className={`h-8 w-8 rounded-full bg-gradient-to-tr ${color} text-white shadow-sm hover:opacity-95`}
+                            title="Next product"
+                        >
+                            ›
+                        </button>
+                    </div>
+                )}
+            </div>
+
+            <div className="relative overflow-hidden">
+                <AnimatePresence mode="wait" initial={false}>
+                    <motion.div
+                        key={activeProduct.id || activeProduct.url || activeProduct.name || activeIndex}
+                        initial={{ opacity: 0, x: 18 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -18 }}
+                        transition={{ duration: 0.22, ease: 'easeOut' }}
+                    >
+                        <ProductCard product={activeProduct} color={color} compact={isCarousel} />
+                    </motion.div>
+                </AnimatePresence>
+            </div>
+
+            {isCarousel && (
+                <div className="mt-1.5 flex justify-center gap-1.5 overflow-x-auto px-2 pb-1">
+                    {safeProducts.map((product, index) => (
+                        <button
+                            key={product.id || product.url || index}
+                            type="button"
+                            onClick={() => setActiveIndex(index)}
+                            aria-label={`Show product ${index + 1}`}
+                            className={`h-1.5 rounded-full transition-all ${index === activeIndex
+                                    ? 'w-6 bg-gray-800 dark:bg-gray-100'
+                                    : 'w-1.5 bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600'
+                                }`}
+                        />
+                    ))}
+                </div>
+            )}
+        </motion.section>
+    );
+};
+
 const maskPII = (text = '') => {
     return text
         // Email addresses
@@ -931,6 +1542,34 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         let botMessageAdded = false;
 
         try {
+            // Ask LifeStore uses a dedicated MCP endpoint that returns a single JSON
+            // object (answer + product list), not a token stream. Handle it separately.
+            if (agentConfig.id === 'lifestore') {
+                const mcpResponse = await fetch(`${API_URL}/api/v1/lifestore/mcp-chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: maskedText,
+                        thread_id: threadId,
+                        user_id: user.username || "anonymous",
+                        limit: 5,
+                    }),
+                    signal: controller.signal,
+                });
+
+                if (!mcpResponse.ok) {
+                    throw new Error(`HTTP error! status: ${mcpResponse.status}`);
+                }
+
+                const data = await mcpResponse.json();
+                // Parse answer text + structured product cards + form marker in one step.
+                const botMessage = buildBotMessageFromJsonResponse(data);
+
+                setMessages(prev => [...prev, { ...botMessage, evidence: [] }]);
+                botMessageAdded = true;
+                return; // finally block still runs (clears loading, refocuses input)
+            }
+
             const response = await fetch(`${API_URL}/api/v1/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1247,7 +1886,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         >
                             <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
                                 {messages.map((msg, index) => {
-                                    if (!(msg.type === 'user' || msg.text || msg.formType || (msg.evidence && msg.evidence.length > 0))) return null;
+                                    if (!(msg.type === 'user' || msg.text || msg.formType || (msg.evidence && msg.evidence.length > 0) || (msg.productCards && msg.productCards.length > 0))) return null;
                                     const isLastMsg = index === lastRenderedIdx;
                                     const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
                                     const isErrorMsg = msg.error && isLastMsg;
@@ -1286,7 +1925,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                             </div>
                                         ),
                                         th: ({ node, ...props }) => <th className="bg-gray-50 dark:bg-gray-800 px-4 py-2 font-semibold border-b border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 border-r dark:border-r-gray-700 last:border-r-0" {...props} />,
-                                        td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 border-r last:border-r-0 text-gray-600 dark:text-gray-300" {...props} />,
+                                        td: ({ node, ...props }) => <td className="px-4 py-2 border-b border-gray-100 dark:border-gray-800 border-r last:border-r-0 text-gray-800 dark:text-gray-200" {...props} />,
                                         tr: ({ node, ...props }) => <tr className="even:bg-gray-50/50 dark:even:bg-gray-800/40 hover:bg-gray-50 dark:hover:bg-gray-800/60 transition-colors" {...props} />,
                                         code: ({ node, inline, className, children, ...props }) => {
                                             if (inline) {
@@ -1332,6 +1971,14 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                         onImageClick={setPreviewImage}
                                                     />
                                                     <SourcesSection sources={sources} color={agentConfig.color} />
+
+                                                    {Array.isArray(msg.productCards) && msg.productCards.length > 0 && (
+                                                        <ProductCards
+                                                            products={msg.productCards}
+                                                            color={agentConfig.color}
+                                                            display={msg.productCardDisplay}
+                                                        />
+                                                    )}
 
                                                     {/* Standalone HITL Buttons Component */}
                                                     <Buttons

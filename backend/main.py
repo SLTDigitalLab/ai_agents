@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat
 from services.ingestion import router as ingestion_router
 from core.config import settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
@@ -77,6 +77,7 @@ app.include_router(finance.router)
 app.include_router(kb_retrieval.router)  
 app.include_router(ingestion_router)
 app.include_router(contact.router)  # Contact Us email form
+app.include_router(lifestore_mcp_chat.router)  # Ask LifeStore MCP chat (/api/v1/lifestore/*)
 
 @app.get("/")
 def read_root():
