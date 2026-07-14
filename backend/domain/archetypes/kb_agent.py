@@ -25,6 +25,32 @@ tools = [search_knowledge_base]
 llm_with_tools = llm.bind_tools(tools)
 
 
+# ── Per-agent identity overrides ─────────────────────────────────────────
+# The default identity frames every agent as an internal corporate department
+# ("You handle internal corporate {agent} queries only... decline unrelated
+# topics"). That framing is wrong for public-facing agents such as Rainbow
+# Pages (a public business/phone directory): the model has no real notion of
+# what "RAINBOWPAGES" is, so a directory lookup (e.g. a temple's phone number)
+# reads as "off-department" and the LLM intermittently declines WITHOUT calling
+# search_knowledge_base. Giving such agents a concrete identity makes directory
+# lookups unambiguously in-scope so retrieval fires every time.
+AGENT_PROFILES: dict[str, dict[str, str]] = {
+    "rainbowpages": {
+        "name": "Ask Rainbow Pages",
+        "identity": (
+            "You are Ask Rainbow Pages, SLTMobitel's public business and telephone "
+            "directory assistant. You help users find contact numbers, addresses, and "
+            "listings for businesses, organisations, temples, schools, government "
+            "offices, and other services across Sri Lanka.\n"
+            "Every request for a contact number, address, or business/place listing is "
+            "squarely in scope — it is a directory lookup, NOT an 'unrelated' or "
+            "'off-department' topic. You MUST call `search_knowledge_base` for such "
+            "requests before answering, and you must never decline without searching first."
+        ),
+    },
+}
+
+
 # ── Graph nodes ──────────────────────────────────────────────────────────
 async def call_model(state: AgentState) -> dict:
     """Invoke the LLM with a system prompt tailored to the active agent."""
@@ -44,6 +70,14 @@ CONVERSATIONAL RULES:
 - Respond naturally to greetings, thank-yous, goodbyes, and small talk. Be friendly and warm.
 - Never introduce yourself as "Ask {agent_id.upper()}", a "{agent_id} specialist", or any department-specific assistant. You are Workmate AI.
 - Never mention "different department", "different specialist agent", "another team", "Ask SLT agent", routing, or that multiple agents exist."""
+    elif AGENT_PROFILES.get(agent_id):
+        profile = AGENT_PROFILES[agent_id]
+        identity_block = f"""{profile['identity']}
+
+CONVERSATIONAL RULES:
+- You CAN respond naturally to greetings (Hi, Hello, Good morning), thank-yous, goodbyes, and basic small talk. Be friendly and warm.
+- When greeting, briefly introduce yourself, e.g. "Hello! I'm {profile['name']}. How can I help you today?"
+- Only decline when a request is clearly NOT a directory lookup (for example an internal HR, Finance, or IT policy question). In that case decline politely and suggest the appropriate Ask SLT agent."""
     else:
         identity_block = f"""You are the Ask {agent_id.upper()} AI assistant for SLTMobitel.
 Your primary purpose is to answer questions related to your specific department ({agent_id}).
