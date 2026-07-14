@@ -36,6 +36,12 @@ const AGENT_CONFIG = {
     placeholder: "Ask about speakers, agenda, partners, or event dates...",
     formToken: null,
   },
+  askrainbowpages: {
+    agentId: "rainbowpages",
+    title: "Ask Rainbow Pages",
+    placeholder: "Ask about a business listing, contact, or service category...",
+    formToken: null,
+  },
 };
 
 function createThreadId(agentId) {
@@ -656,6 +662,7 @@ function InvalidIframeRoute() {
                   <li className="iframe-chat__md-li">/asklifestore/iframe</li>
                   <li className="iframe-chat__md-li">/askenterprise/iframe</li>
                   <li className="iframe-chat__md-li">/aiexpo/iframe</li>
+                  <li className="iframe-chat__md-li">/askrainbowpages/iframe</li>
                 </ul>
               </div>
             </div>
