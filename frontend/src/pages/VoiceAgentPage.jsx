@@ -13,6 +13,16 @@
  * Utilities:
  *   constants.js    — PHASE, API_URL, WS_URL, SYSTEM_PROMPT
  *   audioHelpers.js — float32ToPcm16Base64, pcm16Base64ToFloat32
+ *
+ * Mic capture uses an AudioWorkletNode (not the deprecated ScriptProcessorNode).
+ * ScriptProcessorNode runs on the main JS thread, so when the thread is briefly
+ * blocked (rendering, GC, playback scheduling) several callbacks queue up and
+ * then fire back-to-back — sending Gemini a burst of audio instead of a steady
+ * real-time stream, which triggers its 1011 "sending data too fast" error.
+ * AudioWorkletNode runs on the dedicated audio rendering thread and is immune
+ * to that. The mic is also muted while the assistant is speaking, both to cut
+ * load during the exact window where bursts previously happened and to avoid
+ * the agent picking up its own voice as input.
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
@@ -33,6 +43,34 @@ import TranscriptPanel from '../components/voice_agent/TranscriptPanel';
 import CallControls   from '../components/voice_agent/CallControls';
 import UserMenu       from '../components/voice_agent/UserMenu';
 
+//  AudioWorklet source — inlined via Blob URL, no separate file needed 
+// Runs on the dedicated audio thread. Batches raw Float32 frames and posts
+// them back to the main thread; muting is controlled via postMessage so it
+// takes effect immediately without tearing down the audio graph.
+const MIC_WORKLET_CODE = `
+class MicProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.muted = false;
+    this.port.onmessage = (e) => {
+      if (e.data && e.data.type === 'mute') this.muted = e.data.value;
+    };
+  }
+  process(inputs) {
+    const input = inputs[0];
+    if (input && input[0] && !this.muted) {
+      // copy — the underlying buffer gets reused by the audio thread otherwise
+      this.port.postMessage(input[0].slice());
+    }
+    return true;
+  }
+}
+registerProcessor('mic-processor', MicProcessor);
+`;
+
+// Samples per outgoing chunk — ~256ms @ 16kHz, matches the cadence Gemini expects
+const MIC_CHUNK_SAMPLES = 4096;
+
 //  Main component 
 const VoiceAgentPage = () => {
     const { accounts, instance } = useMsal();
@@ -52,14 +90,15 @@ const VoiceAgentPage = () => {
     const [provider,      setProvider]      = useState(null);
     const [showUserMenu,  setShowUserMenu]  = useState(false);
     const [showTranscript,setShowTranscript]= useState(false);
+    const [micMuted,      setMicMuted]      = useState(false); // UI indicator only
 
-    // ── Refs ─
+    //  Refs ─
     const pcRef              = useRef(null);
-    const dcRef              = useRef(null);
+    const dcRef               = useRef(null);
     const openaiAudioRef     = useRef(null);
     const geminiWsRef        = useRef(null);
     const audioContextRef    = useRef(null);
-    const scriptProcessorRef = useRef(null);
+    const micWorkletRef      = useRef(null);
     const micStreamRef       = useRef(null);
     const nextPlayTimeRef    = useRef(0);
     const sessionTokenRef    = useRef(null);
@@ -90,6 +129,16 @@ const VoiceAgentPage = () => {
         return () => { root.classList.remove('dark'); };
     }, [theme]);
 
+    //  Mute mic while the assistant is speaking — for both providers.
+    //  This trims load during the exact window that previously caused
+    //  audio bursts, and stops the agent from hearing its own TTS.
+    useEffect(() => {
+        if (micWorkletRef.current) {
+            micWorkletRef.current.port.postMessage({ type: 'mute', value: isSpeaking });
+        }
+        setMicMuted(isSpeaking && phase === PHASE.CONNECTED);
+    }, [isSpeaking, phase]);
+
     //  Cleanup helpers 
     const cleanupOpenAI = useCallback(() => {
         if (dcRef.current)          { dcRef.current.close();          dcRef.current = null; }
@@ -98,11 +147,12 @@ const VoiceAgentPage = () => {
     }, []);
 
     const cleanupGemini = useCallback(() => {
-        if (scriptProcessorRef.current) { scriptProcessorRef.current.disconnect(); scriptProcessorRef.current = null; }
+        if (micWorkletRef.current)      { micWorkletRef.current.disconnect(); micWorkletRef.current = null; }
         if (micStreamRef.current)       { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
         if (geminiWsRef.current)        { geminiWsRef.current.close();  geminiWsRef.current = null; }
         if (audioContextRef.current)    { audioContextRef.current.close(); audioContextRef.current = null; }
         nextPlayTimeRef.current = 0;
+        setMicMuted(false);
     }, []);
 
     const cleanupAll = useCallback(() => { cleanupOpenAI(); cleanupGemini(); }, [cleanupOpenAI, cleanupGemini]);
@@ -121,28 +171,23 @@ const VoiceAgentPage = () => {
                 output_modalities: ['audio'],
                 audio: {
                     input:  { turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600 } },
-                    output: { voice: 'alloy' },
+                    output: { voice: 'ash' },
                 },
                 tool_choice: 'auto',
                 tools: [
-                    {
-                        type: 'function', name: 'search_knowledge_base',
-                        description: 'Search SLTMobitel internal knowledge base.',
-                        parameters: {
-                            type: 'object',
-                            properties: {
-                                query:    { type: 'string' },
-                                agent_id: { type: 'string', enum: ['supervisor','hr','finance','admin','it','cia','process'] },
+                        {
+                            type: 'function',
+                            name: 'ask_workmate_ai',
+                            description: 'Send the user question to the Workmate AI agent pipeline. Use for ALL questions — HR, leave balance, finance, IT, admin, or any SLTMobitel workplace topic.',
+                            parameters: {
+                                type: 'object',
+                                properties: {
+                                    question: { type: 'string', description: "The user's question exactly as spoken" }
+                                },
+                                required: ['question'],
                             },
-                            required: ['query'],
                         },
-                    },
-                    {
-                        type: 'function', name: 'get_leave_balance',
-                        description: 'Look up the authenticated employee leave balance. Call when user asks about their leave, remaining days, annual leave, casual leave, or sick leave.',
-                        parameters: { type: 'object', properties: {}, required: [] },
-                    },
-                ],
+                    ],
             },
         });
     }, [sendOpenAIEvent]);
@@ -192,54 +237,63 @@ const VoiceAgentPage = () => {
                 setStatusText('Speak to Workmate AI');
                 break;
 
-            case 'response.function_call_arguments.done':
-                if (msg.name === 'search_knowledge_base') {
-                    try {
-                        const args = JSON.parse(msg.arguments);
-                        setStatusText('Searching knowledge base...');
-                        const res  = await fetch(`${API_URL}/api/v1/realtime/rag-search`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ query: args.query, agent_id: args.agent_id || 'hr' }),
-                        });
-                        const data = res.ok ? await res.json() : { results: [] };
-                        sendOpenAIEvent({
-                            type: 'conversation.item.create',
-                            item: {
-                                type: 'function_call_output', call_id: msg.call_id,
-                                output: JSON.stringify({
-                                    results: data.results?.slice(0, 5).map(r => ({ content: r.content || '', source: r.source || '' })) || [],
-                                }),
-                            },
-                        });
-                        sendOpenAIEvent({ type: 'response.create' });
-                        setStatusText('Speak to Workmate AI');
-                    } catch {
-                        sendOpenAIEvent({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: msg.call_id, output: JSON.stringify({ results: [] }) } });
-                        sendOpenAIEvent({ type: 'response.create' });
+            case 'filler':
+                   
+                    if ('speechSynthesis' in window) {
+                        window.speechSynthesis.cancel(); // stop any previous
+                        const utter = new SpeechSynthesisUtterance(msg.text);
+                        // match voice language
+                        const langMap = { en: 'en-US', si: 'si-LK', ta: 'ta-IN' };
+                        utter.lang = langMap[msg.lang] || 'en-US';
+                        utter.rate = 1.05;
+                        utter.pitch = 1.0;
+                        // try to find a voice that matches — fallback to default
+                        const voices = window.speechSynthesis.getVoices();
+                        const match = voices.find(v => v.lang.startsWith(utter.lang.split('-')[0]));
+                        if (match) utter.voice = match;
+                        window.speechSynthesis.speak(utter);
                     }
-                } else if (msg.name === 'get_leave_balance') {
-                    try {
-                        setStatusText('Fetching leave balance...');
-                        let result = 'Session expired. Please restart the conversation.';
-                        if (sessionTokenRef.current) {
-                            const res = await fetch(`${API_URL}/api/v1/realtime/leave-balance`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ session_token: sessionTokenRef.current }),
-                            });
-                            if (res.ok) { const data = await res.json(); result = data.result || result; }
-                        }
-                        sendOpenAIEvent({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: msg.call_id, output: result } });
-                        sendOpenAIEvent({ type: 'response.create' });
-                        setStatusText('Speak to Workmate AI');
-                    } catch {
-                        sendOpenAIEvent({ type: 'conversation.item.create', item: { type: 'function_call_output', call_id: msg.call_id, output: 'Unable to fetch leave balance.' } });
-                        sendOpenAIEvent({ type: 'response.create' });
-                    }
-                }
-                break;
+                    break;
 
+            case 'response.function_call_arguments.done':
+    if (msg.name === 'ask_workmate_ai') {
+        try {
+            const args = JSON.parse(msg.arguments);
+            setStatusText('Checking knowledge base...');
+            const res = await fetch(`${API_URL}/api/v1/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: args.question,
+                    agent_id: 'supervisor',
+                    user_id: user.username || 'anonymous',
+                    user_name: user.name || '',
+                    thread_id: `voice_openai_${Date.now()}`,
+                    stream: false,
+                }),
+            });
+            const data = res.ok ? await res.json() : {};
+            const result = data.response || 'I could not find an answer to that.';
+            sendOpenAIEvent({
+                type: 'conversation.item.create',
+                item: {
+                    type: 'function_call_output',
+                    call_id: msg.call_id,
+                    output: result,
+                },
+            });
+            sendOpenAIEvent({ type: 'response.create' });
+            setStatusText('Speak to Workmate AI');
+        } catch (err) {
+            console.error('Voice agent call error:', err);
+            sendOpenAIEvent({
+                type: 'conversation.item.create',
+                item: { type: 'function_call_output', call_id: msg.call_id, output: 'Unable to get answer right now.' },
+            });
+            sendOpenAIEvent({ type: 'response.create' });
+        }
+    }
+    break;
             case 'error':
                 setErrorMessage(msg.error?.message || 'An error occurred');
                 setPhase(PHASE.ERROR);
@@ -290,14 +344,14 @@ const VoiceAgentPage = () => {
         setShowTranscript(false);
 
         try {
-            const sessionToken  = await getSessionToken();
+
             const providerRes   = await fetch(`${API_URL}/api/v1/realtime/provider`);
             const providerData  = await providerRes.json();
             const activeProvider = providerData.provider;
             setProvider(activeProvider);
 
-            if (activeProvider === 'gemini') await startGeminiSession(sessionToken);
-            else                             await startOpenAISession(sessionToken);
+            if (activeProvider === 'gemini') await startGeminiSession();
+            else                             await startOpenAISession();
         } catch (err) {
             setErrorMessage(err.message || 'Failed to start voice session');
             setPhase(PHASE.ERROR);
@@ -306,9 +360,7 @@ const VoiceAgentPage = () => {
     };
 
     //  OpenAI WebRTC 
-    const startOpenAISession = async (sessionToken) => {
-        sessionTokenRef.current = sessionToken;
-        setStatusText('Getting session token...');
+    const startOpenAISession = async () => {
 
         const tokenRes = await fetch(`${API_URL}/api/v1/realtime/token`);
         if (!tokenRes.ok) throw new Error('Failed to get OpenAI token');
@@ -348,7 +400,7 @@ const VoiceAgentPage = () => {
     };
 
     //  Gemini WebSocket 
-    const startGeminiSession = async (sessionToken) => {
+    const startGeminiSession = async () => {
         setStatusText('Requesting microphone...');
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         micStreamRef.current = stream;
@@ -367,20 +419,27 @@ const VoiceAgentPage = () => {
             setTimeout(() => reject(new Error('Timeout')), 10000);
         });
 
-        setStatusText('Setting up audio pipeline...');
+        // send user identity so backend can include it in chat API calls
+        ws.send(JSON.stringify({
+            type: 'user_identity',
+            user_id: user.username || '',    //user id
+            user_name: user.name || '',
+        }));
+
+        setStatusText('Connecting...');
 
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
                 switch (msg.type) {
                     case 'ready':
-                        if (sessionToken) ws.send(JSON.stringify({ type: 'auth', session_token: sessionToken }));
-                        setStatusText('Speak to Workmate AI');
-                        setPhase(PHASE.CONNECTED);
-                        startMicCapture(ctx, ws);
-                        break;
+                    
+
+                    setStatusText('Speak to Workmate AI'); setPhase(PHASE.CONNECTED); startMicCapture(ctx, ws); break;
                     case 'audio':
-                        playGeminiAudioChunk(msg.data); break;
+                        window.speechSynthesis.cancel();
+                        playGeminiAudioChunk(msg.data);
+                        break;
                     case 'transcript':
                         if (msg.role === 'user') {
                             setIsListening(false);
@@ -429,16 +488,48 @@ const VoiceAgentPage = () => {
         ws.onerror = () => { setErrorMessage('Connection to voice backend failed'); setPhase(PHASE.ERROR); };
     };
 
-    const startMicCapture = (ctx, ws) => {
-        const source    = ctx.createMediaStreamSource(micStreamRef.current);
-        const processor = ctx.createScriptProcessor(4096, 1, 1);
-        scriptProcessorRef.current = processor;
-        processor.onaudioprocess = (e) => {
-            if (ws.readyState !== WebSocket.OPEN) return;
-            ws.send(JSON.stringify({ type: 'audio', data: float32ToPcm16Base64(e.inputBuffer.getChannelData(0)) }));
-        };
-        source.connect(processor);
-        processor.connect(ctx.destination);
+    //  Mic capture — AudioWorkletNode, not ScriptProcessorNode.
+    //  Runs on the dedicated audio thread so main-thread jank (rendering,
+    //  GC, playback scheduling) can't cause chunks to queue up and burst
+    //  out together — which is what previously triggered Gemini's
+    //  1011 "client sending data too fast" error. Chunks are batched to
+    //  ~256ms (MIC_CHUNK_SAMPLES) before being sent, matching Gemini's
+    //  expected real-time cadence. 
+    const startMicCapture = async (ctx, ws) => {
+        try {
+            const blob = new Blob([MIC_WORKLET_CODE], { type: 'application/javascript' });
+            const workletUrl = URL.createObjectURL(blob);
+            await ctx.audioWorklet.addModule(workletUrl);
+            URL.revokeObjectURL(workletUrl);
+
+            const source = ctx.createMediaStreamSource(micStreamRef.current);
+            const workletNode = new AudioWorkletNode(ctx, 'mic-processor');
+            micWorkletRef.current = workletNode;
+
+            let pending = [];
+            let pendingLen = 0;
+
+            workletNode.port.onmessage = (e) => {
+                if (ws.readyState !== WebSocket.OPEN) return;
+                pending.push(e.data);
+                pendingLen += e.data.length;
+                if (pendingLen >= MIC_CHUNK_SAMPLES) {
+                    const merged = new Float32Array(pendingLen);
+                    let offset = 0;
+                    for (const c of pending) { merged.set(c, offset); offset += c.length; }
+                    pending = [];
+                    pendingLen = 0;
+                    ws.send(JSON.stringify({ type: 'audio', data: float32ToPcm16Base64(merged) }));
+                }
+            };
+
+            source.connect(workletNode);
+            // deliberately NOT connected to ctx.destination — we don't want to hear our own mic
+        } catch (err) {
+            console.error('Failed to start AudioWorklet mic capture:', err);
+            setErrorMessage('Microphone setup failed. Please refresh and try again.');
+            setPhase(PHASE.ERROR);
+        }
     };
 
     //  End call 
@@ -460,7 +551,7 @@ const VoiceAgentPage = () => {
     const isActive     = phase === PHASE.CONNECTED;
     const displayStatus = isListening ? 'Listening...' : isSpeaking ? 'Speaking...' : statusText;
 
-    // ────────
+
     return (
         <div className="h-screen flex bg-[#fafafa] dark:bg-[#111318] text-gray-900 dark:text-gray-100 overflow-hidden">
 
@@ -494,7 +585,7 @@ const VoiceAgentPage = () => {
                 />
             </div>
 
-            {/* ── Main area ── */}
+            {/*  Main area  */}
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
                 {/* Top bar */}
@@ -529,7 +620,7 @@ const VoiceAgentPage = () => {
                     <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-10 w-auto object-contain opacity-90 dark:opacity-80" />
                 </div>
 
-                {/* ── Centre stage ── */}
+                {/*  Centre stage  */}
                 <div className="flex-1 flex flex-col items-center justify-center px-6 pb-6 min-h-0 gap-0">
 
                     {/* Greeting — only on idle */}
@@ -577,6 +668,28 @@ const VoiceAgentPage = () => {
                     >
                         {displayStatus}
                     </motion.p>
+
+                    {/* Mic-muted indicator , shown only while the assistant is
+                        speaking during an active call, so users understand why
+                        the orb isn't reacting to their voice at that moment */}
+                    <AnimatePresence>
+                        {micMuted && (
+                            <motion.div
+                                initial={{ opacity: 0, y: -4 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -4 }}
+                                transition={{ duration: 0.15 }}
+                                className="mt-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/[0.08]"
+                            >
+                                <svg viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-gray-500">
+                                    <path d="M10 2a3 3 0 00-3 3v4a3 3 0 006 0V5a3 3 0 00-3-3z" />
+                                    <path d="M5.5 9a.5.5 0 00-1 0 5.5 5.5 0 004.5 5.415V16H7a.5.5 0 000 1h6a.5.5 0 000-1h-2v-1.585A5.5 5.5 0 0015.5 9a.5.5 0 00-1 0 4.5 4.5 0 01-9 0z" />
+                                    <path d="M2 2l16 16" stroke="currentColor" strokeWidth="1.4" />
+                                </svg>
+                                <span className="text-[0.65rem] text-gray-500 font-medium">Mic paused while assistant speaks</span>
+                            </motion.div>
+                        )}
+                    </AnimatePresence>
 
                     {phase === PHASE.ERROR && errorMessage && (
                         <motion.p
