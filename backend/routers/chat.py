@@ -84,6 +84,68 @@ async def chat(request: ChatRequest):
         builder_fn = get_agent_builder(request.agent_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    
+    # non-streaming path — used by voice agent so it gets a complete answer
+    if not request.stream:
+        full_text = ""
+        try:
+            builder_fn = get_agent_builder(request.agent_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+
+        async def collect() -> str:
+            collected = ""
+            guardrail = await classify_intent(request.message)
+            if guardrail.action == "BLOCK":
+                return BLOCK_MESSAGE
+
+            state = {
+                "messages": [("user", request.message)],
+                "agent_id": request.agent_id,
+                "user_id": request.user_id,
+                "form_slots": {},
+                "next_node": "",
+                "sentiment": guardrail.sentiment,
+            }
+
+            SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
+
+            async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
+                workflow = builder_fn()
+                graph = workflow.compile(checkpointer=checkpointer)
+
+                async for event in graph.astream_events(state, {"configurable": {"thread_id": request.thread_id}}, version="v2"):
+                    if event["event"] == "on_chat_model_stream":
+                        metadata = event.get("metadata") or {}
+                        node = metadata.get("langgraph_node")
+                        checkpoint_ns = metadata.get("langgraph_checkpoint_ns") or ""
+                        suppressed = (
+                            node in SUPPRESS_STREAM_NODES
+                            or any(n in checkpoint_ns for n in SUPPRESS_STREAM_NODES)
+                        )
+                        if suppressed:
+                            continue
+                        content = event["data"]["chunk"].content
+                        text = _message_content_to_text(content, strip=False)
+                        if text:
+                            collected += text
+
+                if not collected:
+                    snapshot = await graph.aget_state({"configurable": {"thread_id": request.thread_id}})
+                    if snapshot.values:
+                        for msg in reversed(snapshot.values.get("messages", [])):
+                            if msg.type == "ai":
+                                t = _message_content_to_text(msg.content)
+                                if t:
+                                    collected = t
+                                    break
+
+            return collected
+
+        full_text = await collect()
+        return {"response": full_text}
+
+    
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:

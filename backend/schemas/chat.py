@@ -12,3 +12,4 @@ class ChatRequest(BaseModel):
     agent_id: str
     user_id: str
     thread_id: Optional[str] = "default_thread"
+    stream: bool = True

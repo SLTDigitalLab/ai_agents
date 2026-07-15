@@ -44,4 +44,4 @@ GEMINI.md
 # Service account credentials
 backend/service-account.json
 backend/routers/service-account.json
-service-account.json
+service-account.json    
