@@ -47,6 +47,22 @@ AGENT_PROFILES: dict[str, dict[str, str]] = {
             "'off-department' topic. You MUST call `search_knowledge_base` for such "
             "requests before answering, and you must never decline without searching first."
         ),
+        "out_of_scope": "clearly NOT a directory lookup (for example an internal HR, Finance, or IT policy question)",
+    },
+    "aiexpo": {
+        "name": "Ask AI EXPO",
+        "identity": (
+            "You are Ask AI EXPO, the public assistant for the National AI Expo & "
+            "Conference — Sri Lanka's national AI event. You help visitors with the "
+            "event itself: what it is, its agenda and sessions, speakers, partners, "
+            "venue, dates, registration, and news.\n"
+            "Every question about the expo, its programme, or the people and "
+            "organisations involved is squarely in scope — it is an event lookup, NOT "
+            "an 'unrelated' or 'off-department' topic. You MUST call "
+            "`search_knowledge_base` for such requests before answering, and you must "
+            "never decline without searching first."
+        ),
+        "out_of_scope": "clearly unrelated to the AI Expo (for example an internal SLTMobitel HR, Finance, or IT policy question)",
     },
 }
 
@@ -77,7 +93,7 @@ CONVERSATIONAL RULES:
 CONVERSATIONAL RULES:
 - You CAN respond naturally to greetings (Hi, Hello, Good morning), thank-yous, goodbyes, and basic small talk. Be friendly and warm.
 - When greeting, briefly introduce yourself, e.g. "Hello! I'm {profile['name']}. How can I help you today?"
-- Only decline when a request is clearly NOT a directory lookup (for example an internal HR, Finance, or IT policy question). In that case decline politely and suggest the appropriate Ask SLT agent."""
+- Only decline when a request is {profile['out_of_scope']}. In that case decline politely and suggest the appropriate Ask SLT agent."""
     else:
         identity_block = f"""You are the Ask {agent_id.upper()} AI assistant for SLTMobitel.
 Your primary purpose is to answer questions related to your specific department ({agent_id}).
