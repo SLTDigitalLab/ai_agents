@@ -12,6 +12,7 @@ import FeedbackPanel from './components/admin/FeedbackPanel';
 import AdminRoute from './components/admin/AdminRoute';
 import IframeChatPage from './components/admin/IframeChatPage';
 import VoiceAgentPage from './pages/VoiceAgentPage';
+import LifestoreVoiceAgentPage from './pages/LifestoreVoiceAgentPage';
 import { motion, AnimatePresence } from 'framer-motion';
 import sltLogo from './assets/slt-mobitel-logo.png';
 import embryoLogo from './assets/embryo-removebg.png';
@@ -348,6 +349,49 @@ const AgentWrapper = () => {
     getAgentRGB(agentConfig.color),
     effectiveTheme
   );
+  const isLifestoreAgent = agentConfig.id === "lifestore";
+  const voiceAgentPath = isLifestoreAgent ? "/asklifestore/voice" : "/voice";
+  const voiceAgentButton = (
+    <>
+      {/* Voice Agent — full pill on desktop */}
+      <motion.button
+        type="button"
+        onClick={() => { window.location.href = voiceAgentPath; }}
+        whileHover={{ scale: 1.04 }}
+        whileTap={{ scale: 0.97 }}
+        title="Voice Agent"
+        className={`hidden sm:flex items-center gap-2 mr-4 bg-gradient-to-r ${agentConfig.color} text-white px-4 py-2 rounded-full text-sm font-semibold shadow-md hover:shadow-lg transition-shadow`}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+          <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
+          <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
+        </svg>
+        Voice Agent
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+          <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+        </svg>
+      </motion.button>
+
+      {/* Voice Agent — compact mic + arrow button on mobile */}
+      <motion.button
+        type="button"
+        onClick={() => { window.location.href = voiceAgentPath; }}
+        whileHover={{ scale: 1.04 }}
+        whileTap={{ scale: 0.95 }}
+        title="Voice Agent"
+        aria-label="Voice Agent"
+        className={`sm:hidden flex items-center gap-1 bg-gradient-to-r ${agentConfig.color} text-white pl-2.5 pr-2 py-1.5 rounded-full shadow-md`}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
+          <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
+          <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
+        </svg>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+          <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
+        </svg>
+      </motion.button>
+    </>
+  );
 
   return (
     <div
@@ -415,45 +459,11 @@ const AgentWrapper = () => {
 
           {/* Right cluster: Voice Agent (pill on desktop, mic button on mobile) + SLT logo */}
           <div className="flex items-center gap-2 sm:gap-0 shrink-0">
-            {!isPublicAgent && (
+            {isLifestoreAgent ? (
+              voiceAgentButton
+            ) : !isPublicAgent && (
               <AuthenticatedTemplate>
-                {/* Voice Agent — full pill on desktop */}
-                <motion.button
-                  type="button"
-                  onClick={() => { window.location.href = '/voice'; }}
-                  whileHover={{ scale: 1.04 }}
-                  whileTap={{ scale: 0.97 }}
-                  title="Voice Agent"
-                  className={`hidden sm:flex items-center gap-2 mr-4 bg-gradient-to-r ${agentConfig.color} text-white px-4 py-2 rounded-full text-sm font-semibold shadow-md hover:shadow-lg transition-shadow`}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                    <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
-                    <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
-                  </svg>
-                  Voice Agent
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
-                  </svg>
-                </motion.button>
-
-                {/* Voice Agent — compact mic + arrow button on mobile */}
-                <motion.button
-                  type="button"
-                  onClick={() => { window.location.href = '/voice'; }}
-                  whileHover={{ scale: 1.04 }}
-                  whileTap={{ scale: 0.95 }}
-                  title="Voice Agent"
-                  aria-label="Voice Agent"
-                  className={`sm:hidden flex items-center gap-1 bg-gradient-to-r ${agentConfig.color} text-white pl-2.5 pr-2 py-1.5 rounded-full shadow-md`}
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-                    <path d="M8.25 4.5a3.75 3.75 0 117.5 0v8.25a3.75 3.75 0 11-7.5 0V4.5z" />
-                    <path d="M6 10.5a.75.75 0 01.75.75v1.5a5.25 5.25 0 1010.5 0v-1.5a.75.75 0 011.5 0v1.5a6.751 6.751 0 01-6 6.709v2.291h3a.75.75 0 010 1.5h-7.5a.75.75 0 010-1.5h3v-2.291a6.751 6.751 0 01-6-6.709v-1.5A.75.75 0 016 10.5z" />
-                  </svg>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                    <path fillRule="evenodd" d="M3 10a.75.75 0 01.75-.75h10.638L10.23 5.29a.75.75 0 111.04-1.08l5.5 5.25a.75.75 0 010 1.08l-5.5 5.25a.75.75 0 11-1.04-1.08l4.158-3.96H3.75A.75.75 0 013 10z" clipRule="evenodd" />
-                  </svg>
-                </motion.button>
+                {voiceAgentButton}
               </AuthenticatedTemplate>
             )}
 
@@ -696,6 +706,7 @@ function App() {
           </Route>
 
           <Route path="/voice" element={<VoiceAgentPage />} />
+          <Route path="/asklifestore/voice" element={<LifestoreVoiceAgentPage />} />
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>
       </BrowserRouter>

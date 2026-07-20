@@ -6,8 +6,9 @@ entirely through chat. The design keeps the LLM away from anything financial:
 
 * Prices are resolved server-side from the live catalog
   (``services.lifestore_catalog``) — never from the model's text.
-* The cart is persisted in Postgres keyed by the chat ``thread_id`` (injected
-  automatically via ``RunnableConfig``; the model never sees or sets it).
+* The cart is persisted in Postgres using a server-side cart owner key. For
+  authenticated users this is derived from ``user_id`` so the cart survives
+  logout/login; anonymous sessions fall back to the chat ``thread_id``.
 * ``begin_checkout`` snapshots the cart into an order with a server-computed
   total, then returns an opaque ``order_id``. The model only echoes a
   ``[RENDER_LIFESTORE_CHECKOUT:<order_id>]`` marker; the frontend fetches the
@@ -28,12 +29,17 @@ from services import lifestore_catalog as catalog
 from services import lifestore_payments_store as store
 
 
-def _thread_id(config: RunnableConfig | None) -> str:
-    """Pull the chat thread_id LangGraph injected into the run config."""
+def _cart_owner_id(config: RunnableConfig | None) -> str:
+    """Return the stable key used to store a LifeStore cart."""
     if not config:
-        return "anonymous"
+        return "thread:anonymous"
     configurable = config.get("configurable") or {}
-    return str(configurable.get("thread_id") or "anonymous")
+    user_id = str(configurable.get("user_id") or "").strip().lower()
+    if user_id and user_id != "anonymous":
+        return f"user:{user_id}"
+
+    thread_id = str(configurable.get("thread_id") or "anonymous").strip()
+    return f"thread:{thread_id}"
 
 
 def _money(cents: int, currency: str = "LKR") -> str:
@@ -41,8 +47,8 @@ def _money(cents: int, currency: str = "LKR") -> str:
     return f"{symbol} {cents / 100:,.2f}"
 
 
-def _cart_summary(thread_id: str) -> dict[str, Any]:
-    items = store.get_cart_items(thread_id)
+def _cart_summary(cart_owner_id: str) -> dict[str, Any]:
+    items = store.get_cart_items(cart_owner_id)
     currency = items[0]["currency"] if items else "LKR"
     lines = []
     subtotal = 0
@@ -86,7 +92,7 @@ async def lifestore_add_to_cart(
     taken from the live catalog automatically — never state or guess a price.
     Returns the updated cart summary.
     """
-    thread_id = _thread_id(config)
+    cart_owner_id = _cart_owner_id(config)
     qty = max(int(quantity or 1), 1)
 
     product = await catalog.resolve_product(product_query)
@@ -111,7 +117,7 @@ async def lifestore_add_to_cart(
 
     await asyncio.to_thread(
         store.upsert_cart_item,
-        thread_id,
+        cart_owner_id,
         product_id=product_id,
         name=snapshot["name"] or product_query,
         unit_price_cents=unit_cents,
@@ -122,7 +128,7 @@ async def lifestore_add_to_cart(
         add=True,
     )
 
-    summary = await asyncio.to_thread(_cart_summary, thread_id)
+    summary = await asyncio.to_thread(_cart_summary, cart_owner_id)
     return _to_json({
         "status": "added",
         "added": {
@@ -143,8 +149,8 @@ async def lifestore_view_cart(config: RunnableConfig = None) -> str:
 
     Use this when the customer asks what's in their cart or before checkout.
     """
-    thread_id = _thread_id(config)
-    summary = await asyncio.to_thread(_cart_summary, thread_id)
+    cart_owner_id = _cart_owner_id(config)
+    summary = await asyncio.to_thread(_cart_summary, cart_owner_id)
     status = "cart_empty" if summary["item_count"] == 0 else "cart"
     return _to_json({"status": status, "cart": summary})
 
@@ -159,7 +165,7 @@ async def lifestore_update_cart_item(
     Set the exact quantity of a product already in the cart. A quantity of 0
     removes it. Use this for "make it 3", "change to 1", etc.
     """
-    thread_id = _thread_id(config)
+    cart_owner_id = _cart_owner_id(config)
     qty = int(quantity)
 
     product = await catalog.resolve_product(product_query)
@@ -173,7 +179,7 @@ async def lifestore_update_cart_item(
     product_id = snapshot["product_id"] or (snapshot["name"] or product_query).lower()
 
     if qty <= 0:
-        await asyncio.to_thread(store.remove_cart_item, thread_id, product_id)
+        await asyncio.to_thread(store.remove_cart_item, cart_owner_id, product_id)
     else:
         unit_cents = catalog.price_to_cents(product)
         if not unit_cents:
@@ -183,7 +189,7 @@ async def lifestore_update_cart_item(
             })
         await asyncio.to_thread(
             store.upsert_cart_item,
-            thread_id,
+            cart_owner_id,
             product_id=product_id,
             name=snapshot["name"] or product_query,
             unit_price_cents=unit_cents,
@@ -194,7 +200,7 @@ async def lifestore_update_cart_item(
             add=False,
         )
 
-    summary = await asyncio.to_thread(_cart_summary, thread_id)
+    summary = await asyncio.to_thread(_cart_summary, cart_owner_id)
     return _to_json({"status": "updated", "cart": summary})
 
 
@@ -204,7 +210,7 @@ async def lifestore_remove_from_cart(
     config: RunnableConfig = None,
 ) -> str:
     """Remove a product from the cart entirely by name, product ID, or URL."""
-    thread_id = _thread_id(config)
+    cart_owner_id = _cart_owner_id(config)
     product = await catalog.resolve_product(product_query)
     product_id = ""
     if product:
@@ -213,17 +219,17 @@ async def lifestore_remove_from_cart(
     else:
         product_id = product_query.lower()
 
-    await asyncio.to_thread(store.remove_cart_item, thread_id, product_id)
-    summary = await asyncio.to_thread(_cart_summary, thread_id)
+    await asyncio.to_thread(store.remove_cart_item, cart_owner_id, product_id)
+    summary = await asyncio.to_thread(_cart_summary, cart_owner_id)
     return _to_json({"status": "removed", "cart": summary})
 
 
 @tool
 async def lifestore_clear_cart(config: RunnableConfig = None) -> str:
     """Empty the customer's LifeStore cart completely."""
-    thread_id = _thread_id(config)
-    await asyncio.to_thread(store.clear_cart, thread_id)
-    return _to_json({"status": "cleared", "cart": _cart_summary(thread_id)})
+    cart_owner_id = _cart_owner_id(config)
+    await asyncio.to_thread(store.clear_cart, cart_owner_id)
+    return _to_json({"status": "cleared", "cart": _cart_summary(cart_owner_id)})
 
 
 @tool
@@ -239,8 +245,8 @@ async def lifestore_begin_checkout(config: RunnableConfig = None) -> str:
     using the order_id returned here. Do NOT write a payment link or the amount
     yourself — the secure PayHere checkout is rendered from the order_id.
     """
-    thread_id = _thread_id(config)
-    items = await asyncio.to_thread(store.get_cart_items, thread_id)
+    cart_owner_id = _cart_owner_id(config)
+    items = await asyncio.to_thread(store.get_cart_items, cart_owner_id)
 
     if not items:
         return _to_json({
@@ -279,7 +285,7 @@ async def lifestore_begin_checkout(config: RunnableConfig = None) -> str:
 
     order_id = await asyncio.to_thread(
         store.create_order,
-        thread_id,
+        cart_owner_id,
         items=order_items,
         amount_cents=amount_cents,
         currency=currency,
