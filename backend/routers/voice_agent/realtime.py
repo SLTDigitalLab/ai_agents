@@ -4,48 +4,52 @@ realtime.py — Live Voice Agent router for Workmate AI
 Provider switching — edit .env only, no code changes needed:
 
   USE GEMINI (Vertex AI):
-    GOOGLE_APPLICATION_CREDENTIALS=service-account.json
-    PROJECT_ID=visionflow-ai-495406
-    LOCATION=us-central1
+    GOOGLE_APPLICATION_CREDENTIALS=path_to_your_google_credentials.json
+    PROJECT_ID=your_gcp_project_id
+    LOCATION=your_gcp_project_location
 
   USE OPENAI:
     OPENAI_API_KEY=your_key
     # comment out GOOGLE_APPLICATION_CREDENTIALS
 
 Endpoints:
-  GET  /api/v1/realtime/provider      — which provider is active
-  GET  /api/v1/realtime/token         — OpenAI ephemeral token (WebRTC)
-  WS   /api/v1/realtime/ws/voice      — Gemini Live proxy (WebSocket)
-  POST /api/v1/realtime/rag-search    — RAG search (both providers)
+  GET  /api/v1/realtime/provider    — which provider is active
+  GET  /api/v1/realtime/token       — OpenAI ephemeral token (WebRTC)
+  WS   /api/v1/realtime/ws/voice    — Gemini Live proxy (WebSocket)
 """
 
 import asyncio
-import base64
 import json
 import logging
 import os
+import random
+
 import httpx
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
 
 from core.config import settings
-from domain.tools.rag_tools import _search_qdrant_knowledge_base
-
-#for leave balance
-import asyncio
-import secrets
-import time
-from domain.tools.api_tools import fetch_leave_balance_for_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/realtime", tags=["realtime"])
 
-#  Model identifiers 
-OPENAI_REALTIME_MODEL  = "gpt-realtime-2"
-GEMINI_LIVE_MODEL      = "gemini-live-2.5-flash-preview-native-audio-09-2025"
+# Full agent pipeline — voice agent calls this for every user question
+CHAT_API_URL = "http://localhost:8000/api/v1/chat"
 
-# Shared system prompt 
+# Model identifiers
+OPENAI_REALTIME_MODEL = "gpt-realtime-2"
+GEMINI_LIVE_MODEL     = "gemini-live-2.5-flash-preview-native-audio-09-2025"
+
+# Audio format sent from the browser — must match the mic capture sample rate
+AUDIO_SAMPLE_RATE_HZ = 16000
+AUDIO_BYTES_PER_SAMPLE = 2  # 16-bit PCM, mono
+
+# Never let the browser->Gemini stream get more than this many seconds
+# ahead of real time. Anything beyond this is throttled with a short sleep.
+# This is a hard backstop independent of frontend pacing behaviour.
+MAX_AUDIO_LEAD_SECONDS = 0.5
+
+# System prompt
 VOICE_SYSTEM_PROMPT = """You are Workmate AI, the intelligent voice assistant for SLTMobitel employees.
 You help employees with questions about HR policies, Finance, IT support, Admin procedures,
 internal audit (CIA), and business processes.
@@ -53,93 +57,84 @@ internal audit (CIA), and business processes.
 You are having a live voice conversation. Keep your responses:
 - Concise and clear — this is a spoken conversation, not a chat interface
 - Natural sounding — avoid bullet points or markdown formatting
-- Accurate — always use the search_knowledge_base function when answering
-  questions about company policies, procedures, leave, benefits, or any
-  SLTMobitel-specific information
+- Accurate — always use the ask_workmate_ai function when answering any company-specific question
 
-When you don't have enough information, use search_knowledge_base before answering.
+When you don't have enough information, use ask_workmate_ai before answering.
 If a question is completely outside SLTMobitel workplace topics, politely say you
 can only help with work-related questions.
 
 Always greet the user warmly at the start of the conversation."""
 
-#  Shared tool definition 
-KB_TOOL_NAME        = "search_knowledge_base"
-KB_TOOL_DESCRIPTION = (
-    "Search the SLTMobitel internal knowledge base for HR policies, leave, "
-    "benefits, finance, IT support, admin procedures, or CIA compliance. "
-    "Always call this before answering any company-specific question."
-)
-KB_TOOL_PARAMETERS  = {
-    "type": "object",
-    "properties": {
-        "query": {
-            "type": "string",
-            "description": "The search query",
+# Single tool — routes all questions through the full agent pipeline
+WORKMATE_TOOL = {
+    "name": "ask_workmate_ai",
+    "description": (
+        "Send the user's question to the Workmate AI agent pipeline. "
+        "Use this for ALL questions — HR policies, leave balance, finance, "
+        "IT support, admin, or any SLTMobitel workplace topic. "
+        "The agent automatically searches the knowledge base or calls "
+        "external systems as needed."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "The user's question exactly as spoken",
+            }
         },
-        "agent_id": {
-            "type": "string",
-            "description": "Which knowledge base: hr, finance, admin, it, cia, process",
-            "enum": ["supervisor", "hr", "finance", "admin", "it", "cia", "process"],
-        },
+        "required": ["question"],
     },
-    "required": ["query"],
 }
 
-#  Voice session store (email lookup by short-lived token) 
-# { session_token: { "email": "...", "expires_at": float } }
-_voice_sessions: dict[str, dict] = {}
-_SESSION_TTL = 300  # 5 minutes
-
-def _store_session(email: str) -> str:
-    """Create a short-lived session token mapped to a verified email."""
-    token = secrets.token_urlsafe(32)
-    _voice_sessions[token] = {"email": email, "expires_at": time.time() + _SESSION_TTL}
-    # Clean up expired entries
-    expired = [k for k, v in _voice_sessions.items() if v["expires_at"] < time.time()]
-    for k in expired:
-        del _voice_sessions[k]
-    return token
-
-def _resolve_session(token: str) -> str | None:
-    """Resolve a session token to an email. Returns None if expired or not found."""
-    entry = _voice_sessions.get(token)
-    if not entry:
-        return None
-    if entry["expires_at"] < time.time():
-        del _voice_sessions[token]
-        return None
-    return entry["email"]
-
-#  Leave balance tool definition (added to both Gemini and OpenAI tool lists) ─
-LEAVE_TOOL_NAME        = "get_leave_balance"
-LEAVE_TOOL_DESCRIPTION = (
-    "Look up the authenticated employee's personal leave balance from the HR system. "
-    "Call this when the user asks about their leave balance, remaining leave days, "
-    "annual leave, casual leave, or sick leave."
-)
-LEAVE_TOOL_PARAMETERS  = {
-    "type": "object",
-    "properties": {},
-    "required": [],
+# Filler phrases per language — spoken while the agent pipeline runs
+# so the user never hears silence during the search
+FILLERS = {
+    "en": [
+        "Sure, let me check that for you.",
+        "Got it, one moment while I look that up.",
+        "Okay, checking that now.",
+        "Let me find that information for you.",
+        "Sure, just a moment.",
+        "Right, let me look into that.",
+    ],
+    "si": [
+        "හරි, මමඒක බලන්නම්.",
+        "හොඳයි, එක මොහොතක් රැඳෙන්න.",
+        "ඒක දැන් සොයා බලනවා.",
+        "ඒ තොරතුරු ලබා ගන්නම්.",
+    ],
+    "ta": [
+        "சரி, நான் அதை சரிபார்க்கிறேன்.",
+        "ஒரு நிமிடம், நான் தேடுகிறேன்.",
+        "சரி, இப்போது தேடுகிறேன்.",
+        "அந்த தகவலை தருகிறேன்.",
+    ],
 }
 
-#  Schemas
-class RAGSearchRequest(BaseModel):
-    query:    str
-    agent_id: str = "supervisor"
-    top_k:    int = 5
 
-class RAGSearchResponse(BaseModel):
-    results: list[dict]
+def _detect_language(text: str) -> str:
+    """
+    Lightweight script detection — checks Unicode ranges.
+    Returns 'si' for Sinhala, 'ta' for Tamil, 'en' for everything else.
+    No external library needed.
+    """
+    for ch in text:
+        cp = ord(ch)
+        if 0x0D80 <= cp <= 0x0DFF:   # Sinhala Unicode block
+            return "si"
+        if 0x0B80 <= cp <= 0x0BFF:   # Tamil Unicode block
+            return "ta"
+    return "en"
 
 
-#  Helper: detect active provider 
+def _pick_filler(question: str) -> str:
+    """Pick a random filler phrase that matches the language of the question."""
+    lang = _detect_language(question)
+    return random.choice(FILLERS.get(lang, FILLERS["en"]))
+
+
 def _active_provider() -> str:
-    """
-    Returns 'gemini' if GOOGLE_APPLICATION_CREDENTIALS is set, else 'openai'.
-    To switch providers just comment / uncomment the relevant .env lines.
-    """
     if settings.GOOGLE_APPLICATION_CREDENTIALS:
         return "gemini"
     if settings.OPENAI_API_KEY:
@@ -147,34 +142,25 @@ def _active_provider() -> str:
     return "none"
 
 
-#  Endpoint: provider detection 
+# Endpoint: which provider is active
 @router.get("/provider")
 async def get_voice_provider():
-    """
-    Returns the active voice provider based on which credentials are set in .env.
-    Frontend calls this on page load to decide which connection path to use.
-    """
     provider = _active_provider()
     if provider == "none":
         raise HTTPException(
             status_code=500,
-            detail="No voice provider configured. Set GOOGLE_APPLICATION_CREDENTIALS or OPENAI_API_KEY in .env."
+            detail="No voice provider configured. Set GOOGLE_APPLICATION_CREDENTIALS or OPENAI_API_KEY in .env.",
         )
     model = GEMINI_LIVE_MODEL if provider == "gemini" else OPENAI_REALTIME_MODEL
     logger.info(f"Voice provider: {provider} / {model}")
     return {"provider": provider, "model": model}
 
 
-#  Endpoint: OpenAI ephemeral token (unchanged) 
+# Endpoint: OpenAI ephemeral token for WebRTC
 @router.get("/token")
 async def get_realtime_token():
-    """
-    Generates an OpenAI ephemeral token for WebRTC.
-    Only used when provider == 'openai'.
-    """
     if not settings.OPENAI_API_KEY:
         raise HTTPException(status_code=500, detail="OPENAI_API_KEY is not configured.")
-
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
@@ -188,17 +174,16 @@ async def get_realtime_token():
                     "session": {
                         "type": "realtime",
                         "model": OPENAI_REALTIME_MODEL,
-                        "audio": {"output": {"voice": "alloy"}},
+                        "audio": {"output": {"voice": "ash"}},
                     }
                 },
             )
-
         if response.status_code != 200:
             logger.error(f"OpenAI token error: {response.status_code} — {response.text}")
             raise HTTPException(status_code=502, detail=f"Failed to create OpenAI session: {response.text}")
 
         data = response.json()
-        logger.info(f"OpenAI ephemeral token generated — keys: {list(data.keys())}")
+        logger.info(f"OpenAI ephemeral token generated — voice: ash")
         return data
 
     except httpx.TimeoutException:
@@ -208,53 +193,10 @@ async def get_realtime_token():
     except Exception as e:
         logger.error(f"OpenAI token error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
-
-#  Endpoint: exchange MSAL token for voice session token 
-class SessionTokenRequest(BaseModel):
-    msal_token: str
-
-@router.post("/session-token")
-async def create_voice_session(request: SessionTokenRequest):
-    """
-    Accepts a Microsoft MSAL access token from the frontend.
-    Verifies it by calling Microsoft Graph /me endpoint.
-    Returns a short-lived session token the WebSocket will use to identify the user.
-    The user's email never travels over the WebSocket connection.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            graph_res = await client.get(
-                "https://graph.microsoft.com/v1.0/me",
-                headers={"Authorization": f"Bearer {request.msal_token}"},
-            )
-
-        if graph_res.status_code != 200:
-            raise HTTPException(status_code=401, detail="Invalid or expired MSAL token")
-
-        profile = graph_res.json()
-        # Use userPrincipalName (the intranet email) — same field the chat agent uses
-        email = profile.get("userPrincipalName") or profile.get("mail") or ""
-        if not email:
-            raise HTTPException(status_code=400, detail="Could not retrieve email from Microsoft account")
-
-        session_token = _store_session(email)
-        logger.info(f"Voice session created for user: {email[:4]}...@...")
-        return {"session_token": session_token}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Session token error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to verify identity")
 
 
-#  Helper: get Vertex AI access token from service account 
+# Helper: Vertex AI access token from service account
 def _get_vertex_access_token() -> str:
-    """
-    Uses the service-account.json to get a short-lived Google access token.
-    Resolves the credential path relative to the backend directory.
-    """
     import google.auth
     import google.auth.transport.requests
 
@@ -262,7 +204,6 @@ def _get_vertex_access_token() -> str:
     if not cred_path:
         raise RuntimeError("GOOGLE_APPLICATION_CREDENTIALS not set in .env")
 
-    # Resolve relative path from backend root
     if not os.path.isabs(cred_path):
         backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         cred_path = os.path.join(backend_dir, cred_path)
@@ -271,7 +212,6 @@ def _get_vertex_access_token() -> str:
         raise RuntimeError(f"service-account.json not found at: {cred_path}")
 
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
-
     credentials, _ = google.auth.default(
         scopes=["https://www.googleapis.com/auth/cloud-platform"]
     )
@@ -280,15 +220,82 @@ def _get_vertex_access_token() -> str:
     return credentials.token
 
 
-#  Endpoint: Gemini Live WebSocket proxy 
+# Helper: keep Gemini WebSocket alive while waiting for a slow operation.
+# Sends a lightweight ping-style message every interval_sec seconds.
+# The done_event is set by the caller when the wait is over.
+async def _gemini_keepalive(gemini_ws, done_event: asyncio.Event, interval_sec: float = 5.0):
+    """
+    Gemini Live closes with 1011 if nothing is sent for ~10 seconds.
+    This coroutine sends an empty realtime_input heartbeat to keep
+    the connection open while the agent pipeline is running.
+    """
+    try:
+        while not done_event.is_set():
+            await asyncio.sleep(interval_sec)
+            if done_event.is_set():
+                break
+            try:
+                # empty media chunk — valid no-op that resets the keepalive timer
+                await gemini_ws.send(json.dumps({
+                    "realtime_input": {"media_chunks": []}
+                }))
+                
+            except Exception:
+                break
+    except asyncio.CancelledError:
+        pass
+
+
+# Helper: call the full agent pipeline and return a complete answer
+async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str) -> str:
+    """
+    Sends the user's question to /api/v1/chat with stream=False.
+    Returns the complete answer text.
+    All routing, RAG search, leave balance, and guardrails happen inside the pipeline.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                CHAT_API_URL,
+                json={
+                    "message":   question,
+                    "agent_id":  "supervisor",
+                    "user_id":   user_id or "anonymous",
+                    "user_name": user_name or "",
+                    "thread_id": thread_id,
+                    "stream":    False,
+                },
+            )
+        if resp.status_code == 200:
+            answer = resp.json().get("response", "").strip()
+            if answer:
+                return answer
+            logger.warning("Chat API returned empty response")
+            return "I couldn't find the information right now. Please try again."
+        else:
+            logger.error(f"Chat API returned {resp.status_code}: {resp.text[:200]}")
+            return "I had trouble finding that information. Please try again."
+    except httpx.TimeoutError:
+        logger.error("Chat API timed out")
+        return "That took too long. Please try asking again."
+    except Exception as e:
+        logger.error(f"Chat API call failed: {e}")
+        return "I had trouble connecting. Please try again."
+
+
+# Helper: estimate the audio duration (seconds) of a base64-encoded PCM16 chunk
+def _estimate_chunk_seconds(b64_data: str) -> float:
+    # base64 expands bytes by ~4/3 — reverse that to get raw byte count
+    approx_bytes = (len(b64_data) * 3) // 4
+    samples = approx_bytes / AUDIO_BYTES_PER_SAMPLE
+    return samples / AUDIO_SAMPLE_RATE_HZ
+
+
+# Endpoint: Gemini Live WebSocket proxy
 @router.websocket("/ws/voice")
 async def gemini_voice_proxy(websocket: WebSocket):
     await websocket.accept()
     logger.info("Browser WebSocket connected — starting Gemini Live proxy")
-
-    #  Step 0: wait for auth message (first message from browser) 
-    session_email: str = ""
-    
 
     try:
         import websockets as ws_lib
@@ -296,32 +303,26 @@ async def gemini_voice_proxy(websocket: WebSocket):
         try:
             access_token = _get_vertex_access_token()
         except Exception as e:
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "message": f"Vertex AI auth failed: {str(e)}"
-            }))
+            await websocket.send_text(json.dumps({"type": "error", "message": f"Vertex AI auth failed: {str(e)}"}))
             return
 
         project_id = settings.PROJECT_ID
-        location   = settings.LOCATION or "us-central1"
-
         if not project_id:
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "message": "PROJECT_ID not set in .env"
-            }))
+            await websocket.send_text(json.dumps({"type": "error", "message": "PROJECT_ID not set in .env"}))
             return
 
         region = "us-central1"
-        host = f"{region}-aiplatform.googleapis.com"
-        path = "google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
-        gemini_url = f"wss://{host}/ws/{path}?access_token={access_token}"
+        gemini_url = (
+            f"wss://{region}-aiplatform.googleapis.com"
+            f"/ws/google.cloud.aiplatform.v1.LlmBidiService/BidiGenerateContent"
+            f"?access_token={access_token}"
+        )
         model_resource = (
             f"projects/{project_id}/locations/{region}"
             f"/publishers/google/models/{GEMINI_LIVE_MODEL}"
         )
 
-        logger.info(f"Connecting to Gemini Live: {host} model={GEMINI_LIVE_MODEL}")
+        logger.info(f"Connecting to Gemini Live: {region}-aiplatform.googleapis.com model={GEMINI_LIVE_MODEL}")
 
         async with ws_lib.connect(
             gemini_url,
@@ -338,86 +339,107 @@ async def gemini_voice_proxy(websocket: WebSocket):
                         "response_modalities": ["AUDIO"],
                         "speech_config": {
                             "voice_config": {
-                                "prebuilt_voice_config": {
-                                    "voice_name": "Aoede"
-                                }
+                                "prebuilt_voice_config": {"voice_name": "Alnilam"}
                             }
                         },
                     },
-                    "system_instruction": {
-                        "parts": [{"text": VOICE_SYSTEM_PROMPT}]
-                    },
-                    "tools": [
-                        {
-                            "function_declarations": [
-                                {
-                                    "name": KB_TOOL_NAME,
-                                    "description": KB_TOOL_DESCRIPTION,
-                                    "parameters": KB_TOOL_PARAMETERS,
-                                },
-                                {
-                                    "name": LEAVE_TOOL_NAME,
-                                    "description": LEAVE_TOOL_DESCRIPTION,
-                                    "parameters": LEAVE_TOOL_PARAMETERS,
-                                },
-                            ]
-                        }
-                    ],
+                    "system_instruction": {"parts": [{"text": VOICE_SYSTEM_PROMPT}]},
+                    "tools": [{"function_declarations": [WORKMATE_TOOL]}],
                 }
             }
             await gemini_ws.send(json.dumps(setup))
-            logger.info("Gemini Live setup sent")
+            logger.info(f"Gemini Live setup sent — voice: Alnilam")
 
             await websocket.send_text(json.dumps({"type": "ready"}))
-            #  Wait for auth message from browser (sent right after ready) 
-            try:
-                raw_auth = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
-                auth_msg = json.loads(raw_auth)
-                if auth_msg.get("type") == "auth":
-                    session_email = _resolve_session(auth_msg.get("session_token", "")) or ""
-                    if session_email:
-                        logger.info(f"Voice session authenticated: {session_email[:4]}...@...")
-                    else:
-                        logger.warning("Voice session: invalid or expired session token")
-            except asyncio.TimeoutError:
-                logger.warning("No auth message within 10s — continuing unauthenticated")
-            except Exception as e:
-                logger.warning(f"Auth message error: {e}")
 
-            #  browser → Gemini 
+            # receive user identity from browser right after ready
+            session_email: str = ""
+            session_name: str = ""
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+                msg = json.loads(raw)
+                if msg.get("type") == "user_identity":
+                    session_email = msg.get("user_id", "")
+                    session_name  = msg.get("user_name", "")
+                    logger.info(f"Voice user identity received: {session_email[:6]}...")
+            except asyncio.TimeoutError:
+                logger.warning("No identity message within 10s — continuing as anonymous")
+            except Exception as e:
+                logger.warning(f"Identity message error: {e}")
+
+            # unique thread per voice session so history is stored separately
+            voice_thread = f"voice_{id(websocket)}"
+
             async def browser_to_gemini():
+                """
+                Forwards mic audio from the browser to Gemini Live.
+
+                Includes a pacing safety net: tracks how many seconds of audio
+                have been sent versus how much real wall-clock time has elapsed
+                since streaming started, and inserts a short sleep whenever the
+                stream gets more than MAX_AUDIO_LEAD_SECONDS ahead of real time.
+
+                This guarantees Gemini never receives a burst faster than
+                real-time playback speed — which is what triggers its
+                1011 "client sending data too fast" flow-control error —
+                regardless of how the browser batches or schedules chunks.
+                """
+                loop = asyncio.get_event_loop()
+                stream_start_time = None
+                audio_seconds_sent = 0.0
+
                 try:
                     while True:
                         raw = await websocket.receive_text()
                         msg = json.loads(raw)
+
                         if msg.get("type") == "audio":
+                            if stream_start_time is None:
+                                stream_start_time = loop.time()
+                                audio_seconds_sent = 0.0
+
+                            chunk_seconds = _estimate_chunk_seconds(msg["data"])
+                            audio_seconds_sent += chunk_seconds
+
+                            elapsed_real_time = loop.time() - stream_start_time
+                            lead = audio_seconds_sent - elapsed_real_time
+
+                            if lead > MAX_AUDIO_LEAD_SECONDS:
+                                sleep_for = lead - MAX_AUDIO_LEAD_SECONDS
+                                
+                                await asyncio.sleep(sleep_for)
+
                             await gemini_ws.send(json.dumps({
                                 "realtime_input": {
-                                    "media_chunks": [
-                                        {
-                                            "mime_type": "audio/pcm;rate=16000",
-                                            "data": msg["data"],
-                                        }
-                                    ]
+                                    "media_chunks": [{
+                                        "mime_type": "audio/pcm;rate=16000",
+                                        "data": msg["data"],
+                                    }]
                                 }
                             }))
+
                         elif msg.get("type") == "end":
                             logger.info("Browser sent end signal")
                             break
+
+                        elif msg.get("type") == "user_identity":
+                            # already consumed before the loop started, but ignore
+                            # gracefully if it arrives again for any reason
+                            continue
+
                 except WebSocketDisconnect:
                     logger.info("Browser WebSocket disconnected")
                 except Exception as e:
                     logger.error(f"browser_to_gemini error: {e}")
 
-            #  Gemini → browser 
             async def gemini_to_browser():
                 try:
                     async for raw_msg in gemini_ws:
                         data = json.loads(raw_msg)
                         server_content = data.get("serverContent", {})
 
-                        parts = server_content.get("modelTurn", {}).get("parts", [])
-                        for part in parts:
+                        # forward audio and transcript to browser
+                        for part in server_content.get("modelTurn", {}).get("parts", []):
                             if "inlineData" in part:
                                 inline = part["inlineData"]
                                 await websocket.send_text(json.dumps({
@@ -443,49 +465,50 @@ async def gemini_voice_proxy(websocket: WebSocket):
                         if server_content.get("turnComplete"):
                             await websocket.send_text(json.dumps({"type": "turn_complete"}))
 
-                        tool_calls = data.get("toolCall", {}).get("functionCalls", [])
-                        for call in tool_calls:
-                            name = call.get("name", "")
-                            args = call.get("args", {})
+                        # handle tool calls
+                        for call in data.get("toolCall", {}).get("functionCalls", []):
+                            if call.get("name") == "ask_workmate_ai":
+                                question = call.get("args", {}).get("question", "")
+                                logger.info(f"Voice tool call: '{question[:80]}'")
 
-                            if name == KB_TOOL_NAME:
-                                query    = args.get("query", "")
-                                agent_id = args.get("agent_id", "hr")
-                                logger.info(f"Gemini tool call: {KB_TOOL_NAME} query='{query}' agent='{agent_id}'")
-                                context = await _search_qdrant_knowledge_base(
-                                    query=query,
-                                    agent_id=agent_id if agent_id != "supervisor" else "hr",
-                                    k=5,
-                                )
+                                # speak a filler in the user's language so there is no silence
+                                filler = _pick_filler(question)
                                 await gemini_ws.send(json.dumps({
-                                    "tool_response": {
-                                        "function_responses": [
-                                            {
-                                                "name": KB_TOOL_NAME,
-                                                "response": {
-                                                    "output": context or "No relevant information found."
-                                                },
-                                            }
-                                        ]
+                                    "client_content": {
+                                        "turns": [{"role": "model", "parts": [{"text": filler}]}],
+                                        "turn_complete": False,
                                     }
                                 }))
+                                logger.info(f"Filler sent ({_detect_language(question)}): '{filler}'")
 
-                            elif name == LEAVE_TOOL_NAME:
-                                logger.info(f"Gemini tool call: {LEAVE_TOOL_NAME} user={session_email[:4] if session_email else 'unknown'}...")
-                                if not session_email:
-                                    result = "I cannot retrieve your leave balance because your identity could not be verified. Please ensure you are logged in."
-                                else:
-                                    result = await asyncio.to_thread(
-                                        fetch_leave_balance_for_user, session_email
+                                # call the full agent pipeline while keeping
+                                # the Gemini WebSocket alive with periodic pings
+                                done_event = asyncio.Event()
+                                keepalive_task = asyncio.create_task(
+                                    _gemini_keepalive(gemini_ws, done_event)
+                                )
+                                try:
+                                    answer = await _ask_agent(
+                                        question=question,
+                                        user_id=session_email,
+                                        user_name=session_name,
+                                        thread_id=voice_thread,
                                     )
+                                finally:
+                                    done_event.set()
+                                    keepalive_task.cancel()
+                                    try:
+                                        await keepalive_task
+                                    except asyncio.CancelledError:
+                                        pass
+                                logger.info(f"Agent answer: {len(answer)} chars")
+
                                 await gemini_ws.send(json.dumps({
                                     "tool_response": {
-                                        "function_responses": [
-                                            {
-                                                "name": LEAVE_TOOL_NAME,
-                                                "response": {"output": result},
-                                            }
-                                        ]
+                                        "function_responses": [{
+                                            "name": "ask_workmate_ai",
+                                            "response": {"output": answer},
+                                        }]
                                     }
                                 }))
 
@@ -501,10 +524,7 @@ async def gemini_voice_proxy(websocket: WebSocket):
     except Exception as e:
         logger.error(f"Gemini voice proxy error: {e}")
         try:
-            await websocket.send_text(json.dumps({
-                "type": "error",
-                "message": f"Gemini Live connection failed: {str(e)}",
-            }))
+            await websocket.send_text(json.dumps({"type": "error", "message": f"Gemini Live connection failed: {str(e)}"}))
         except Exception:
             pass
     finally:
@@ -513,57 +533,3 @@ async def gemini_voice_proxy(websocket: WebSocket):
             await websocket.send_text(json.dumps({"type": "session_end"}))
         except Exception:
             pass
-
-#  Endpoint: leave balance lookup for OpenAI path 
-class LeaveBalanceRequest(BaseModel):
-    session_token: str
-
-@router.post("/leave-balance")
-async def get_leave_balance_endpoint(request: LeaveBalanceRequest):
-    email = _resolve_session(request.session_token)
-    if not email:
-        return {"result": "Your session has expired. Please end the call and start a new conversation to check your leave balance."}
-    try:
-        result = await asyncio.to_thread(fetch_leave_balance_for_user, email)
-        return {"result": result}
-    except Exception as e:
-        logger.error(f"Leave balance endpoint error: {e}")
-        return {"result": "Unable to fetch leave balance at the moment."}
-    
-
-#  Endpoint: RAG search (unchanged — used by both providers) 
-@router.post("/rag-search", response_model=RAGSearchResponse)
-async def rag_search(request: RAGSearchRequest):
-    """
-    Searches the existing Qdrant knowledge base.
-    Called by function calling from OpenAI (via fetch) or Gemini (via proxy above).
-    Reuses _search_qdrant_knowledge_base — same path as working chat agents.
-    """
-    logger.info(f"RAG search: query='{request.query}' agent_id='{request.agent_id}'")
-
-    if not request.query or not request.query.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
-
-    try:
-        agent_id = request.agent_id if request.agent_id != "supervisor" else "hr"
-
-        context = await _search_qdrant_knowledge_base(
-            query=request.query.strip(),
-            agent_id=agent_id,
-            k=request.top_k,
-        )
-
-        unavailable = (
-            "No relevant documents found.",
-            "No relevant vector documents found.",
-        )
-        if context in unavailable or context.startswith(("[KB_UNAVAILABLE]", "[QDRANT_UNAVAILABLE]")):
-            logger.info(f"RAG search: no results for '{agent_id}'")
-            return RAGSearchResponse(results=[])
-
-        logger.info(f"RAG search: got context from '{agent_id}'")
-        return RAGSearchResponse(results=[{"content": context, "source": ""}])
-
-    except Exception as e:
-        logger.error(f"RAG search error: {e}")
-        return RAGSearchResponse(results=[])
