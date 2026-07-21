@@ -6,9 +6,8 @@ entirely through chat. The design keeps the LLM away from anything financial:
 
 * Prices are resolved server-side from the live catalog
   (``services.lifestore_catalog``) — never from the model's text.
-* The cart is persisted in Postgres using a server-side cart owner key. For
-  authenticated users this is derived from ``user_id`` so the cart survives
-  logout/login; anonymous sessions fall back to the chat ``thread_id``.
+* The cart is persisted in Postgres keyed by the chat ``thread_id`` (injected
+  automatically via ``RunnableConfig``; the model never sees or sets it).
 * ``begin_checkout`` snapshots the cart into an order with a server-computed
   total, then returns an opaque ``order_id``. The model only echoes a
   ``[RENDER_LIFESTORE_CHECKOUT:<order_id>]`` marker; the frontend fetches the
@@ -30,16 +29,11 @@ from services import lifestore_payments_store as store
 
 
 def _cart_owner_id(config: RunnableConfig | None) -> str:
-    """Return the stable key used to store a LifeStore cart."""
+    """Return the chat thread_id used to store a LifeStore cart."""
     if not config:
-        return "thread:anonymous"
+        return "anonymous"
     configurable = config.get("configurable") or {}
-    user_id = str(configurable.get("user_id") or "").strip().lower()
-    if user_id and user_id != "anonymous":
-        return f"user:{user_id}"
-
-    thread_id = str(configurable.get("thread_id") or "anonymous").strip()
-    return f"thread:{thread_id}"
+    return str(configurable.get("thread_id") or "anonymous")
 
 
 def _money(cents: int, currency: str = "LKR") -> str:

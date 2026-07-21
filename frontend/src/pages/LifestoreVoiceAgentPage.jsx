@@ -1,11 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useMsal } from '@azure/msal-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
 import sltLogo from '../assets/slt-mobitel-logo.png';
 import embryoLogo from '../assets/embryo-removebg.png';
-import { loginRequest } from '../authConfig';
 import { useTheme } from '../contexts/ThemeContext';
 
 import LifestoreCheckout from '../components/forms/LifestoreCheckout';
@@ -15,7 +13,6 @@ import VoiceOrb from '../components/voice_agent/VoiceOrb';
 import ListeningWave from '../components/voice_agent/ListeningWave';
 import TranscriptPanel from '../components/voice_agent/TranscriptPanel';
 import CallControls from '../components/voice_agent/CallControls';
-import UserMenu from '../components/voice_agent/UserMenu';
 
 const LIFESTORE_REALTIME_PATH = '/api/v1/realtime/lifestore';
 const ASK_LIFESTORE_TOOL = 'ask_lifestore_chat';
@@ -89,12 +86,10 @@ const ProductCardsPanel = ({ cards, onClear }) => {
 };
 
 const LifestoreVoiceAgentPage = () => {
-    const { accounts, instance } = useMsal();
     const navigate = useNavigate();
     const { theme, toggleTheme } = useTheme();
-    const user = accounts[0] || {};
-    const firstName = (user.name || 'User').split(' ')[0];
-    const initials = (user.name || 'U').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+    const firstName = 'Guest';
+    const initials = 'LS';
 
     const [phase, setPhase] = useState(PHASE.IDLE);
     const [isSpeaking, setIsSpeaking] = useState(false);
@@ -103,7 +98,6 @@ const LifestoreVoiceAgentPage = () => {
     const [statusText, setStatusText] = useState('Ready to connect');
     const [errorMessage, setErrorMessage] = useState('');
     const [provider, setProvider] = useState(null);
-    const [showUserMenu, setShowUserMenu] = useState(false);
     const [showTranscript, setShowTranscript] = useState(false);
     const [productCards, setProductCards] = useState([]);
     const [checkoutOrderId, setCheckoutOrderId] = useState(null);
@@ -267,7 +261,7 @@ const LifestoreVoiceAgentPage = () => {
                             body: JSON.stringify({
                                 message: args.message || args.query || args.question || '',
                                 thread_id: voiceThreadIdRef.current,
-                                user_id: user.username || user.localAccountId || 'anonymous',
+                                user_id: 'anonymous',
                             }),
                         });
                         const data = res.ok
@@ -304,7 +298,7 @@ const LifestoreVoiceAgentPage = () => {
             default:
                 break;
         }
-    }, [applyLifeStoreEvents, configureOpenAISession, sendOpenAIEvent, user.localAccountId, user.username]);
+    }, [applyLifeStoreEvents, configureOpenAISession, sendOpenAIEvent]);
 
     const playGeminiAudioChunk = useCallback((base64Data) => {
         if (!audioContextRef.current) return;
@@ -324,21 +318,7 @@ const LifestoreVoiceAgentPage = () => {
         };
     }, []);
 
-    const getSessionToken = async () => {
-        try {
-            const tokenResponse = await instance.acquireTokenSilent({ ...loginRequest, account: accounts[0] });
-            const res = await fetch(`${API_URL}/api/v1/realtime/session-token`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ msal_token: tokenResponse.accessToken }),
-            });
-            if (!res.ok) return null;
-            const data = await res.json();
-            return data.session_token || null;
-        } catch {
-            return null;
-        }
-    };
+    const getSessionToken = async () => null;
 
     const startConversation = async () => {
         setPhase(PHASE.CONNECTING);
@@ -438,7 +418,7 @@ const LifestoreVoiceAgentPage = () => {
                         ws.send(JSON.stringify({
                             type: 'auth',
                             session_token: sessionToken,
-                            user_id: user.username || user.localAccountId || 'anonymous',
+                            user_id: 'anonymous',
                             thread_id: voiceThreadIdRef.current,
                         }));
                         setStatusText('Speak to Ask LifeStore');
@@ -535,11 +515,6 @@ const LifestoreVoiceAgentPage = () => {
         setStatusText('Ready to connect');
     }, [cleanupAll]);
 
-    const handleLogout = () => {
-        endConversation();
-        instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin });
-    };
-
     const isActive = phase === PHASE.CONNECTED;
     const displayStatus = isListening ? 'Listening...' : isSpeaking ? 'Speaking...' : statusText;
 
@@ -562,13 +537,9 @@ const LifestoreVoiceAgentPage = () => {
                         </svg>
                     )}
                 </button>
-                <UserMenu
-                    user={user}
-                    initials={initials}
-                    showMenu={showUserMenu}
-                    onToggle={setShowUserMenu}
-                    onLogout={handleLogout}
-                />
+                <div className="w-9 h-9 flex items-center justify-center rounded-full bg-gradient-to-br from-cyan-900 to-cyan-600 text-white text-xs font-bold shadow-md">
+                    {initials}
+                </div>
             </div>
 
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
