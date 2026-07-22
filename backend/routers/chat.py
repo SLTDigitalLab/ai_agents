@@ -149,8 +149,15 @@ async def chat(request: ChatRequest):
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            # Thread config enables LangGraph memory/checkpointing per conversation
-            config = {"configurable": {"thread_id": request.thread_id}}
+            # Thread config enables LangGraph memory/checkpointing per conversation.
+            # user_id is also passed through so LifeStore cart tools can keep a
+            # customer cart across logout/login without changing the chat API.
+            config = {
+                "configurable": {
+                    "thread_id": request.thread_id,
+                    "user_id": request.user_id,
+                }
+            }
 
             # ── Run guardrail classifier FIRST ──────────────────────────
             # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
