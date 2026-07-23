@@ -15,7 +15,7 @@ Neo4j:
 
 import json
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, Any, Optional
 
 import httpx
 from langchain_core.tools import tool
@@ -23,7 +23,7 @@ from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langgraph.prebuilt import InjectedState
 from qdrant_client import QdrantClient
 
-from core.config import settings
+from core.config import settings, agent_collection_name, collection_suffix
 from core.llm import get_embedding_model
 
 log = logging.getLogger(__name__)
@@ -35,10 +35,138 @@ try:
 except Exception:
     GraphDatabase = None
 
-async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
+# — Per-thread evidence cache -------------------------------------------------
+# search_knowledge_base collects image/table evidence from retrieved Qdrant
+# chunks (attached at ingestion time as doc.metadata["evidence"]). chat.py
+# consumes this cache after the final answer is generated and streams the
+# best matching evidence to the frontend.
+_THREAD_EVIDENCE_CACHE: dict[str, list[dict[str, Any]]] = {}
+
+
+def clear_thread_evidence(thread_id: str | None) -> None:
+    """Clear evidence collected for a thread before a new chat request starts."""
+    if thread_id:
+        _THREAD_EVIDENCE_CACHE.pop(thread_id, None)
+
+
+def _evidence_key(item: dict[str, Any]) -> tuple:
+    """Stable key used for deduplicating evidence items."""
+    return (
+        item.get("type"),
+        item.get("source"),
+        item.get("page"),
+        item.get("url"),
+        (item.get("content") or "")[:200],
+    )
+
+
+def _dedupe_evidence(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove duplicate evidence items while preserving order."""
+    seen = set()
+    unique: list[dict[str, Any]] = []
+
+    for item in items:
+        key = _evidence_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+
+    return unique
+
+
+def consume_thread_evidence(thread_id: str | None, max_items: int | None = None) -> list[dict[str, Any]]:
+    """Return and clear collected evidence for this thread."""
+    if not thread_id:
+        return []
+
+    items = _THREAD_EVIDENCE_CACHE.pop(thread_id, [])
+    items = _dedupe_evidence(items)
+
+    if max_items is not None:
+        return items[:max_items]
+
+    return items
+
+
+def _add_thread_evidence(
+    thread_id: str | None,
+    evidence_items: Any,
+    source: str,
+    link: str,
+) -> None:
+    """Add valid evidence metadata from retrieved Qdrant chunks."""
+    if not thread_id or not evidence_items:
+        return
+
+    if not isinstance(evidence_items, list):
+        return
+
+    cleaned_items: list[dict[str, Any]] = []
+
+    for raw_item in evidence_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        evidence_type = item.get("type")
+
+        if evidence_type not in ("image", "table"):
+            continue
+
+        if evidence_type == "image" and not item.get("url"):
+            continue
+
+        if evidence_type == "table" and not item.get("content"):
+            continue
+
+        item.setdefault("source", source)
+        item.setdefault("link", link)
+        cleaned_items.append(item)
+
+    if cleaned_items:
+        _THREAD_EVIDENCE_CACHE.setdefault(thread_id, []).extend(cleaned_items)
+
+def _absolutize_remote_evidence(evidence_items: Any, base_url: str) -> list[dict[str, Any]]:
+    """Rewrite relative evidence image URLs to absolute URLs on the remote host.
+
+    Evidence PNG crops live on the remote (prod VM) under EVIDENCE_URL_PREFIX
+    and are stored as relative URLs. A local dev reading prod vectors must
+    point <img> at the remote host, so we prefix relative urls with base_url.
+    """
+    if not isinstance(evidence_items, list):
+        return []
+
+    base = (base_url or "").rstrip("/")
+    rewritten: list[dict[str, Any]] = []
+
+    for raw_item in evidence_items:
+        if not isinstance(raw_item, dict):
+            continue
+
+        item = dict(raw_item)
+        url = item.get("url")
+
+        if url and isinstance(url, str) and not url.startswith(("http://", "https://")):
+            item["url"] = f"{base}{url}" if url.startswith("/") else f"{base}/{url}"
+
+        rewritten.append(item)
+
+    return rewritten
+
+
+async def _search_remote(
+    agent_id: str,
+    query: str,
+    k: int = 10,
+    thread_id: str | None = None,
+) -> str:
     """Proxy retrieval to a remote Ask SLT instance's /api/v1/kb endpoint.
 
     Used by local dev environments to skip ingestion and read prod vectors.
+    Also collects any visual/table evidence returned by the remote so devs
+    pointing at prod can see diagrams (with image URLs rewritten to the
+    remote host where the crops are actually served).
     """
     base = settings.KB_REMOTE_URL.rstrip("/")
     url = f"{base}/api/v1/kb/{agent_id}/retrieve"
@@ -52,6 +180,16 @@ async def _search_remote(agent_id: str, query: str, k: int = 10) -> str:
 
     if not chunks:
         return "No relevant documents found."
+
+    for c in chunks:
+        evidence = c.get("evidence")
+        if evidence:
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=_absolutize_remote_evidence(evidence, base),
+                source=c.get("source", "Unknown Source"),
+                link=c.get("link", "#"),
+            )
 
     return "\n\n---\n\n".join(
         f"[Source: {c.get('source', 'Unknown Source')} | Link: {c.get('link', '#')}]\n{c.get('text', '')}"
@@ -71,12 +209,42 @@ def _is_lifestore_agent(agent_id: str) -> bool:
 
 
 def _resolve_collection_name(agent_id: str) -> str:
-    lifestore_collection = _get_setting("LIFESTORE_QDRANT_COLLECTION", None)
+    """
+    Resolve the actual Qdrant collection used for retrieval.
 
-    if _is_lifestore_agent(agent_id) and lifestore_collection:
-        return lifestore_collection
+    Important:
+    - Ingestion may receive collection_name="lifestore".
+    - The backend ingestion layer creates the real Qdrant collection as "lifestore_docs".
+    - Retrieval must search the real Qdrant collection, not the base name.
+    """
+    if _is_lifestore_agent(agent_id):
+        # Explicit overrides are used verbatim — the operator names the exact
+        # collection (including any provider suffix) themselves.
+        explicit_search_collection = _get_setting(
+            "LIFESTORE_QDRANT_SEARCH_COLLECTION",
+            None,
+        )
 
-    return f"{agent_id}_docs"
+        if explicit_search_collection:
+            return explicit_search_collection
+
+        delete_collection = _get_setting(
+            "LIFESTORE_QDRANT_DELETE_COLLECTION",
+            None,
+        )
+
+        if delete_collection:
+            return delete_collection
+
+        base_collection = _get_setting("LIFESTORE_QDRANT_COLLECTION", "lifestore")
+
+        if not base_collection.endswith("_docs"):
+            base_collection = f"{base_collection}_docs"
+
+        # Namespace by embedding provider so gemini/openai collections coexist.
+        return f"{base_collection}{collection_suffix()}"
+
+    return agent_collection_name(agent_id)
 
 
 def _get_neo4j_driver():
@@ -110,6 +278,7 @@ async def _search_qdrant_knowledge_base(
     query: str,
     agent_id: str,
     k: int = 12,
+    thread_id: str | None = None,
 ) -> str:
     """Search the Qdrant knowledge base for documents relevant to the user's query.
 
@@ -130,7 +299,7 @@ async def _search_qdrant_knowledge_base(
 
     if settings.KB_REMOTE_URL:
         try:
-            return await _search_remote(agent_id, query, k=10)
+            return await _search_remote(agent_id, query, k=10, thread_id=thread_id)
         except Exception as e:
             log.exception(
                 f"Remote KB retrieval failed for agent='{agent_id}' "
@@ -199,7 +368,31 @@ async def _search_qdrant_knowledge_base(
                 or "#"
             )
 
-            title = doc.metadata.get("title") or "Untitled"
+            # Prefer the section heading captured at ingestion; fall back to
+            # the filename so citations never read "Untitled".
+            title = doc.metadata.get("title") or source or "Untitled"
+
+            # Collect any visual/table evidence attached to this chunk at
+            # ingestion time so chat.py can stream it to the frontend.
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=doc.metadata.get("evidence") or [],
+                source=source,
+                link=link,
+            )
+
+            evidence_items = (
+                doc.metadata.get("evidence")
+                or doc.metadata.get("evidence_items")
+                or []
+            )
+
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=evidence_items,
+                source=source,
+                link=link,
+            )
 
             context_parts.append(
                 f"[Vector Source: {source} | Link: {link} | Title: {title}]\n"
@@ -264,7 +457,10 @@ def _format_graph_rows(rows: list[dict]) -> str:
             specs = {}
 
         specs_text = ", ".join(f"{k}: {v}" for k, v in specs.items()) if specs else "None"
-        tags_text = ", ".join(tags) if tags else "None"
+        tags_text = ", ".join(str(tag) for tag in tags if tag) if tags else "None"
+
+        description = row.get("description") or ""
+        description = " ".join(str(description).split())
 
         parts.append(
             "\n".join(
@@ -277,8 +473,10 @@ def _format_graph_rows(rows: list[dict]) -> str:
                     f"Price: {row.get('price') or 'Unknown'}",
                     f"Stock Status: {row.get('stock_status') or 'Unknown'}",
                     f"URL: {row.get('url') or 'Unknown'}",
+                    f"Image URL: {row.get('image_url') or 'Unknown'}",
                     f"Tags: {tags_text}",
                     f"Specs: {specs_text}",
+                    f"Description: {description or 'No description available'}",
                 ]
             )
         )
@@ -470,6 +668,7 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
 async def search_knowledge_base(
     query: str,
     agent_id: Annotated[str, InjectedState("agent_id")],
+    thread_id: Annotated[str | None, InjectedState("thread_id")] = None,
 ) -> str:
     """
     Search knowledge base.
@@ -484,6 +683,7 @@ async def search_knowledge_base(
         query=query,
         agent_id=agent_id,
         k=12,
+        thread_id=thread_id,
     )
 
     if not _is_lifestore_agent(agent_id):
@@ -498,9 +698,9 @@ async def search_knowledge_base(
     graph_context = _search_lifestore_graph(query=query, limit=12)
 
     return f"""
-[NEO4J GRAPH FACTS - USE THESE FOR STOCK, PRICE, BRAND, CATEGORY, PRODUCT TYPE, URL]
+[NEO4J GRAPH FACTS - VERIFIED PRODUCT FACTS. USE THESE FOR NAME, BRAND, SELLER, PRICE, STOCK, CATEGORY, PRODUCT TYPE, URL, DESCRIPTION, FEATURES, AND SPECIFICATIONS]
 {graph_context}
 
-[QDRANT VECTOR CONTEXT - USE THIS FOR DESCRIPTIONS AND GENERAL PRODUCT DETAILS]
+[QDRANT VECTOR CONTEXT - VERIFIED PRODUCT PAGE CONTENT. USE THIS FOR DESCRIPTIONS, FUNCTIONALITIES, FEATURES, SPECIFICATIONS, AND GENERAL PRODUCT DETAILS]
 {qdrant_context}
 """.strip()

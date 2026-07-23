@@ -16,16 +16,35 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     
     # LLM and Embedding Configuration
-    LLM_PROVIDER: str = "gemini" # 'gemini', 'openai'
+    LLM_PROVIDER: str = "gemini" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'
     LLM_MODEL: str = "gemini-3-flash-preview"
     LLM_API_KEY: Optional[str] = None
     LLM_BASE_URL: Optional[str] = None
-    
-    EMBEDDING_PROVIDER: str = "gemini" # 'gemini', 'openai'
+
+    EMBEDDING_PROVIDER: str = "gemini" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'
     EMBEDDING_MODEL: str = "models/gemini-embedding-001"
     EMBEDDING_DIMENSIONS: int = 3072
     EMBEDDING_API_KEY: Optional[str] = None
     EMBEDDING_BASE_URL: Optional[str] = None
+
+    # Ingestion-only embedding override (for zero-downtime provider migrations).
+    # When INGESTION_EMBEDDING_PROVIDER is set, INGESTION embeds with this provider
+    # and writes that provider's collection namespace (e.g. *_docs_gemini), while
+    # RETRIEVAL keeps using EMBEDDING_PROVIDER (e.g. *_docs). This lets you build
+    # the new provider's collections in the background while still serving users
+    # from the old provider. Unset → ingestion uses EMBEDDING_* (normal behavior).
+    INGESTION_EMBEDDING_PROVIDER: Optional[str] = None
+    INGESTION_EMBEDDING_MODEL: Optional[str] = None
+    INGESTION_EMBEDDING_DIMENSIONS: Optional[int] = None
+    INGESTION_EMBEDDING_API_KEY: Optional[str] = None
+    INGESTION_EMBEDDING_BASE_URL: Optional[str] = None
+
+    # Vertex AI (Google Cloud). Used when LLM_PROVIDER / EMBEDDING_PROVIDER == "vertex".
+    # Auth is via a service-account JSON; the SDK reads GOOGLE_APPLICATION_CREDENTIALS
+    # (set below from .env, normalized to an absolute path).
+    VERTEX_PROJECT_ID: Optional[str] = None
+    VERTEX_LOCATION: str = "us-central1"
+    GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
 
     # Routing-only embedding model — used ONLY by the supervisor to score query
     # similarity against specialist profiles. Independent of the main embedding
@@ -36,6 +55,9 @@ class Settings(BaseSettings):
     ROUTING_EMBEDDING_API_KEY: Optional[str] = None
 
     # Guardrail Classifier (cheap/fast model for input safety)
+    # When GUARDRAIL_MODEL_ENABLED is False, the LLM classifier is skipped and
+    # only the deterministic regex pre-check runs (free, no model call).
+    GUARDRAIL_MODEL_ENABLED: bool = True
     GUARDRAIL_PROVIDER: str = "openai"
     GUARDRAIL_MODEL: str = "gpt-4.1-nano"
     GUARDRAIL_API_KEY: Optional[str] = None  # falls back to provider key
@@ -49,6 +71,12 @@ class Settings(BaseSettings):
 
     QDRANT_URL: str
     POSTGRES_URL: str
+
+    # Evidence previews for PDF/image/table references
+    EVIDENCE_STORAGE_DIR: str = "storage/evidence"
+    EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
+    EVIDENCE_RENDER_ZOOM: float = 1.75
+    EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
 
     # API key for external clients (e.g. voice assistant) hitting the Finance retrieval endpoint
     VOICE_ASSISTANT_API_KEY: Optional[str] = None
@@ -98,6 +126,73 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+# Make the Vertex service-account credentials discoverable by the Google SDK.
+# load_dotenv() above already copies GOOGLE_APPLICATION_CREDENTIALS into os.environ
+# if it was set in .env, but we normalize a relative path to an absolute one
+# (resolved against the project root) so it works regardless of the CWD uvicorn
+# is launched from.
+if settings.GOOGLE_APPLICATION_CREDENTIALS:
+    _cred_path = Path(settings.GOOGLE_APPLICATION_CREDENTIALS)
+    if not _cred_path.is_absolute():
+        _cred_path = ROOT_DIR / _cred_path
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(_cred_path)
+
+
+# ── Qdrant collection naming ────────────────────────────────────────────
+# A Qdrant collection's vectors depend ONLY on the embedding model that created
+# them, so the collection name is namespaced by EMBEDDING_PROVIDER (NOT the chat
+# LLM). OpenAI keeps the original unsuffixed names for backward compatibility;
+# Gemini (AI Studio) and Vertex AI both use the "_gemini" suffix so OpenAI and
+# Gemini collections can coexist in the same Qdrant instance. Switch providers
+# via .env and the matching collections are used automatically.
+_EMBEDDING_COLLECTION_SUFFIX = {
+    "openai": "",
+    "gemini": "_gemini",
+    "vertex": "_gemini",
+}
+
+
+def _suffix_for_provider(provider: Optional[str]) -> str:
+    """Qdrant collection suffix for a given embedding provider."""
+    return _EMBEDDING_COLLECTION_SUFFIX.get((provider or "").lower().strip(), "")
+
+
+def collection_suffix() -> str:
+    """Return the Qdrant collection suffix for the active (serving) provider."""
+    return _suffix_for_provider(settings.EMBEDDING_PROVIDER)
+
+
+def agent_collection_name(agent_id: str) -> str:
+    """Resolve the Qdrant collection for an agent's KB, namespaced by the SERVING
+    (retrieval) embedding provider.
+
+    e.g. agent_id="hr" -> "hr_docs" (openai) or "hr_docs_gemini" (gemini/vertex).
+
+    Note: the Ollama-backed SLM agent ("askhrslm") is excluded from this helper —
+    it always uses its own "askhrslm_docs" collection regardless of provider.
+    """
+    return f"{agent_id}_docs{collection_suffix()}"
+
+
+def ingestion_embedding_provider() -> str:
+    """Provider that INGESTION embeds with (override, else serving provider)."""
+    return settings.INGESTION_EMBEDDING_PROVIDER or settings.EMBEDDING_PROVIDER
+
+
+def ingestion_embedding_dimensions() -> int:
+    """Vector size for collections CREATED by ingestion (override, else serving)."""
+    return settings.INGESTION_EMBEDDING_DIMENSIONS or settings.EMBEDDING_DIMENSIONS
+
+
+def ingestion_agent_collection_name(agent_id: str) -> str:
+    """Resolve the Qdrant collection that INGESTION writes to, namespaced by the
+    ingestion embedding provider. When no ingestion override is set this equals
+    agent_collection_name(); when set (e.g. ingestion=vertex while serving=openai)
+    it targets the other provider's namespace (e.g. "hr_docs_gemini").
+    """
+    return f"{agent_id}_docs{_suffix_for_provider(ingestion_embedding_provider())}"
 
 
 def get_mail_config() -> ConnectionConfig:

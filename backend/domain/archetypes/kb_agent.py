@@ -13,6 +13,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from core.config import settings
 from core.llm import get_chat_model
+from domain.prompts import LANGUAGE_RULE
 from domain.state import AgentState
 from domain.tools.rag_tools import search_knowledge_base
 
@@ -22,6 +23,48 @@ llm = get_chat_model()
 # Bind the RAG tool so the LLM can decide to call it
 tools = [search_knowledge_base]
 llm_with_tools = llm.bind_tools(tools)
+
+
+# ── Per-agent identity overrides ─────────────────────────────────────────
+# The default identity frames every agent as an internal corporate department
+# ("You handle internal corporate {agent} queries only... decline unrelated
+# topics"). That framing is wrong for public-facing agents such as Rainbow
+# Pages (a public business/phone directory): the model has no real notion of
+# what "RAINBOWPAGES" is, so a directory lookup (e.g. a temple's phone number)
+# reads as "off-department" and the LLM intermittently declines WITHOUT calling
+# search_knowledge_base. Giving such agents a concrete identity makes directory
+# lookups unambiguously in-scope so retrieval fires every time.
+AGENT_PROFILES: dict[str, dict[str, str]] = {
+    "rainbowpages": {
+        "name": "Ask Rainbow Pages",
+        "identity": (
+            "You are Ask Rainbow Pages, SLTMobitel's public business and telephone "
+            "directory assistant. You help users find contact numbers, addresses, and "
+            "listings for businesses, organisations, temples, schools, government "
+            "offices, and other services across Sri Lanka.\n"
+            "Every request for a contact number, address, or business/place listing is "
+            "squarely in scope — it is a directory lookup, NOT an 'unrelated' or "
+            "'off-department' topic. You MUST call `search_knowledge_base` for such "
+            "requests before answering, and you must never decline without searching first."
+        ),
+        "out_of_scope": "clearly NOT a directory lookup (for example an internal HR, Finance, or IT policy question)",
+    },
+    "aiexpo": {
+        "name": "Ask AI EXPO",
+        "identity": (
+            "You are Ask AI EXPO, the public assistant for the National AI Expo & "
+            "Conference — Sri Lanka's national AI event. You help visitors with the "
+            "event itself: what it is, its agenda and sessions, speakers, partners, "
+            "venue, dates, registration, and news.\n"
+            "Every question about the expo, its programme, or the people and "
+            "organisations involved is squarely in scope — it is an event lookup, NOT "
+            "an 'unrelated' or 'off-department' topic. You MUST call "
+            "`search_knowledge_base` for such requests before answering, and you must "
+            "never decline without searching first."
+        ),
+        "out_of_scope": "clearly unrelated to the AI Expo (for example an internal SLTMobitel HR, Finance, or IT policy question)",
+    },
+}
 
 
 # ── Graph nodes ──────────────────────────────────────────────────────────
@@ -43,6 +86,14 @@ CONVERSATIONAL RULES:
 - Respond naturally to greetings, thank-yous, goodbyes, and small talk. Be friendly and warm.
 - Never introduce yourself as "Ask {agent_id.upper()}", a "{agent_id} specialist", or any department-specific assistant. You are Workmate AI.
 - Never mention "different department", "different specialist agent", "another team", "Ask SLT agent", routing, or that multiple agents exist."""
+    elif AGENT_PROFILES.get(agent_id):
+        profile = AGENT_PROFILES[agent_id]
+        identity_block = f"""{profile['identity']}
+
+CONVERSATIONAL RULES:
+- You CAN respond naturally to greetings (Hi, Hello, Good morning), thank-yous, goodbyes, and basic small talk. Be friendly and warm.
+- When greeting, briefly introduce yourself, e.g. "Hello! I'm {profile['name']}. How can I help you today?"
+- Only decline when a request is {profile['out_of_scope']}. In that case decline politely and suggest the appropriate Ask SLT agent."""
     else:
         identity_block = f"""You are the Ask {agent_id.upper()} AI assistant for SLTMobitel.
 Your primary purpose is to answer questions related to your specific department ({agent_id}).
@@ -73,6 +124,19 @@ RESPONSE FORMATTING RULES:
 4. BOLD KEY METRICS: Always bold crucial variables like times (e.g., **8.30 a.m.**), durations (e.g., **3.5 hours**), and quantities to make the text highly scannable.
 5. MARKDOWN SPACING: Use a double newline (blank line) between the direct answer and the bulleted list to ensure proper rendering. Do NOT use non-standard bullet characters like `•`.
 6. NO CLOSING QUESTIONS: Do not end your response with phrases like "Is there anything else I can help you with?". Just stop once the answer is complete.
+7. WORD COUNT LIMIT: Keep normal factual answers under 300 words unless the user explicitly asks for a detailed explanation.
+8. SENTENCE COUNT LIMIT: For simple policy questions, use maximum 7 short sentences or 7 bullet points.
+9. NO OVER-ANSWERING: Do not include unrelated policy sections, examples, or extra explanations unless the user asks.
+10. FINAL GROUNDING CHECK: Before finalizing, silently check that every factual claim, number, duration, condition, and exception appears in the retrieved context. If not, remove it.
+11. UNSUPPORTED ANSWER RULE: If the retrieved context does not clearly support the answer, reply: "I don't have that information available."
+"""
+
+    # ── Citations ─────────────────────────────────────────────────────
+    # Append a Sources section for internal agents. Public, embeddable
+    # agents (e.g. aiexpo) should return clean answers with no Sources
+    # section — the frontend shows nothing because none is generated.
+    if agent_id != "aiexpo":
+        system_prompt += """
 
 CITATIONS:
 1. In the context returned by the tool, each chunk starts with `[Source: <filename> | Link: <url>]`.
@@ -90,6 +154,9 @@ CITATIONS:
 
 TONE ADJUSTMENT:
 The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledge their frustration before answering. Use a warm, understanding tone."""
+
+    # ── Answer in the user's language ─────────────────────────────────
+    system_prompt += f"\n\n{LANGUAGE_RULE}"
 
     # Trim to the last 5 messages + system prompt for the LLM window,
     # but the full history stays in state for the checkpointer to persist.

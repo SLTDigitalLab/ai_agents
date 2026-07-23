@@ -3,6 +3,7 @@ import { AGENTS } from '../../config/agents';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import AdminLayout from './AdminLayout';
 
 const API_BASE = `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/admin/dashboard`;
 
@@ -20,6 +21,7 @@ const SessionDetail = ({ session, agent, onClose }) => {
     const [feedback, setFeedback] = useState({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [sessionMeta, setSessionMeta] = useState(null);
 
     useEffect(() => {
         if (!session) return;
@@ -39,6 +41,7 @@ const SessionDetail = ({ session, agent, onClose }) => {
         ])
             .then(([msgData, fbData]) => {
                 setMessages(msgData.messages || []);
+                setSessionMeta(msgData);
                 // Flatten feedback: { index: "up" | "down" } (take the first user's rating)
                 const fbMap = {};
                 for (const [idx, users] of Object.entries(fbData.feedback || {})) {
@@ -78,10 +81,45 @@ const SessionDetail = ({ session, agent, onClose }) => {
                         {/* Header */}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/80 backdrop-blur">
                             <div>
-                                <h3 className="text-white font-semibold text-lg">Session Detail</h3>
+                                <h3 className="text-white font-semibold text-lg">
+                                    {session.user_name || session.user_id || 'Session Detail'}
+                                </h3>
+                                {(session.user_name && session.user_id) && (
+                                    <p className="text-white/50 text-xs mt-0.5 truncate max-w-md">
+                                        {session.user_id}
+                                    </p>
+                                )}
+                                {(session.department || session.job_title) && (
+                                    <p className="flex items-center gap-2 mt-1">
+                                        {session.department && (
+                                            <span className="inline-block bg-cyan-500/10 text-cyan-300/80 px-2 py-0.5 rounded text-xs font-medium">
+                                                {session.department}
+                                            </span>
+                                        )}
+                                        {session.job_title && (
+                                            <span className="text-white/40 text-xs">
+                                                {session.job_title}
+                                            </span>
+                                        )}
+                                    </p>
+                                )}
                                 <p className="text-white/40 text-xs font-mono mt-0.5 truncate max-w-md">
                                     {session.session_id}
                                 </p>
+
+                                <div className="mt-2">
+                                    <p className="text-cyan-300/90 text-sm font-semibold truncate max-w-md">
+                                        {sessionMeta?.user_name && sessionMeta.user_name !== sessionMeta?.user_id
+                                            ? sessionMeta.user_name
+                                            : session?.user_name && session.user_name !== session?.user_id
+                                                ? session.user_name
+                                                : 'Name not saved'}
+                                    </p>
+
+                                    <p className="text-white/35 text-xs truncate max-w-md">
+                                        {sessionMeta?.user_id || session?.user_id || 'Email not available'}
+                                    </p>
+                                </div>
                             </div>
                             <button
                                 onClick={onClose}
@@ -243,83 +281,110 @@ const ChatBrowser = () => {
 
     const agentMeta = AGENT_LIST.find(a => a.id === selectedAgent);
 
+    const fieldClass =
+        'bg-white/[0.04] border border-white/[0.10] text-white rounded-2xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-400/50 transition-all placeholder:text-white/25';
+
+    const statCardClass =
+        'rounded-[24px] border border-white/[0.08] bg-white/[0.045] p-5 shadow-xl shadow-black/10 backdrop-blur-sm';
+
+    const tableCardClass =
+        'rounded-[28px] border border-white/[0.08] bg-white/[0.035] overflow-hidden shadow-2xl shadow-black/15 backdrop-blur-sm';
+
+    const tableHeaderClass =
+        'grid grid-cols-12 gap-4 px-6 py-4 border-b border-white/[0.08] bg-white/[0.035] text-white/45 text-xs uppercase tracking-wider font-bold';
+
+    const tableRowClass =
+        'grid grid-cols-12 gap-4 px-6 py-4 border-b border-white/[0.05] hover:bg-white/[0.045] cursor-pointer transition-colors group';
+
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 relative overflow-hidden">
-
-            {/* Ambient bg effects */}
-            <div className="absolute inset-0 pointer-events-none">
-                <div className="absolute top-[-15%] left-[-10%] w-[500px] h-[500px] rounded-full bg-cyan-500/[0.04] blur-3xl" />
-                <div className="absolute bottom-[-10%] right-[-5%] w-[600px] h-[600px] rounded-full bg-purple-500/[0.04] blur-3xl" />
-            </div>
-
-            <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-                {/* ── Header ────────────────────────────────────── */}
+        <AdminLayout
+            title="Chat Sessions"
+            subtitle="Browse and review past conversations across all agents."
+            backTo="/admin"
+            backLabel="Back to Dashboard"
+            backgroundVariant="legacy-dark"
+        >
+            <div className="relative z-10 max-w-7xl mx-auto">
+                {/* Toolbar */}
                 <motion.div
-                    initial={{ opacity: 0, y: -20 }}
+                    initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5 }}
-                    className="mb-8"
+                    transition={{ delay: 0.05 }}
+                    className="mb-6 rounded-[28px] border border-white/[0.08] bg-white/[0.035] p-4 shadow-xl shadow-black/10 backdrop-blur-sm"
                 >
-                    {/* Back link */}
-                    <a href="/admin" className="inline-flex items-center gap-2 text-white/40 hover:text-white/70 text-sm mb-6 transition-colors group">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                        </svg>
-                        Back to Dashboard
-                    </a>
-
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                         <div>
-                            <h1 className="text-3xl font-bold text-white tracking-tight">
-                                Chat Sessions
-                            </h1>
-                            <p className="text-white/40 text-sm mt-1">
-                                Browse and review past conversations across all agents
+                            <h2 className="text-white text-lg font-bold">
+                                Conversation Browser
+                            </h2>
+                            <p className="text-white/40 text-sm">
+                                Search sessions and filter conversations by agent.
                             </p>
                         </div>
 
-                        <div className="flex items-center gap-3">
-                            {/* Search input */}
+                        <div className="flex flex-col sm:flex-row gap-3">
                             <div className="relative">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-white/30 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    strokeWidth={2}
+                                    stroke="currentColor"
+                                    className="w-4 h-4 text-white/30 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                                >
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
                                 </svg>
+
                                 <input
                                     id="session-search"
                                     type="text"
                                     value={searchInput}
                                     onChange={(e) => handleSearchChange(e.target.value)}
                                     placeholder="Search conversations..."
-                                    className="bg-white/5 border border-white/10 text-white rounded-xl pl-9 pr-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-all placeholder:text-white/25 w-48 sm:w-64 hover:bg-white/10"
+                                    className={`${fieldClass} pl-9 w-full sm:w-72`}
                                 />
+
                                 {searchInput && (
                                     <button
-                                        onClick={() => { setSearchInput(''); setDebouncedSearch(''); setSkip(0); }}
-                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded text-white/30 hover:text-white/60 transition-colors"
+                                        type="button"
+                                        onClick={() => {
+                                            setSearchInput('');
+                                            setDebouncedSearch('');
+                                            setSkip(0);
+                                        }}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 text-white/35 hover:text-white/70 transition-colors"
                                     >
-                                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
-                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                        </svg>
+                                        ✕
                                     </button>
                                 )}
                             </div>
 
-                            {/* Agent dropdown */}
                             <div className="relative">
                                 <select
                                     id="agent-select"
                                     value={selectedAgent}
                                     onChange={(e) => handleAgentChange(e.target.value)}
-                                    className="appearance-none bg-white/5 border border-white/10 text-white rounded-xl px-4 py-2.5 pr-10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/40 transition-all cursor-pointer hover:bg-white/10"
+                                    className={`${fieldClass} appearance-none pr-10 w-full sm:w-56 cursor-pointer`}
                                 >
                                     {AGENT_LIST.map(agent => (
-                                        <option key={agent.id} value={agent.id} className="bg-slate-800 text-white">
+                                        <option
+                                            key={agent.id}
+                                            value={agent.id}
+                                            className="bg-slate-900 text-white"
+                                        >
                                             {agent.title}
                                         </option>
                                     ))}
                                 </select>
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4 text-white/40 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+
+                                <svg
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    strokeWidth={2}
+                                    stroke="currentColor"
+                                    className="w-4 h-4 text-white/35 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                                >
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
                                 </svg>
                             </div>
@@ -327,46 +392,65 @@ const ChatBrowser = () => {
                     </div>
                 </motion.div>
 
-                {/* ── Stats Bar ──────────────────────────────────── */}
+                {/* Stats Bar */}
                 <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.1 }}
-                    className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-6"
+                    className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6"
                 >
-                    <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-4">
-                        <p className="text-white/40 text-xs uppercase tracking-wider font-medium">{debouncedSearch ? 'Matching Sessions' : 'Total Sessions'}</p>
-                        <p className="text-2xl font-bold text-white mt-1">
+                    <div className={statCardClass}>
+                        <p className="text-white/45 text-xs uppercase tracking-wider font-bold">
+                            {debouncedSearch ? 'Matching Sessions' : 'Total Sessions'}
+                        </p>
+                        <p className="text-3xl font-bold text-white mt-2">
                             {total}
-                            {debouncedSearch && <span className="text-sm font-normal text-cyan-400/60 ml-2">for "{debouncedSearch}"</span>}
+                            {debouncedSearch && (
+                                <span className="text-sm font-medium text-cyan-300 ml-2">
+                                    for "{debouncedSearch}"
+                                </span>
+                            )}
                         </p>
                     </div>
-                    <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-4">
-                        <p className="text-white/40 text-xs uppercase tracking-wider font-medium">Current Agent</p>
-                        <p className="text-2xl font-bold text-cyan-400 mt-1">{agentMeta?.title || selectedAgent}</p>
+
+                    <div className={statCardClass}>
+                        <p className="text-white/45 text-xs uppercase tracking-wider font-bold">
+                            Current Agent
+                        </p>
+                        <p className="text-3xl font-bold text-cyan-300 mt-2">
+                            {agentMeta?.title || selectedAgent}
+                        </p>
                     </div>
-                    <div className="bg-white/[0.03] border border-white/[0.06] rounded-2xl p-4 hidden sm:block">
-                        <p className="text-white/40 text-xs uppercase tracking-wider font-medium">Page</p>
-                        <p className="text-2xl font-bold text-white mt-1">{currentPage} <span className="text-white/30 text-base font-normal">/ {totalPages || 1}</span></p>
+
+                    <div className={statCardClass}>
+                        <p className="text-white/45 text-xs uppercase tracking-wider font-bold">
+                            Page
+                        </p>
+                        <p className="text-3xl font-bold text-white mt-2">
+                            {currentPage}
+                            <span className="text-white/30 text-base font-medium">
+                                {' '} / {totalPages || 1}
+                            </span>
+                        </p>
                     </div>
                 </motion.div>
 
-                {/* ── Sessions Table ─────────────────────────────── */}
+                {/* Sessions Table */}
                 <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.2 }}
-                    className="bg-white/[0.02] border border-white/[0.06] rounded-2xl overflow-hidden"
+                    className={tableCardClass}
                 >
-                    {/* Table Header */}
-                    <div className="grid grid-cols-12 gap-4 px-6 py-3 border-b border-white/[0.06] bg-white/[0.02] text-white/40 text-xs uppercase tracking-wider font-semibold">
+                    <div className={tableHeaderClass}>
                         <div className="col-span-1">#</div>
-                        <div className="col-span-4">Session ID</div>
-                        <div className="col-span-2 text-center">Messages</div>
-                        <div className="col-span-5">Preview</div>
+                        <div className="col-span-3">User</div>
+                        <div className="col-span-2">Department</div>
+                        <div className="col-span-2">Session ID</div>
+                        <div className="col-span-1 text-center">Msgs</div>
+                        <div className="col-span-3">Preview</div>
                     </div>
 
-                    {/* Loading */}
                     {loading && (
                         <div className="flex items-center justify-center py-20">
                             <div className="flex items-center gap-3">
@@ -377,30 +461,25 @@ const ChatBrowser = () => {
                         </div>
                     )}
 
-                    {/* Error */}
                     {!loading && error && (
                         <div className="px-6 py-8 text-center">
-                            <div className="inline-flex items-center gap-2 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-red-400 text-sm">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
-                                </svg>
+                            <div className="inline-flex items-center gap-2 bg-red-500/10 border border-red-500/25 rounded-xl px-4 py-3 text-red-300 text-sm font-medium">
                                 {error}
                             </div>
                         </div>
                     )}
 
-                    {/* Empty State */}
                     {!loading && !error && sessions.length === 0 && (
                         <div className="px-6 py-16 text-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor" className="w-12 h-12 text-white/10 mx-auto mb-4">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 01-.825-.242m9.345-8.334a2.126 2.126 0 00-.476-.095 48.64 48.64 0 00-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0011.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
-                            </svg>
-                            <p className="text-white/30 text-sm">No chat sessions found for this agent</p>
-                            <p className="text-white/15 text-xs mt-1">Sessions will appear here once users start chatting</p>
+                            <p className="text-white/45 text-sm font-semibold">
+                                No chat sessions found for this agent
+                            </p>
+                            <p className="text-white/25 text-xs mt-1">
+                                Sessions will appear here once users start chatting.
+                            </p>
                         </div>
                     )}
 
-                    {/* Session Rows */}
                     {!loading && !error && sessions.map((session, i) => (
                         <motion.div
                             key={session.session_id}
@@ -408,68 +487,86 @@ const ChatBrowser = () => {
                             animate={{ opacity: 1 }}
                             transition={{ delay: i * 0.03 }}
                             onClick={() => setSelectedSession(session)}
-                            className="grid grid-cols-12 gap-4 px-6 py-4 border-b border-white/[0.04] hover:bg-white/[0.04] cursor-pointer transition-colors group"
+                            className={tableRowClass}
                         >
                             <div className="col-span-1 text-white/30 text-sm font-mono">
                                 {skip + i + 1}
                             </div>
-                            <div className="col-span-4 text-white/70 text-sm font-mono truncate group-hover:text-cyan-400 transition-colors">
-                                {session.session_id.substring(0, 20)}...
+                            <div className="col-span-3 truncate pr-2">
+                                <span className="block text-white/80 text-sm truncate group-hover:text-cyan-400 transition-colors">
+                                    {session.user_name || session.user_id || 'Anonymous'}
+                                </span>
+                                {session.user_name && session.user_id && (
+                                    <span className="block text-white/30 text-xs truncate">
+                                        {session.user_id}
+                                    </span>
+                                )}
                             </div>
-                            <div className="col-span-2 text-center">
-                                <span className="inline-flex items-center gap-1.5 bg-white/[0.06] text-white/60 px-2.5 py-1 rounded-full text-xs font-medium">
+                            <div className="col-span-2 truncate pr-2">
+                                {session.department ? (
+                                    <span className="inline-block max-w-full truncate bg-cyan-500/10 text-cyan-300/80 px-2 py-0.5 rounded text-xs font-medium align-middle">
+                                        {session.department}
+                                    </span>
+                                ) : (
+                                    <span className="text-white/20 text-xs">—</span>
+                                )}
+                                {session.job_title && (
+                                    <span className="block text-white/30 text-xs truncate mt-0.5">
+                                        {session.job_title}
+                                    </span>
+                                )}
+                            </div>
+                            <div className="col-span-2 text-white/50 text-sm font-mono truncate">
+                                {session.session_id.substring(0, 12)}...
+                            </div>
+                            <div className="col-span-1 text-center">
+                                <span className="inline-flex items-center gap-1 bg-white/[0.06] text-white/60 px-2 py-1 rounded-full text-xs font-medium">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3 h-3">
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.129.166 2.27.293 3.423.379.35.026.67.21.865.501L12 21l2.755-4.133a1.14 1.14 0 01.865-.501 48.172 48.172 0 003.423-.379c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0012 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018z" />
                                     </svg>
                                     {session.message_count}
                                 </span>
                             </div>
-                            <div className="col-span-5 text-white/50 text-sm truncate">
+                            <div className="col-span-3 text-white/50 text-sm truncate">
                                 {session.preview_text}
                             </div>
                         </motion.div>
                     ))}
 
-                    {/* Pagination Footer */}
                     {!loading && sessions.length > 0 && (
-                        <div className="flex items-center justify-between px-6 py-4 bg-white/[0.02] border-t border-white/[0.06]">
+                        <div className="flex items-center justify-between px-6 py-4 bg-white/[0.025] border-t border-white/[0.08]">
                             <button
+                                type="button"
                                 onClick={() => setSkip(Math.max(0, skip - limit))}
                                 disabled={skip === 0}
-                                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/10 border border-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/60"
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white/55 hover:text-cyan-300 hover:bg-white/[0.06] border border-white/[0.10] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/55"
                             >
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
-                                </svg>
                                 Previous
                             </button>
 
-                            <span className="text-white/30 text-sm">
+                            <span className="text-white/35 text-sm font-medium">
                                 Page {currentPage} of {totalPages || 1}
                             </span>
 
                             <button
+                                type="button"
                                 onClick={() => setSkip(skip + limit)}
                                 disabled={skip + limit >= total}
-                                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/10 border border-white/10 transition-all disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/60"
+                                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold text-white/55 hover:text-cyan-300 hover:bg-white/[0.06] border border-white/[0.10] transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-white/55"
                             >
                                 Next
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                                </svg>
                             </button>
                         </div>
                     )}
                 </motion.div>
-            </div>
 
-            {/* ── Slide-over Detail Panel ─────────────────────── */}
-            <SessionDetail
-                session={selectedSession}
-                agent={selectedAgent}
-                onClose={() => setSelectedSession(null)}
-            />
-        </div>
+                <SessionDetail
+                    session={selectedSession}
+                    agent={selectedAgent}
+                    onClose={() => setSelectedSession(null)}
+                />
+            </div>
+        </AdminLayout>
     );
 };
 

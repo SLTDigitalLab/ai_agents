@@ -15,3 +15,17 @@ export const loginRequest = {
     scopes: ["User.Read"],
     prompt: "select_account"
 };
+
+// Used only for automatic OneDrive ingestion.
+// This reads files accessible to the currently logged-in Microsoft account.
+export const graphTokenRequest = {
+  scopes: ["Files.Read"],
+};
+
+// Microsoft Graph endpoint used to read the signed-in user's profile.
+// `department` and `jobTitle` come from Azure AD directory attributes.
+export const graphConfig = {
+  meEndpoint:
+    "https://graph.microsoft.com/v1.0/me?$select=department,jobTitle,officeLocation",
+
+};

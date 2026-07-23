@@ -11,6 +11,8 @@ venv/
 .venv/
 env/
 .env
+.env.production
+env.production/
 
 # Node
 node_modules/
@@ -41,3 +43,7 @@ backend/service-account.json
 data/
 CLAUDE.md
 GEMINI.md
+backend/storage
+# LifeStore MCP runtime image cache (regenerated at runtime)
+mcp_lifestore/cache/
+mcp_lifestore/orders/
