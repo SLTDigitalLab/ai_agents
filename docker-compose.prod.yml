@@ -46,6 +46,11 @@ services:
       PYTHONUNBUFFERED: 1
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
       QDRANT_URL: http://db_qdrant:6333
+      # Ask LifeStore MCP — the backend talks to the mcp_lifestore container over
+      # the Docker network. Must override .env's LIFESTORE_MCP_URL, which points at
+      # 127.0.0.1 (that would resolve to the backend container itself).
+      LIFESTORE_MCP_TRANSPORT: streamable_http
+      LIFESTORE_MCP_URL: http://mcp_lifestore:8001/mcp
     env_file:
       - ./.env
     volumes:

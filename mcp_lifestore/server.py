@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import uvicorn
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP  # type: ignore
 
@@ -30,6 +34,40 @@ mcp = FastMCP(
     stateless_http=True,
     json_response=True,
 )
+
+
+class MCPBearerAuthMiddleware(BaseHTTPMiddleware):
+    """
+    Bearer-token authentication for LifeStore MCP Streamable HTTP.
+
+    If LIFESTORE_MCP_TOKEN is set, every HTTP request to the MCP server must include:
+
+        Authorization: Bearer <token>
+
+    If LIFESTORE_MCP_TOKEN is not set, authentication is skipped. This keeps local
+    development flexible while allowing secured staging/production deployments.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        expected_token = os.getenv("LIFESTORE_MCP_TOKEN", "").strip()
+
+        if not expected_token:
+            return await call_next(request)
+
+        auth_header = request.headers.get("authorization", "").strip()
+        expected_header = f"Bearer {expected_token}"
+
+        if auth_header != expected_header:
+            return JSONResponse(
+                {
+                    "error": "Unauthorized MCP request",
+                    "detail": "Missing or invalid bearer token.",
+                },
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        return await call_next(request)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -242,6 +280,264 @@ CATEGORY_ALIASES = {
 
 def normalize_space_lower(value: Any) -> str:
     return re.sub(r"\s+", " ", safe_text(value).lower()).strip()
+
+
+# ---------------------------------------------------------------------
+# Strict MCP input validation
+# ---------------------------------------------------------------------
+# These helpers validate tool inputs before the MCP server uses them.
+# The goal is not to decide whether a product exists; search/retrieval does that.
+# The goal is to reject unsafe, oversized, or unexpected values at the tool boundary.
+
+MAX_QUERY_LENGTH = int(os.getenv("LIFESTORE_MAX_QUERY_LENGTH", "240"))
+MAX_CATEGORY_LENGTH = int(os.getenv("LIFESTORE_MAX_CATEGORY_LENGTH", "120"))
+MAX_PRODUCT_QUERY_LENGTH = int(os.getenv("LIFESTORE_MAX_PRODUCT_QUERY_LENGTH", "240"))
+MAX_COMPARE_ITEMS = int(os.getenv("LIFESTORE_MAX_COMPARE_ITEMS", "6"))
+MAX_PRICE_VALUE = float(os.getenv("LIFESTORE_MAX_PRICE_VALUE", "10000000"))
+
+ALLOWED_SORT_VALUES = {
+    "relevance",
+    "price_asc",
+    "price_desc",
+    "price-low-high",
+    "price-high-low",
+    "low_to_high",
+    "high_to_low",
+    "name_asc",
+    "name",
+}
+
+ALLOWED_SEARCH_MODES = {
+    "auto",
+    "general",
+    "single_product",
+    "availability",
+    "purchase",
+    "exact",
+    "comparison",
+    "category",
+}
+
+AVAILABILITY_ALIASES = {
+    "in_stock": "in_stock",
+    "in stock": "in_stock",
+    "available": "in_stock",
+    "yes": "in_stock",
+    "out_stock": "out_of_stock",
+    "out_of_stock": "out_of_stock",
+    "out of stock": "out_of_stock",
+    "unavailable": "out_of_stock",
+    "sold out": "out_of_stock",
+    "no": "out_of_stock",
+}
+
+SUSPICIOUS_TEXT_MARKERS = (
+    "\x00",
+    "../",
+    "..\\",
+    "file://",
+    "javascript:",
+    "data:text",
+    "data:application",
+    "<script",
+    "</script",
+    "<?php",
+    "$(",
+    "`",
+)
+
+
+def invalid_input_response(field: str, message: str) -> dict[str, Any]:
+    return {
+        "status": "invalid_input",
+        "message": f"Invalid {field}: {message}",
+        "products": [],
+    }
+
+
+def validate_text_input(
+    value: Any,
+    field_name: str,
+    *,
+    max_length: int,
+    allow_blank: bool = False,
+    allow_lifestore_product_url: bool = True,
+) -> tuple[str, dict[str, Any] | None]:
+    text = safe_text(value)
+
+    if not text:
+        if allow_blank:
+            return "", None
+        return "", invalid_input_response(field_name, "value cannot be empty.")
+
+    if len(text) > max_length:
+        return "", invalid_input_response(
+            field_name,
+            f"value is too long. Maximum allowed length is {max_length} characters.",
+        )
+
+    lowered = text.lower()
+
+    for marker in SUSPICIOUS_TEXT_MARKERS:
+        if marker in lowered:
+            return "", invalid_input_response(
+                field_name,
+                f"value contains unsupported pattern: {marker}",
+            )
+
+    # Product lookup can accept a LifeStore product URL, but not arbitrary URLs.
+    if lowered.startswith(("http://", "https://")):
+        if not allow_lifestore_product_url:
+            return "", invalid_input_response(field_name, "URLs are not allowed here.")
+
+        if "lifestore.lk/product/" not in lowered:
+            return "", invalid_input_response(
+                field_name,
+                "only LifeStore product URLs are allowed.",
+            )
+
+    return text, None
+
+
+def bounded_int(
+    value: Any,
+    *,
+    default: int,
+    min_value: int,
+    max_value: int,
+) -> int:
+    try:
+        number = int(value)
+    except Exception:
+        number = default
+
+    return max(min(number, max_value), min_value)
+
+
+def validate_price_value(
+    value: Any,
+    field_name: str,
+) -> tuple[float | None, dict[str, Any] | None]:
+    if value is None or safe_text(value) == "":
+        return None, None
+
+    try:
+        number = float(value)
+    except Exception:
+        return None, invalid_input_response(field_name, "must be a valid number.")
+
+    if number < 0:
+        return None, invalid_input_response(field_name, "cannot be negative.")
+
+    if number > MAX_PRICE_VALUE:
+        return None, invalid_input_response(
+            field_name,
+            f"cannot exceed {MAX_PRICE_VALUE}.",
+        )
+
+    return number, None
+
+
+def validate_price_range(
+    min_price: Any,
+    max_price: Any,
+) -> tuple[float | None, float | None, dict[str, Any] | None]:
+    cleaned_min, error = validate_price_value(min_price, "min_price")
+    if error:
+        return None, None, error
+
+    cleaned_max, error = validate_price_value(max_price, "max_price")
+    if error:
+        return None, None, error
+
+    if cleaned_min is not None and cleaned_max is not None and cleaned_min > cleaned_max:
+        return None, None, invalid_input_response(
+            "price_range",
+            "min_price cannot be greater than max_price.",
+        )
+
+    return cleaned_min, cleaned_max, None
+
+
+def normalize_sort_value(sort: Any) -> tuple[str, dict[str, Any] | None]:
+    value = safe_text(sort).lower() or "relevance"
+
+    if value not in ALLOWED_SORT_VALUES:
+        return "relevance", invalid_input_response(
+            "sort",
+            f"unsupported sort value '{value}'.",
+        )
+
+    return value, None
+
+
+def normalize_search_mode(search_mode: Any) -> tuple[str, dict[str, Any] | None]:
+    value = safe_text(search_mode).lower() or "auto"
+
+    if value not in ALLOWED_SEARCH_MODES:
+        return "auto", invalid_input_response(
+            "search_mode",
+            f"unsupported search mode '{value}'.",
+        )
+
+    return value, None
+
+
+def normalize_requested_availability(
+    requested_availability: Any,
+) -> tuple[str, dict[str, Any] | None]:
+    value = normalize_space_lower(requested_availability or "in_stock")
+
+    if value not in AVAILABILITY_ALIASES:
+        return "in_stock", invalid_input_response(
+            "requested_availability",
+            f"unsupported availability value '{value}'.",
+        )
+
+    return AVAILABILITY_ALIASES[value], None
+
+
+def validate_product_query_list(
+    value: Any,
+) -> tuple[list[str], dict[str, Any] | None]:
+    parsed = parse_json_string_if_needed(value)
+
+    if parsed is None or parsed == "":
+        return [], None
+
+    if isinstance(parsed, str):
+        raw_items = [item for item in parsed.split(",")]
+    elif isinstance(parsed, list):
+        raw_items = parsed
+    else:
+        return [], invalid_input_response(
+            "product_queries",
+            "must be a list or comma-separated string.",
+        )
+
+    if len(raw_items) > MAX_COMPARE_ITEMS:
+        return [], invalid_input_response(
+            "product_queries",
+            f"too many products. Maximum allowed is {MAX_COMPARE_ITEMS}.",
+        )
+
+    cleaned_items: list[str] = []
+
+    for item in raw_items:
+        cleaned, error = validate_text_input(
+            item,
+            "product_queries item",
+            max_length=MAX_PRODUCT_QUERY_LENGTH,
+            allow_blank=True,
+            allow_lifestore_product_url=True,
+        )
+        if error:
+            return [], error
+
+        if cleaned:
+            cleaned_items.append(cleaned)
+
+    return cleaned_items, None
 
 
 def canonical_category_query(query: str) -> str:
@@ -746,9 +1042,41 @@ def lifestore_search_products(
         max_price = parsed_q.get("max_price", max_price)
         in_stock_only = bool(parsed_q.get("in_stock_only", in_stock_only))
         sort = str(parsed_q.get("sort", sort))
-        limit = int(parsed_q.get("limit", limit))
-        cursor = int(parsed_q.get("cursor", cursor))
+        limit = parsed_q.get("limit", limit)
+        cursor = parsed_q.get("cursor", cursor)
         currency = str(parsed_q.get("currency", currency))
+
+    q, error = validate_text_input(
+        q,
+        "q",
+        max_length=MAX_QUERY_LENGTH,
+        allow_blank=True,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    category, error = validate_text_input(
+        category,
+        "category",
+        max_length=MAX_CATEGORY_LENGTH,
+        allow_blank=True,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    min_price, max_price, error = validate_price_range(min_price, max_price)
+    if error:
+        return error
+
+    sort, error = normalize_sort_value(sort)
+    if error:
+        return error
+
+    limit = bounded_int(limit, default=10, min_value=1, max_value=24)
+    cursor = bounded_int(cursor, default=0, min_value=0, max_value=5000)
+    currency = "LKR"
 
     products = [normalize_product(product) for product in load_products()]
     requested_family = _family_requested_by_query(q, category)
@@ -876,6 +1204,8 @@ def lifestore_list_categories(depth: int = 1) -> dict[str, Any]:
 
     The depth parameter is accepted for compatibility, but the local LifeStore JSON currently stores flat categories.
     """
+    depth = bounded_int(depth, default=1, min_value=1, max_value=3)
+
     products = [normalize_product(product) for product in load_products()]
     category_counts: dict[str, int] = {}
 
@@ -924,8 +1254,21 @@ def lifestore_strict_category_products(
     if isinstance(parsed_category, dict):
         category = str(parsed_category.get("category", parsed_category.get("query", category)))
         in_stock_only = bool(parsed_category.get("in_stock_only", in_stock_only))
-        limit = int(parsed_category.get("limit", limit))
+        limit = parsed_category.get("limit", limit)
         currency = str(parsed_category.get("currency", currency))
+
+    category, error = validate_text_input(
+        category,
+        "category",
+        max_length=MAX_CATEGORY_LENGTH,
+        allow_blank=False,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    limit = bounded_int(limit, default=24, min_value=1, max_value=50)
+    currency = "LKR"
 
     canonical = canonical_category_query(category)
     products = [normalize_product(product) for product in load_products()]
@@ -2615,7 +2958,7 @@ def lifestore_hybrid_product_search(
 
     if isinstance(parsed_query, dict):
         query = str(parsed_query.get("query", parsed_query.get("q", query)))
-        limit = int(parsed_query.get("limit", limit))
+        limit = parsed_query.get("limit", limit)
         include_vector_evidence = bool(
             parsed_query.get("include_vector_evidence", include_vector_evidence)
         )
@@ -2624,16 +2967,37 @@ def lifestore_hybrid_product_search(
     else:
         query = safe_text(parsed_query)
 
-    query = safe_text(query)
-    product_query = safe_text(product_query)
-    search_mode = safe_text(search_mode or "auto") or "auto"
+    query, error = validate_text_input(
+        query,
+        "query",
+        max_length=MAX_QUERY_LENGTH,
+        allow_blank=False,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    product_query, error = validate_text_input(
+        product_query,
+        "product_query",
+        max_length=MAX_PRODUCT_QUERY_LENGTH,
+        allow_blank=True,
+        allow_lifestore_product_url=True,
+    )
+    if error:
+        return error
+
+    search_mode, error = normalize_search_mode(search_mode)
+    if error:
+        return error
+
+    limit = bounded_int(limit, default=5, min_value=1, max_value=8)
 
     # Important: for direct product or availability questions, the FastAPI proxy
     # passes a clean product_query extracted by the OpenAI planner. Searching the
     # full user sentence can accidentally match a whole category such as "router".
     retrieval_query = product_query or query
 
-    limit = max(int(limit), 1)
     if search_mode in {"single_product", "availability", "purchase", "exact"}:
         limit = min(limit, 1)
 
@@ -2700,14 +3064,15 @@ def lifestore_precise_product_lookup(
     This tool intentionally returns only one frontend-ready product card so the
     chat does not show a whole category for a single-product question.
     """
-    product_query = safe_text(product_query)
-
-    if not product_query:
-        return {
-            "status": "missing_product_query",
-            "message": "Please provide a product name, product ID, SKU, or product URL.",
-            "products": [],
-        }
+    product_query, error = validate_text_input(
+        product_query,
+        "product_query",
+        max_length=MAX_PRODUCT_QUERY_LENGTH,
+        allow_blank=False,
+        allow_lifestore_product_url=True,
+    )
+    if error:
+        return error
 
     return lifestore_hybrid_product_search(
         query=product_query,
@@ -2729,6 +3094,20 @@ def lifestore_availability_lookup(
     This avoids the old behavior where asking "is A available?" could return every
     product in A's category.
     """
+    product_query, error = validate_text_input(
+        product_query,
+        "product_query",
+        max_length=MAX_PRODUCT_QUERY_LENGTH,
+        allow_blank=False,
+        allow_lifestore_product_url=True,
+    )
+    if error:
+        return error
+
+    requested_availability, error = normalize_requested_availability(requested_availability)
+    if error:
+        return error
+
     lookup = lifestore_precise_product_lookup(
         product_query=product_query,
         include_vector_evidence=False,
@@ -2777,19 +3156,33 @@ def lifestore_compare_products(
     If it is not provided, the tool searches the query and returns up to `limit`
     products for a category-style comparison.
     """
-    parsed_queries = parse_json_string_if_needed(product_queries)
-    query = safe_text(query)
-    limit = max(min(int(limit or 4), 6), 2)
+    query, error = validate_text_input(
+        query,
+        "query",
+        max_length=MAX_QUERY_LENGTH,
+        allow_blank=True,
+        allow_lifestore_product_url=False,
+    )
+    if error:
+        return error
+
+    parsed_queries, error = validate_product_query_list(product_queries)
+    if error:
+        return error
+
+    if not query and not parsed_queries:
+        return invalid_input_response(
+            "query",
+            "provide either a comparison query or product_queries.",
+        )
+
+    limit = bounded_int(limit, default=4, min_value=2, max_value=6)
 
     collected: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    if isinstance(parsed_queries, list):
-        for item in parsed_queries:
-            item_query = safe_text(item)
-            if not item_query:
-                continue
-
+    if parsed_queries:
+        for item_query in parsed_queries:
             result = lifestore_precise_product_lookup(
                 product_query=item_query,
                 include_vector_evidence=include_vector_evidence,
@@ -2823,7 +3216,7 @@ def lifestore_compare_products(
     return {
         "status": "success" if collected else "not_found",
         "query": query,
-        "product_queries": parsed_queries if isinstance(parsed_queries, list) else [],
+        "product_queries": parsed_queries,
         "products": collected,
         "answer": answer,
         "retrieval": {
@@ -2922,4 +3315,18 @@ If the data is missing, say that the current LifeStore KB does not contain enoug
 
 
 if __name__ == "__main__":
-    mcp.run(transport=os.getenv("MCP_TRANSPORT", "streamable-http"))
+    transport = os.getenv("MCP_TRANSPORT", "streamable-http").strip().lower()
+    host = os.getenv("MCP_HOST", "0.0.0.0").strip()
+    port = int(os.getenv("MCP_PORT", "8001"))
+
+    if transport in {"streamable-http", "streamable_http", "http"}:
+        app = mcp.streamable_http_app()
+        app.add_middleware(MCPBearerAuthMiddleware)
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            log_level=os.getenv("MCP_LOG_LEVEL", "info").lower(),
+        )
+    else:
+        mcp.run(transport=transport)
