@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -28,20 +28,24 @@ const loadPayHere = () => {
  * backend by orderId — the chat/LLM never carries it. Payment is confirmed only
  * by the backend (webhook, or the reconcile fallback), never by this component.
  */
-const LifestoreCheckout = ({ orderId }) => {
+const EMPTY_CUSTOMER = {
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+};
+
+const LifestoreCheckout = forwardRef(({ orderId, customer: controlledCustomer, onCustomerChange }, ref) => {
     const [checkout, setCheckout] = useState(null);
     const [loadError, setLoadError] = useState('');
     // 'idle' | 'paying' | 'processing' | 'paid' | 'failed' | 'canceled'
     const [status, setStatus] = useState('idle');
-    const [customer, setCustomer] = useState({
-        first_name: '',
-        last_name: '',
-        email: '',
-        phone: '',
-    });
+    const [internalCustomer, setInternalCustomer] = useState(EMPTY_CUSTOMER);
     const [customerError, setCustomerError] = useState('');
 
     const pollRef = useRef(null);
+    const customer = controlledCustomer || internalCustomer;
+    const setCustomer = onCustomerChange || setInternalCustomer;
 
     // ── Fetch the authoritative checkout payload ──────────────────────────
     useEffect(() => {
@@ -169,6 +173,17 @@ const LifestoreCheckout = ({ orderId }) => {
 
     const onCustomer = (e) =>
         setCustomer((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+
+    useImperativeHandle(ref, () => ({
+        pay: handlePay,
+        getCustomer: () => ({ ...customer }),
+        isReadyToPay: () => (
+            !!customer.first_name.trim() &&
+            !!customer.last_name.trim() &&
+            isValidEmail(customer.email) &&
+            !!customer.phone.trim()
+        ),
+    }));
 
     // ── Render states ─────────────────────────────────────────────────────
     if (!orderId) return null;
@@ -344,6 +359,6 @@ const LifestoreCheckout = ({ orderId }) => {
             </div>
         </motion.div>
     );
-};
+});
 
 export default LifestoreCheckout;

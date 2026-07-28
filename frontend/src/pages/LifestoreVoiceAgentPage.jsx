@@ -16,13 +16,34 @@ import CallControls from '../components/voice_agent/CallControls';
 
 const LIFESTORE_REALTIME_PATH = '/api/v1/realtime/lifestore';
 const ASK_LIFESTORE_TOOL = 'ask_lifestore_chat';
+const SET_CHECKOUT_FIELD_TOOL = 'set_checkout_field';
+const GET_CHECKOUT_FORM_STATE_TOOL = 'get_checkout_form_state';
+const START_CHECKOUT_PAYMENT_TOOL = 'start_checkout_payment';
+const CHECKOUT_FIELDS = ['first_name', 'last_name', 'email', 'phone'];
+const CHECKOUT_FIELD_LABELS = {
+    first_name: 'first name',
+    last_name: 'last name',
+    email: 'email',
+    phone: 'phone number',
+};
+const EMPTY_CHECKOUT_CUSTOMER = {
+    first_name: '',
+    last_name: '',
+    email: '',
+    phone: '',
+};
 
 const LIFESTORE_SYSTEM_PROMPT = `You are Ask LifeStore, a live voice assistant for SLTMobitel LifeStore customers.
 For every LifeStore product, category, availability, comparison, cart, or checkout request, call ask_lifestore_chat.
 Do not answer product facts, prices, stock status, seller names, cart totals, or checkout details from memory.
 Keep spoken replies short and natural. Do not use markdown tables in voice replies.
 Never speak raw JSON, hidden product-card metadata, checkout tokens, URLs, or implementation markers.
-When checkout is prepared, tell the customer the checkout is ready on screen and that this is a sandbox demo if the chat result says so.`;
+When checkout is prepared, tell the customer the checkout is ready on screen and that this is a sandbox demo if the chat result says so.
+When the checkout form is visible, collect first name, last name, email, and phone number one at a time.
+After each customer answer, call set_checkout_field with the field and cleaned value so the visible form updates.
+If the customer corrects a value, call set_checkout_field again for that field.
+Before payment, call get_checkout_form_state, read back the collected details briefly, and ask for confirmation.
+Only after the customer clearly confirms, call start_checkout_payment.`;
 
 const createVoiceThreadId = () => {
     const random =
@@ -101,9 +122,11 @@ const LifestoreVoiceAgentPage = () => {
     const [showTranscript, setShowTranscript] = useState(false);
     const [productCards, setProductCards] = useState([]);
     const [checkoutOrderId, setCheckoutOrderId] = useState(null);
+    const [checkoutCustomer, setCheckoutCustomer] = useState(EMPTY_CHECKOUT_CUSTOMER);
 
     const pcRef = useRef(null);
     const dcRef = useRef(null);
+    const checkoutRef = useRef(null);
     const openaiAudioRef = useRef(null);
     const geminiWsRef = useRef(null);
     const audioContextRef = useRef(null);
@@ -112,10 +135,20 @@ const LifestoreVoiceAgentPage = () => {
     const nextPlayTimeRef = useRef(0);
     const sessionTokenRef = useRef(null);
     const voiceThreadIdRef = useRef(createVoiceThreadId());
+    const checkoutOrderIdRef = useRef(null);
+    const checkoutCustomerRef = useRef(EMPTY_CHECKOUT_CUSTOMER);
 
     useEffect(() => {
         if (transcript.length > 0) setShowTranscript(true);
     }, [transcript.length]);
+
+    useEffect(() => {
+        checkoutOrderIdRef.current = checkoutOrderId;
+    }, [checkoutOrderId]);
+
+    useEffect(() => {
+        checkoutCustomerRef.current = checkoutCustomer;
+    }, [checkoutCustomer]);
 
     useEffect(() => {
         fetch(`${API_URL}${LIFESTORE_REALTIME_PATH}/provider`)
@@ -160,6 +193,7 @@ const LifestoreVoiceAgentPage = () => {
             }
             if (item.type === 'checkout' && item.order_id) {
                 setCheckoutOrderId(item.order_id);
+                setCheckoutCustomer(EMPTY_CHECKOUT_CUSTOMER);
             }
         }
     }, []);
@@ -169,6 +203,97 @@ const LifestoreVoiceAgentPage = () => {
             dcRef.current.send(JSON.stringify(event));
         }
     }, []);
+
+    const isValidCheckoutEmail = (value = '') => /\S+@\S+\.\S+/.test(String(value).trim());
+
+    const checkoutFormSnapshot = useCallback(() => {
+        const customer = checkoutCustomerRef.current || EMPTY_CHECKOUT_CUSTOMER;
+        const missing_fields = CHECKOUT_FIELDS.filter((field) => {
+            if (field === 'email') return !isValidCheckoutEmail(customer.email);
+            return !String(customer[field] || '').trim();
+        });
+
+        return {
+            checkout_visible: !!checkoutOrderIdRef.current,
+            order_id: checkoutOrderIdRef.current,
+            customer,
+            missing_fields,
+            ready_to_pay: missing_fields.length === 0,
+        };
+    }, []);
+
+    const setCheckoutField = useCallback((field, value) => {
+        const normalizedField = String(field || '').trim();
+        if (!CHECKOUT_FIELDS.includes(normalizedField)) {
+            return {
+                ok: false,
+                message: `Unknown checkout field. Use one of: ${CHECKOUT_FIELDS.join(', ')}.`,
+                form: checkoutFormSnapshot(),
+            };
+        }
+
+        const cleanedValue = String(value || '').trim();
+        setCheckoutCustomer((prev) => ({
+            ...prev,
+            [normalizedField]: cleanedValue,
+        }));
+
+        const nextCustomer = {
+            ...(checkoutCustomerRef.current || EMPTY_CHECKOUT_CUSTOMER),
+            [normalizedField]: cleanedValue,
+        };
+        const nextMissingFields = CHECKOUT_FIELDS.filter((item) => {
+            if (item === 'email') return !isValidCheckoutEmail(nextCustomer.email);
+            return !String(nextCustomer[item] || '').trim();
+        });
+        checkoutCustomerRef.current = nextCustomer;
+
+        return {
+            ok: true,
+            field: normalizedField,
+            label: CHECKOUT_FIELD_LABELS[normalizedField],
+            value: cleanedValue,
+            form: {
+                ...checkoutFormSnapshot(),
+                customer: nextCustomer,
+                missing_fields: nextMissingFields,
+                ready_to_pay: nextMissingFields.length === 0,
+            },
+        };
+    }, [checkoutFormSnapshot]);
+
+    const startCheckoutPaymentFromVoice = useCallback(() => {
+        const form = checkoutFormSnapshot();
+        if (!form.checkout_visible) {
+            return { ok: false, message: 'Checkout is not visible yet.', form };
+        }
+        if (!form.ready_to_pay) {
+            return {
+                ok: false,
+                message: `Missing or invalid fields: ${form.missing_fields.map((item) => CHECKOUT_FIELD_LABELS[item] || item).join(', ')}.`,
+                form,
+            };
+        }
+        if (!checkoutRef.current?.pay) {
+            return { ok: false, message: 'Checkout payment control is not ready yet.', form };
+        }
+
+        checkoutRef.current.pay();
+        return { ok: true, message: 'Opening the PayHere sandbox checkout.', form };
+    }, [checkoutFormSnapshot]);
+
+    const handleCheckoutTool = useCallback((toolName, args = {}) => {
+        if (toolName === SET_CHECKOUT_FIELD_TOOL) {
+            return setCheckoutField(args.field, args.value);
+        }
+        if (toolName === GET_CHECKOUT_FORM_STATE_TOOL) {
+            return checkoutFormSnapshot();
+        }
+        if (toolName === START_CHECKOUT_PAYMENT_TOOL) {
+            return startCheckoutPaymentFromVoice();
+        }
+        return { ok: false, message: `Unsupported checkout tool: ${toolName}` };
+    }, [checkoutFormSnapshot, setCheckoutField, startCheckoutPaymentFromVoice]);
 
     const configureOpenAISession = useCallback(() => {
         sendOpenAIEvent({
@@ -193,6 +318,40 @@ const LifestoreVoiceAgentPage = () => {
                                 message: { type: 'string' },
                             },
                             required: ['message'],
+                        },
+                    },
+                    {
+                        type: 'function',
+                        name: SET_CHECKOUT_FIELD_TOOL,
+                        description: 'Update one visible LifeStore checkout form field from the customer voice answer.',
+                        parameters: {
+                            type: 'object',
+                            properties: {
+                                field: {
+                                    type: 'string',
+                                    enum: CHECKOUT_FIELDS,
+                                },
+                                value: { type: 'string' },
+                            },
+                            required: ['field', 'value'],
+                        },
+                    },
+                    {
+                        type: 'function',
+                        name: GET_CHECKOUT_FORM_STATE_TOOL,
+                        description: 'Read the current LifeStore checkout form values and missing fields before confirmation.',
+                        parameters: {
+                            type: 'object',
+                            properties: {},
+                        },
+                    },
+                    {
+                        type: 'function',
+                        name: START_CHECKOUT_PAYMENT_TOOL,
+                        description: 'Start the PayHere sandbox checkout after the customer confirms all checkout details are correct.',
+                        parameters: {
+                            type: 'object',
+                            properties: {},
                         },
                     },
                 ],
@@ -289,6 +448,28 @@ const LifestoreVoiceAgentPage = () => {
                         });
                         sendOpenAIEvent({ type: 'response.create' });
                     }
+                } else if (
+                    msg.name === SET_CHECKOUT_FIELD_TOOL ||
+                    msg.name === GET_CHECKOUT_FORM_STATE_TOOL ||
+                    msg.name === START_CHECKOUT_PAYMENT_TOOL
+                ) {
+                    let result;
+                    try {
+                        const args = JSON.parse(msg.arguments || '{}');
+                        result = handleCheckoutTool(msg.name, args);
+                    } catch (err) {
+                        result = { ok: false, message: err.message || 'Checkout tool failed.' };
+                    }
+
+                    sendOpenAIEvent({
+                        type: 'conversation.item.create',
+                        item: {
+                            type: 'function_call_output',
+                            call_id: msg.call_id,
+                            output: JSON.stringify(result),
+                        },
+                    });
+                    sendOpenAIEvent({ type: 'response.create' });
                 }
                 break;
             case 'error':
@@ -298,7 +479,7 @@ const LifestoreVoiceAgentPage = () => {
             default:
                 break;
         }
-    }, [applyLifeStoreEvents, configureOpenAISession, sendOpenAIEvent]);
+    }, [applyLifeStoreEvents, configureOpenAISession, handleCheckoutTool, sendOpenAIEvent]);
 
     const playGeminiAudioChunk = useCallback((base64Data) => {
         if (!audioContextRef.current) return;
@@ -328,6 +509,7 @@ const LifestoreVoiceAgentPage = () => {
         setShowTranscript(false);
         setProductCards([]);
         setCheckoutOrderId(null);
+        setCheckoutCustomer(EMPTY_CHECKOUT_CUSTOMER);
 
         try {
             const sessionToken = await getSessionToken();
@@ -447,8 +629,23 @@ const LifestoreVoiceAgentPage = () => {
                         if (Array.isArray(msg.products)) setProductCards(msg.products);
                         break;
                     case 'checkout':
-                        if (msg.order_id) setCheckoutOrderId(msg.order_id);
+                        if (msg.order_id) {
+                            setCheckoutOrderId(msg.order_id);
+                            setCheckoutCustomer(EMPTY_CHECKOUT_CUSTOMER);
+                        }
                         break;
+                    case 'checkout_tool_call': {
+                        const result = handleCheckoutTool(msg.tool_name, msg.args || {});
+                        if (ws.readyState === WebSocket.OPEN) {
+                            ws.send(JSON.stringify({
+                                type: 'checkout_tool_result',
+                                tool_name: msg.tool_name,
+                                call_id: msg.call_id || '',
+                                result,
+                            }));
+                        }
+                        break;
+                    }
                     case 'turn_complete':
                         setTranscript((prev) => {
                             const last = prev[prev.length - 1];
@@ -620,6 +817,7 @@ const LifestoreVoiceAgentPage = () => {
                                     type="button"
                                     onClick={() => {
                                         setCheckoutOrderId(null);
+                                        setCheckoutCustomer(EMPTY_CHECKOUT_CUSTOMER);
                                         setStatusText('Checkout closed');
                                     }}
                                     className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900 dark:border-white/[0.08] dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white"
@@ -627,7 +825,12 @@ const LifestoreVoiceAgentPage = () => {
                                     Close checkout
                                 </button>
                             </div>
-                            <LifestoreCheckout orderId={checkoutOrderId} />
+                            <LifestoreCheckout
+                                ref={checkoutRef}
+                                orderId={checkoutOrderId}
+                                customer={checkoutCustomer}
+                                onCustomerChange={setCheckoutCustomer}
+                            />
                         </div>
                     )}
 
