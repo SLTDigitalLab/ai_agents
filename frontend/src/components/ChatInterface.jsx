@@ -1215,6 +1215,8 @@ const ScrollToLatestPill = ({ onClick, color }) => (
 const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const { accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
+    const isLifeStoreAgent = agentConfig?.id === "lifestore";
+    const chatUserId = isLifeStoreAgent ? "anonymous" : (user.username || "anonymous");
 
     // State for thread ID and messages
     const [threadId, setThreadId] = useState('');
@@ -1293,7 +1295,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
                         if (fbRes.ok) {
                             const fbData = await fbRes.json();
-                            const userId = user.username || "anonymous";
+                            const userId = chatUserId;
                             const map = {};
 
                             for (const [idx, users] of Object.entries(fbData.feedback || {})) {
@@ -1331,7 +1333,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         return () => {
             isMounted = false;
         };
-    }, [agentConfig.id, agentConfig.title, user.name]);
+    }, [agentConfig.id, agentConfig.title, chatUserId]);
 
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -1527,7 +1529,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 body: JSON.stringify({
                     message: text,
                     agent_id: agentConfig.id,
-                    user_id: user.username || "anonymous",
+                    user_id: chatUserId,
                     thread_id: threadId,
                 }),
                 signal: controller.signal,
@@ -2011,7 +2013,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                             messageIndex={index}
                                                             agentId={agentConfig.id}
                                                             threadId={threadId}
-                                                            userId={user.username || "anonymous"}
+                                                            userId={chatUserId}
                                                             existingRating={feedbackMap[index] || null}
                                                             onFeedback={(idx, rating) => {
                                                                 setFeedbackMap(prev => {

@@ -3,6 +3,7 @@ Chat router - connects the React frontend to the LangGraph agent system with str
 Includes input guardrails (LLM-based intent + sentiment classification) run before the agent.
 """
 
+import json
 import logging
 import re
 from typing import AsyncGenerator
@@ -21,6 +22,15 @@ router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
 
 BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
+
+# Hidden metadata block the frontend parses into the LifeStore product-card
+# slideshow. The LLM is *asked* to emit this in its answer, but small models
+# (gpt-4o-mini) skip it unreliably. We append it deterministically after the
+# stream from the last tool result so the slideshow renders every time image-
+# ready products were returned. Must match frontend/src/components/ChatInterface.jsx.
+PRODUCT_CARDS_START = "[LIFESTORE_PRODUCT_CARDS]"
+PRODUCT_CARDS_END = "[/LIFESTORE_PRODUCT_CARDS]"
+PRODUCT_CARD_MAX_ITEMS = 24
 
 
 def _join_text_parts(parts: list[str]) -> str:
@@ -75,6 +85,71 @@ def _message_content_to_text(content, strip: bool = True) -> str:
         return ""
 
     return str(content).strip() if strip else str(content)
+
+
+def _tool_output_to_text(output) -> str:
+    """Normalize an ``on_tool_end`` event output into plain text."""
+    content = getattr(output, "content", output)
+    if isinstance(content, str):
+        return content
+    return _message_content_to_text(content, strip=False)
+
+
+def _parse_product_cards_from_text(text: str) -> tuple[list, str]:
+    """
+    Parse an image-safe ``product_cards`` list out of a single LifeStore tool
+    output string.
+
+    The LifeStore tool wrappers return JSON that includes ``product_cards``
+    (the image-safe frontend-ready subset) and a ``display`` hint. Returns
+    ``(product_cards, display)`` or ``([], "")`` when the payload has none.
+    """
+    if not text or "product_cards" not in text:
+        return [], ""
+
+    data = None
+    try:
+        data = json.loads(text)
+    except Exception:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            try:
+                data = json.loads(text[start : end + 1])
+            except Exception:
+                data = None
+
+    if not isinstance(data, dict):
+        return [], ""
+
+    cards = data.get("product_cards")
+    if isinstance(cards, list) and cards:
+        display = str(data.get("display") or ("carousel" if len(cards) > 1 else "single"))
+        return cards[:PRODUCT_CARD_MAX_ITEMS], display
+
+    return [], ""
+
+
+def _extract_current_turn_product_cards(tool_output_texts: list) -> tuple[list, str]:
+    """
+    Find the most recent product-card payload among tool outputs produced in
+    the CURRENT turn only.
+
+    Scoping to the current run (rather than the full checkpointed thread
+    history) prevents a stale product search from re-injecting a slideshow on
+    a later, unrelated turn such as add-to-cart or checkout.
+    """
+    for text in reversed(tool_output_texts):
+        cards, display = _parse_product_cards_from_text(text)
+        if cards:
+            return cards, display
+    return [], ""
+
+
+def _build_product_cards_block(cards: list, display: str) -> str:
+    """Render the hidden product-card block the frontend slideshow parses."""
+    payload = json.dumps({"display": display, "products": cards}, ensure_ascii=False)
+    return f"\n\n{PRODUCT_CARDS_START}{payload}{PRODUCT_CARDS_END}"
 
 
 @router.post("")
@@ -149,8 +224,15 @@ async def chat(request: ChatRequest):
 
     async def event_generator() -> AsyncGenerator[str, None]:
         try:
-            # Thread config enables LangGraph memory/checkpointing per conversation
-            config = {"configurable": {"thread_id": request.thread_id}}
+            # Thread config enables LangGraph memory/checkpointing per conversation.
+            # user_id is also passed through so LifeStore cart tools can keep a
+            # customer cart across logout/login without changing the chat API.
+            config = {
+                "configurable": {
+                    "thread_id": request.thread_id,
+                    "user_id": request.user_id,
+                }
+            }
 
             # ── Run guardrail classifier FIRST ──────────────────────────
             # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
@@ -203,6 +285,11 @@ async def chat(request: ChatRequest):
                 graph = workflow.compile(checkpointer=checkpointer)
 
                 streamed_any_text = False
+                streamed_text = ""
+                # Tool outputs produced in THIS turn only, used to append the
+                # product-card slideshow deterministically. Scoped to the
+                # current run so a stale search does not re-inject on later turns.
+                tool_output_texts: list[str] = []
 
                 project_name = f"Ask SLT - {request.agent_id.upper()}"
                 with tracing_v2_enabled(project_name=project_name):
@@ -235,6 +322,14 @@ async def chat(request: ChatRequest):
                     async for event in graph.astream_events(state, config, version="v2"):
                         # ── Extract tokens from stream events ────────
                         kind = event["event"]
+
+                        if kind == "on_tool_end":
+                            # Capture this turn's tool outputs so we can append
+                            # the product-card slideshow after the answer streams.
+                            tool_text = _tool_output_to_text((event.get("data") or {}).get("output"))
+                            if tool_text:
+                                tool_output_texts.append(tool_text)
+                            continue
 
                         if kind == "on_chat_model_stream":
                             metadata = event.get("metadata") or {}
@@ -287,6 +382,7 @@ async def chat(request: ChatRequest):
 
                             if text:
                                 streamed_any_text = True
+                                streamed_text += text
                                 yield text
 
                 # Fallback: if the graph responded without streaming tokens,
@@ -306,8 +402,28 @@ async def chat(request: ChatRequest):
                                         request.agent_id,
                                         request.thread_id,
                                     )
+                                    streamed_text += text
                                     yield text
                                     break
+
+                # Deterministic product-card injection.
+                # The LLM is asked to append the hidden [LIFESTORE_PRODUCT_CARDS]
+                # block, but small models skip it unreliably. If it didn't emit
+                # one, append it ourselves from the last tool result's image-safe
+                # product_cards so the frontend slideshow renders every time.
+                if PRODUCT_CARDS_START not in streamed_text:
+                    try:
+                        cards, display = _extract_current_turn_product_cards(tool_output_texts)
+                        if cards:
+                            logger.info(
+                                "Injected %d LifeStore product card(s) | agent=%s | thread=%s",
+                                len(cards),
+                                request.agent_id,
+                                request.thread_id,
+                            )
+                            yield _build_product_cards_block(cards, display)
+                    except Exception as inject_exc:
+                        logger.warning("Product-card injection skipped: %s", inject_exc)
 
         except Exception as exc:
             import traceback
