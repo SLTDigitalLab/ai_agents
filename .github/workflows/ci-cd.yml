@@ -4,7 +4,7 @@
 #
 # Jobs:
 #   1. test           — Install Python deps, run existing pytest file
-#   2. build-and-push — Build backend + frontend Docker images, push to GHCR
+#   2. build-and-push — Build backend + frontend + mcp_lifestore Docker images, push to GHCR
 #   3. deploy         — SSH into VM, pull new images, restart compose stack
 # ============================================================
 
@@ -172,6 +172,21 @@ jobs:
             ghcr.io/sltdigitallab/ai_agents/frontend:latest
             ghcr.io/sltdigitallab/ai_agents/frontend:${{ steps.sha.outputs.short }}
 
+      # Build and push the MCP Lifestore server image.
+      # Context is the repo root because the Dockerfile copies both
+      # backend/ and mcp_lifestore/ directories.
+      - name: Build & push mcp_lifestore image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./mcp_lifestore/Dockerfile
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/sltdigitallab/ai_agents/mcp_lifestore:latest
+            ghcr.io/sltdigitallab/ai_agents/mcp_lifestore:${{ steps.sha.outputs.short }}
+
   # ============================================================
   # JOB 3 — deploy
   # Runs only after build-and-push succeeds.
@@ -210,13 +225,14 @@ jobs:
             # 3. Pull the newly-built images
             docker pull ghcr.io/sltdigitallab/ai_agents/backend:latest
             docker pull ghcr.io/sltdigitallab/ai_agents/frontend:latest
+            docker pull ghcr.io/sltdigitallab/ai_agents/mcp_lifestore:latest
 
             # 4. Create Docker network if it doesn't already exist
             docker network create slt-network 2>/dev/null || true
 
             # 5. Stop and remove old slt containers (ignore errors if not running)
-            docker stop slt_backend slt_frontend slt_postgres slt_qdrant 2>/dev/null || true
-            docker rm   slt_backend slt_frontend slt_postgres slt_qdrant 2>/dev/null || true
+            docker stop slt_backend slt_frontend slt_postgres slt_qdrant slt_mcp_lifestore 2>/dev/null || true
+            docker rm   slt_backend slt_frontend slt_postgres slt_qdrant slt_mcp_lifestore 2>/dev/null || true
 
             # 6. Start Postgres
             #    NOTE: If this container keeps crashing, it is almost always because the
@@ -265,12 +281,32 @@ jobs:
               -e PYTHONUNBUFFERED=1 \
               -e POSTGRES_URL=postgresql://slt:slt123@slt_postgres:5432/slt_db \
               -e QDRANT_URL=http://slt_qdrant:6333 \
+              -e LIFESTORE_MCP_TRANSPORT=streamable_http \
+              -e LIFESTORE_MCP_URL=http://slt_mcp_lifestore:8001/mcp \
               -v /root/slt-app/data/evidence:/app/storage/evidence \
               --restart always \
               ghcr.io/sltdigitallab/ai_agents/backend:latest \
               uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info
 
-            # 10. Start Frontend
+            # 10. Start MCP Lifestore server
+            #     Depends on Postgres, Qdrant, and the backend being started.
+            #     Mirrors the docker-compose.yml mcp_lifestore service.
+            mkdir -p /root/slt-app/data/real
+            docker run -d --name slt_mcp_lifestore \
+              --network slt-network \
+              -p 8001:8001 \
+              --env-file /root/slt-app/.env \
+              -e MCP_TRANSPORT=streamable-http \
+              -e MCP_HOST=0.0.0.0 \
+              -e MCP_PORT=8001 \
+              -e PYTHONPATH=/app/backend:/app \
+              -e QDRANT_URL=http://slt_qdrant:6333 \
+              -e ADMIN_BASE_URL=http://slt_backend:8000 \
+              -v /root/slt-app/data/real:/app/backend/data/real:ro \
+              --restart always \
+              ghcr.io/sltdigitallab/ai_agents/mcp_lifestore:latest
+
+            # 11. Start Frontend
             docker run -d --name slt_frontend \
               --network slt-network \
               -p 127.0.0.1:3100:3000 \
@@ -278,13 +314,13 @@ jobs:
               --restart always \
               ghcr.io/sltdigitallab/ai_agents/frontend:latest
 
-            # 11. Wait for application containers to initialise
+            # 12. Wait for application containers to initialise
             sleep 20
 
-            # 12. Print status for the Actions log
+            # 13. Print status for the Actions log
             docker ps --filter name=slt
 
-            # 13. Fail if any slt_ container is not in "Up" state
+            # 14. Fail if any slt_ container is not in "Up" state
             if docker ps --filter name=slt --format '{{.Names}} {{.Status}}' | grep -v "^$" | grep -qv "Up"; then
               echo "ERROR: One or more slt containers are not healthy:"
               docker ps -a --filter name=slt --format 'table {{.Names}}\t{{.Status}}'
