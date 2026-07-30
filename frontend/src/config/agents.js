@@ -187,5 +187,16 @@ export const AGENTS = {
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
         idlePrompt: "Ask about speakers, the agenda, partners, or event dates.",
         disclaimer: "Event information is sourced from aiexpo.lk and may change. Please verify critical details on the official website."
+    },
+
+    // 15. MintCRM (knowledge base only)
+    askmintcrm: {
+        id: "mintcrm",
+        title: "ASK MINTCRM",
+        subtitle: "Guidance on MintCRM — modules, workflows, user roles, configuration, and troubleshooting.",
+        color: "from-lime-900 to-lime-600",
+        buttonColor: "bg-lime-600 hover:bg-lime-700",
+        idlePrompt: "Ask about MintCRM modules, workflows, or how to complete a task.",
+        disclaimer: "If you need any further clarifications, please reach out to the MintCRM support team."
     }
 };
