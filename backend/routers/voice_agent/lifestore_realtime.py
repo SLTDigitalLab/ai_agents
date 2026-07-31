@@ -42,7 +42,10 @@ When the checkout form is visible, collect first name, last name, email, and pho
 After each customer answer, call set_checkout_field with the field and cleaned value so the visible form updates.
 If the customer corrects a value, call set_checkout_field again for that field.
 Before payment, call get_checkout_form_state, read back the collected details briefly, and ask for confirmation.
-Only after the customer clearly confirms, call start_checkout_payment."""
+Only after the customer clearly confirms, call start_checkout_payment.
+If the customer asks to close or hide the checkout card, call close_checkout.
+If the customer asks to show the checkout card again, call show_checkout.
+If the customer asks to clear, close, or hide the product cards, call clear_product_cards."""
 
 ASK_LIFESTORE_TOOL_NAME = "ask_lifestore_chat"
 ASK_LIFESTORE_TOOL_DESCRIPTION = (
@@ -65,6 +68,9 @@ CHECKOUT_FIELD_TOOL_NAMES = {
     "set_checkout_field",
     "get_checkout_form_state",
     "start_checkout_payment",
+    "clear_product_cards",
+    "close_checkout",
+    "show_checkout",
 }
 
 SET_CHECKOUT_FIELD_TOOL_PARAMETERS = {
@@ -369,6 +375,21 @@ async def lifestore_voice_proxy(websocket: WebSocket):
                                 {
                                     "name": "start_checkout_payment",
                                     "description": "Start the PayHere sandbox checkout after the customer confirms all checkout details are correct.",
+                                    "parameters": EMPTY_TOOL_PARAMETERS,
+                                },
+                                {
+                                    "name": "clear_product_cards",
+                                    "description": "Clear or hide the visible LifeStore product cards panel.",
+                                    "parameters": EMPTY_TOOL_PARAMETERS,
+                                },
+                                {
+                                    "name": "close_checkout",
+                                    "description": "Close or hide the visible LifeStore checkout card without canceling the cart.",
+                                    "parameters": EMPTY_TOOL_PARAMETERS,
+                                },
+                                {
+                                    "name": "show_checkout",
+                                    "description": "Show the latest LifeStore checkout card again after it was closed.",
                                     "parameters": EMPTY_TOOL_PARAMETERS,
                                 },
                             ]
