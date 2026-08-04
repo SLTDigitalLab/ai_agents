@@ -37,7 +37,7 @@ router = APIRouter(prefix="/api/v1/realtime", tags=["realtime"])
 CHAT_API_URL = "http://localhost:8000/api/v1/chat"
 
 # Model identifiers
-OPENAI_REALTIME_MODEL = "gpt-realtime-2"
+OPENAI_REALTIME_MODEL = "gpt-realtime"
 GEMINI_LIVE_MODEL     = "gemini-live-2.5-flash-preview-native-audio-09-2025"
 
 # Audio format sent from the browser — must match the mic capture sample rate
@@ -134,11 +134,22 @@ def _pick_filler(question: str) -> str:
     return random.choice(FILLERS.get(lang, FILLERS["en"]))
 
 
-def _active_provider() -> str:
-    if settings.GOOGLE_APPLICATION_CREDENTIALS:
-        return "gemini"
+def _active_provider():
+
+    provider = (
+        getattr(settings, "VOICE_PROVIDER", "")
+        or os.getenv("VOICE_PROVIDER", "")
+    ).strip().lower()
+
+    if provider in ("openai", "gemini"):
+        return provider
+
     if settings.OPENAI_API_KEY:
         return "openai"
+
+    if settings.GOOGLE_APPLICATION_CREDENTIALS:
+        return "gemini"
+
     return "none"
 
 

@@ -2,7 +2,7 @@
 #tools.py (voice agent tools)
 # shared constants used by both gemini_proxy.py and realtime.py
 
-OPENAI_REALTIME_MODEL = "gpt-realtime-2"
+OPENAI_REALTIME_MODEL = "gpt-realtime"
 GEMINI_LIVE_MODEL = "gemini-live-2.5-flash-preview-native-audio-09-2025"
 
 VOICE_SYSTEM_PROMPT = """You are Workmate AI, the intelligent voice assistant for SLTMobitel employees.
