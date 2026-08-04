@@ -731,7 +731,7 @@ const LifestoreVoiceAgentPage = () => {
         await pc.setLocalDescription(offer);
         setStatusText('Negotiating connection...');
 
-        const sdpRes = await fetch('https://api.openai.com/v1/realtime/calls?model=gpt-realtime-2', {
+        const sdpRes = await fetch('https://api.openai.com/v1/realtime/calls?model=gpt-realtime', {
             method: 'POST',
             headers: { Authorization: `Bearer ${ephemeralKey}`, 'Content-Type': 'application/sdp' },
             body: offer.sdp,
