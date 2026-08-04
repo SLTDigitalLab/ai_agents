@@ -37,7 +37,15 @@ For every LifeStore product, category, availability, comparison, cart, or checko
 Do not answer product facts, prices, stock status, seller names, cart totals, or checkout details from memory.
 Keep spoken replies short and natural. Do not use markdown tables in voice replies.
 Never speak raw JSON, hidden product-card metadata, checkout tokens, URLs, or implementation markers.
-When checkout is prepared, tell the customer the checkout is ready on screen and that this is a sandbox demo if the chat result says so."""
+When checkout is prepared, tell the customer the checkout is ready on screen and that this is a sandbox demo if the chat result says so.
+When the checkout form is visible, collect first name, last name, email, and phone number one at a time.
+After each customer answer, call set_checkout_field with the field and cleaned value so the visible form updates.
+If the customer corrects a value, call set_checkout_field again for that field.
+Before payment, call get_checkout_form_state, read back the collected details briefly, and ask for confirmation.
+Only after the customer clearly confirms, call start_checkout_payment.
+If the customer asks to close or hide the checkout card, call close_checkout.
+If the customer asks to show the checkout card again, call show_checkout.
+If the customer asks to clear, close, or hide the product cards, call clear_product_cards."""
 
 ASK_LIFESTORE_TOOL_NAME = "ask_lifestore_chat"
 ASK_LIFESTORE_TOOL_DESCRIPTION = (
@@ -54,6 +62,32 @@ ASK_LIFESTORE_TOOL_PARAMETERS = {
         },
     },
     "required": ["message"],
+}
+
+CHECKOUT_FIELD_TOOL_NAMES = {
+    "set_checkout_field",
+    "get_checkout_form_state",
+    "start_checkout_payment",
+    "clear_product_cards",
+    "close_checkout",
+    "show_checkout",
+}
+
+SET_CHECKOUT_FIELD_TOOL_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "field": {
+            "type": "string",
+            "enum": ["first_name", "last_name", "email", "phone"],
+        },
+        "value": {"type": "string"},
+    },
+    "required": ["field", "value"],
+}
+
+EMPTY_TOOL_PARAMETERS = {
+    "type": "object",
+    "properties": {},
 }
 
 PRODUCT_CARDS_START = "[LIFESTORE_PRODUCT_CARDS]"
@@ -327,7 +361,37 @@ async def lifestore_voice_proxy(websocket: WebSocket):
                                     "name": ASK_LIFESTORE_TOOL_NAME,
                                     "description": ASK_LIFESTORE_TOOL_DESCRIPTION,
                                     "parameters": ASK_LIFESTORE_TOOL_PARAMETERS,
-                                }
+                                },
+                                {
+                                    "name": "set_checkout_field",
+                                    "description": "Update one visible LifeStore checkout form field from the customer voice answer.",
+                                    "parameters": SET_CHECKOUT_FIELD_TOOL_PARAMETERS,
+                                },
+                                {
+                                    "name": "get_checkout_form_state",
+                                    "description": "Read the current LifeStore checkout form values and missing fields before confirmation.",
+                                    "parameters": EMPTY_TOOL_PARAMETERS,
+                                },
+                                {
+                                    "name": "start_checkout_payment",
+                                    "description": "Start the PayHere sandbox checkout after the customer confirms all checkout details are correct.",
+                                    "parameters": EMPTY_TOOL_PARAMETERS,
+                                },
+                                {
+                                    "name": "clear_product_cards",
+                                    "description": "Clear or hide the visible LifeStore product cards panel.",
+                                    "parameters": EMPTY_TOOL_PARAMETERS,
+                                },
+                                {
+                                    "name": "close_checkout",
+                                    "description": "Close or hide the visible LifeStore checkout card without canceling the cart.",
+                                    "parameters": EMPTY_TOOL_PARAMETERS,
+                                },
+                                {
+                                    "name": "show_checkout",
+                                    "description": "Show the latest LifeStore checkout card again after it was closed.",
+                                    "parameters": EMPTY_TOOL_PARAMETERS,
+                                },
                             ]
                         }
                     ],
@@ -373,6 +437,21 @@ async def lifestore_voice_proxy(websocket: WebSocket):
                                     ]
                                 }
                             }))
+                        elif msg.get("type") == "checkout_tool_result":
+                            response_payload = {
+                                "name": msg.get("tool_name") or "",
+                                "response": {
+                                    "output": msg.get("result") or {},
+                                },
+                            }
+                            if msg.get("call_id"):
+                                response_payload["id"] = msg.get("call_id")
+
+                            await gemini_ws.send(json.dumps({
+                                "tool_response": {
+                                    "function_responses": [response_payload]
+                                }
+                            }))
                         elif msg.get("type") == "end":
                             break
                 except WebSocketDisconnect:
@@ -415,7 +494,17 @@ async def lifestore_voice_proxy(websocket: WebSocket):
 
                         tool_calls = data.get("toolCall", {}).get("functionCalls", [])
                         for call in tool_calls:
-                            if call.get("name") != ASK_LIFESTORE_TOOL_NAME:
+                            tool_name = call.get("name")
+                            if tool_name in CHECKOUT_FIELD_TOOL_NAMES:
+                                await websocket.send_json({
+                                    "type": "checkout_tool_call",
+                                    "tool_name": tool_name,
+                                    "call_id": call.get("id") or "",
+                                    "args": call.get("args") or {},
+                                })
+                                continue
+
+                            if tool_name != ASK_LIFESTORE_TOOL_NAME:
                                 continue
 
                             args = call.get("args") or {}
