@@ -76,6 +76,11 @@ const AGENT_COLORS = {
         badge: 'bg-green-500/20 border-green-500/25 text-green-200',
         text: 'text-green-300',
     },
+    mintcrm: {
+        card: 'bg-lime-500/10 border-lime-500/20',
+        badge: 'bg-lime-500/20 border-lime-500/25 text-lime-200',
+        text: 'text-lime-300',
+    },
 };
 
 const DEFAULT_COLOR = {
