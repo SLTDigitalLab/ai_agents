@@ -148,7 +148,7 @@ def _active_provider() -> str:
     return "none"
 
 
-# Endpoint: which provider is active
+# which provider is active
 @router.get("/provider")
 async def get_voice_provider():
     provider = _active_provider()
@@ -162,7 +162,7 @@ async def get_voice_provider():
     return {"provider": provider, "model": model}
 
 
-# Endpoint: OpenAI ephemeral token for WebRTC
+#  OpenAI ephemeral token for WebRTC
 @router.get("/token")
 async def get_realtime_token():
     if not settings.OPENAI_API_KEY:
@@ -201,7 +201,7 @@ async def get_realtime_token():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Helper: Vertex AI access token from service account
+#  Vertex AI access token from service account
 def _get_vertex_access_token() -> str:
     import google.auth
     import google.auth.transport.requests
@@ -245,14 +245,14 @@ async def _gemini_keepalive(gemini_ws, done_event: asyncio.Event, interval_sec: 
                 await gemini_ws.send(json.dumps({
                     "realtime_input": {"media_chunks": []}
                 }))
-                logger.debug("Gemini keepalive ping sent")
+                
             except Exception:
                 break
     except asyncio.CancelledError:
         pass
 
 
-# Helper: call the full agent pipeline and return a complete answer
+# call the full agent pipeline and return a complete answer
 async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str) -> str:
     """
     Sends the user's question to /api/v1/chat with stream=False.
@@ -281,7 +281,7 @@ async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str
         else:
             logger.error(f"Chat API returned {resp.status_code}: {resp.text[:200]}")
             return "I had trouble finding that information. Please try again."
-    except httpx.TimeoutError:
+    except httpx.TimeoutException:
         logger.error("Chat API timed out")
         return "That took too long. Please try asking again."
     except Exception as e:
@@ -289,7 +289,7 @@ async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str
         return "I had trouble connecting. Please try again."
 
 
-# Endpoint: Gemini Live WebSocket proxy
+# Gemini Live WebSocket proxy
 @router.websocket("/ws/voice")
 async def gemini_voice_proxy(websocket: WebSocket):
     await websocket.accept()
@@ -353,7 +353,7 @@ async def gemini_voice_proxy(websocket: WebSocket):
             first_name = session_name.split()[0] if session_name else "there"
             personalized_prompt = VOICE_SYSTEM_PROMPT.replace("{USER_FIRST_NAME}", first_name)
 
-            # send setup to Gemini ONCE — after we have the name
+            # send setup to Gemini ONCE , after we have the name
             setup = {
                 "setup": {
                     "model": model_resource,
@@ -373,10 +373,11 @@ async def gemini_voice_proxy(websocket: WebSocket):
             logger.info(f"Gemini Live setup sent — voice: Alnilam — user: {first_name}")
 
             voice_thread = f"voice_{id(websocket)}"
-
-            # tracks the currently running agent task so it can be cancelled on interruption
-            current_agent_task: asyncio.Task | None = None
+            
+            current_agent_task = [None]   # current_agent_task[0] holds the Task or None
             current_agent_lock = asyncio.Lock()
+
+            
 
             async def browser_to_gemini():
                 try:
@@ -435,60 +436,88 @@ async def gemini_voice_proxy(websocket: WebSocket):
 
                         # handle tool calls
                         for call in data.get("toolCall", {}).get("functionCalls", []):
-                                    if call.get("name") == "ask_workmate_ai":
-                                        question = call.get("args", {}).get("question", "")
-                                        logger.info(f"Voice tool call: '{question[:80]}'")
+                            if call.get("name") == "ask_workmate_ai":
+                                question = call.get("args", {}).get("question", "")
+                                logger.info(f"Voice tool call: '{question[:80]}'")
 
-                                        # tell browser to pause mic so filler is not interrupted
-                                        await websocket.send_text(json.dumps({"type": "mic_pause"}))
-
-                                        # send filler to Gemini
-                                        filler = _pick_filler(question)
-                                        await gemini_ws.send(json.dumps({
-                                            "client_content": {
-                                                "turns": [{"role": "model", "parts": [{"text": filler}]}],
-                                                "turn_complete": True,   # ← change False to True
-                                            }
-                                        }))
-                                        logger.info(f"Filler sent ({_detect_language(question)}): '{filler}'")
-
-                                        # wait a moment for filler to start playing before pipeline starts
-                                        await asyncio.sleep(1.5)
-
-                                        # call agent pipeline with keepalive
-                                        done_event = asyncio.Event()
-                                        keepalive_task = asyncio.create_task(
-                                            _gemini_keepalive(gemini_ws, done_event)
-                                        )
+                                # cancel any previous in-progress agent call (user interrupted)
+                                async with current_agent_lock:
+                                    if current_agent_task[0] and not current_agent_task[0].done():
+                                        current_agent_task[0].cancel()
+                                        logger.info("Previous agent call cancelled — user interrupted")
                                         try:
-                                            answer = await _ask_agent(
-                                                question=question,
-                                                user_id=session_email,
-                                                user_name=session_name,
-                                                thread_id=voice_thread,
-                                            )
-                                        finally:
-                                            done_event.set()
-                                            keepalive_task.cancel()
-                                            try:
-                                                await keepalive_task
-                                            except asyncio.CancelledError:
-                                                pass
+                                            await current_agent_task[0]
+                                        except asyncio.CancelledError:
+                                            pass
+                                        # tell browser to stop playing current audio immediately
+                                        try:
+                                            await websocket.send_text(json.dumps({"type": "stop_audio"}))
+                                        except Exception:
+                                            pass
 
+                                
+                                # for interruptions while the pipeline runs
+                                filler = _pick_filler(question)
+                                await gemini_ws.send(json.dumps({
+                                    "client_content": {
+                                        "turns": [{"role": "model", "parts": [{"text": filler}]}],
+                                        "turn_complete": True,
+                                    }
+                                }))
+                                logger.info(f"Filler sent ({_detect_language(question)}): '{filler}'")
+
+                                async def run_agent_and_respond(q: str, call_name: str):
+                                    done_event = asyncio.Event()
+                                    keepalive_task = asyncio.create_task(
+                                        _gemini_keepalive(gemini_ws, done_event)
+                                    )
+                                    try:
+                                        answer = await _ask_agent(
+                                            question=q,
+                                            user_id=session_email,
+                                            user_name=session_name,
+                                            thread_id=voice_thread,
+                                        )
                                         logger.info(f"Agent answer: {len(answer)} chars")
-
-                                        # resume mic after answer is ready
-                                        await websocket.send_text(json.dumps({"type": "mic_resume"}))
 
                                         await gemini_ws.send(json.dumps({
                                             "tool_response": {
                                                 "function_responses": [{
-                                                    "name": "ask_workmate_ai",
+                                                    "name": call_name,
                                                     "response": {"output": answer},
                                                 }]
                                             }
                                         }))
-                                        logger.info("Tool response sent")
+                                    except asyncio.CancelledError:
+                                        logger.info(f"Agent task cancelled for question: '{q[:50]}'")
+                                        # send empty tool response so Gemini doesn't hang waiting
+                                        try:
+                                            await gemini_ws.send(json.dumps({
+                                                "tool_response": {
+                                                    "function_responses": [{
+                                                        "name": call_name,
+                                                        "response": {"output": ""},
+                                                    }]
+                                                }
+                                            }))
+                                        except Exception:
+                                            pass
+                                        raise
+                                    finally:
+                                        done_event.set()
+                                        keepalive_task.cancel()
+                                        try:
+                                            await keepalive_task
+                                        except asyncio.CancelledError:
+                                            pass
+
+                                
+                                # so new tool calls (interruptions) can arrive and cancel this one
+                                # start agent in background task
+                                async with current_agent_lock:
+                                    current_agent_task[0] = asyncio.create_task(
+                                        run_agent_and_respond(question, "ask_workmate_ai")
+                                    )
 
                 except Exception as e:
                     logger.error(f"gemini_to_browser error: {e}")

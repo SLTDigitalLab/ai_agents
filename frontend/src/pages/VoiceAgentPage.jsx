@@ -62,6 +62,8 @@ const VoiceAgentPage = () => {
     const nextPlayTimeRef    = useRef(0);
     const sessionTokenRef    = useRef(null);
     const micPausedRef = useRef(false);
+    const activeAudioSourcesRef = useRef([]);
+
 
 
     //  Auto-show transcript when entries arrive 
@@ -246,20 +248,40 @@ const VoiceAgentPage = () => {
 
     //  Gemini audio playback 
     const playGeminiAudioChunk = useCallback((base64Data) => {
-        if (!audioContextRef.current) return;
-        const ctx     = audioContextRef.current;
-        const float32 = pcm16Base64ToFloat32(base64Data);
-        const buffer  = ctx.createBuffer(1, float32.length, 24000);
-        buffer.copyToChannel(float32, 0);
-        const source  = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-        const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
-        source.start(startTime);
-        nextPlayTimeRef.current = startTime + buffer.duration;
-        setIsSpeaking(true);
-        source.onended = () => { if (nextPlayTimeRef.current <= ctx.currentTime) setIsSpeaking(false); };
-    }, []);
+    if (!audioContextRef.current) return;
+    const ctx     = audioContextRef.current;
+    const float32 = pcm16Base64ToFloat32(base64Data);
+    const buffer  = ctx.createBuffer(1, float32.length, 24000);
+    buffer.copyToChannel(float32, 0);
+    const source  = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
+    source.start(startTime);
+    nextPlayTimeRef.current = startTime + buffer.duration;
+    setIsSpeaking(true);
+
+    // track this source so it can be stopped on interruption
+    activeAudioSourcesRef.current.push(source);
+    source.onended = () => {
+        activeAudioSourcesRef.current = activeAudioSourcesRef.current.filter(s => s !== source);
+        if (activeAudioSourcesRef.current.length === 0 &&
+            nextPlayTimeRef.current <= ctx.currentTime) {
+            setIsSpeaking(false);
+        }
+    };
+}, []);
+
+
+const stopAllAudio = useCallback(() => {
+    // stop all queued and playing audio chunks immediately
+    activeAudioSourcesRef.current.forEach(source => {
+        try { source.stop(); } catch { /* already stopped */ }
+    });
+    activeAudioSourcesRef.current = [];
+    nextPlayTimeRef.current = audioContextRef.current?.currentTime || 0;
+    setIsSpeaking(false);
+}, []);
 
     //  Session token 
     const getSessionToken = async () => {
@@ -379,7 +401,7 @@ const VoiceAgentPage = () => {
                         break;
                     case 'audio':
                         window.speechSynthesis.cancel();
-                        playGeminiAudioChunk(msg.data); 
+                        playGeminiAudioChunk(msg.data);
                         break;
                     case 'transcript':
                         if (msg.role === 'user') {
@@ -417,6 +439,12 @@ const VoiceAgentPage = () => {
                     case 'mic_resume':
                         micPausedRef.current = false;
                         break;
+
+                    case 'stop_audio':
+                        stopAllAudio();
+                        setStatusText('Listening...');
+                        setIsListening(true);
+                        break;
                     case 'error':
                         setErrorMessage(msg.message || 'Connection error');
                         setPhase(PHASE.ERROR);
@@ -441,8 +469,6 @@ const VoiceAgentPage = () => {
     const processor = ctx.createScriptProcessor(4096, 1, 1);
     scriptProcessorRef.current = processor;
     processor.onaudioprocess = (e) => {
-        // skip sending audio if mic is paused (filler playing)
-        if (micPausedRef.current) return;
         if (ws.readyState !== WebSocket.OPEN) return;
         ws.send(JSON.stringify({ type: 'audio', data: float32ToPcm16Base64(e.inputBuffer.getChannelData(0)) }));
     };
