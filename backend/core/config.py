@@ -99,6 +99,19 @@ class Settings(BaseSettings):
     # Bitrix24 CRM
     BITRIX24_WEBHOOK_URL: str = ""
 
+    # WhatsApp Business Platform (Cloud API). The access token, app secret,
+    # phone-number ID, and Graph API version are shown in Meta's app dashboard.
+    # WHATSAPP_VERIFY_TOKEN is a private random value chosen by us and entered
+    # in both Meta's webhook configuration and this application.
+    WHATSAPP_ACCESS_TOKEN: Optional[str] = None
+    WHATSAPP_APP_SECRET: Optional[str] = None
+    WHATSAPP_PHONE_NUMBER_ID: Optional[str] = None
+    WHATSAPP_GRAPH_API_VERSION: Optional[str] = None
+    WHATSAPP_VERIFY_TOKEN: Optional[str] = None
+    # Empty means every sender accepted by the Meta test setup can use the
+    # webhook. For a controlled pilot, set comma-separated E.164 numbers.
+    WHATSAPP_ALLOWED_NUMBERS: str = ""
+
     # JSON mapping of admin email -> list of allowed agent_ids for ingestion.
     # Use ["*"] to grant access to all agents. Example:
     #   ADMIN_AGENT_MAP={"hr.admin@slt.com.lk":["hr"],"super@slt.com.lk":["*"]}

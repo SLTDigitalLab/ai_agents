@@ -84,6 +84,8 @@ Routing profiles and thresholds for the supervisor live in `backend/domain/confi
 | ------------------------------------------------------- | ------ | ----------------------------------------------------------------- |
 | `/api/v1/chat`                                          | POST   | Send a message to an agent (streaming response)                   |
 | `/api/v1/chat/{agent_id}/{thread_id}`                   | GET    | Retrieve chat history for a thread                                |
+| `/api/v1/whatsapp/webhook`                              | GET    | Complete Meta's webhook verification challenge                   |
+| `/api/v1/whatsapp/webhook`                              | POST   | Receive signed WhatsApp events and invoke Workmate Supervisor     |
 | `/api/v1/feedback`                                      | POST   | Submit or toggle feedback rating                                  |
 | `/api/v1/feedback`                                      | DELETE | Remove a feedback rating                                          |
 | `/api/v1/feedback/{agent_id}/{thread_id}`               | GET    | Get feedback for a conversation                                   |
@@ -165,6 +167,15 @@ BITRIX24_WEBHOOK_URL=your_bitrix_webhook
 MAIL_USERNAME=your_gmail
 MAIL_PASSWORD=your_app_password
 MAIL_FROM=your_gmail
+
+# WhatsApp Cloud API (keep every value secret except the Graph API version)
+WHATSAPP_ACCESS_TOKEN=your_meta_access_token
+WHATSAPP_APP_SECRET=your_meta_app_secret
+WHATSAPP_PHONE_NUMBER_ID=your_test_phone_number_id
+WHATSAPP_GRAPH_API_VERSION=vXX.X
+WHATSAPP_VERIFY_TOKEN=choose_a_long_random_private_value
+# Empty during Meta test-number development; comma-separated E.164 numbers for pilot.
+WHATSAPP_ALLOWED_NUMBERS=
 
 # ── Admin access control ──────────────────────────────────────────────────
 # JSON map: email -> list of agent_ids they may ingest into (["*"] = all agents)
