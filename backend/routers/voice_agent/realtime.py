@@ -40,13 +40,9 @@ CHAT_API_URL = "http://localhost:8000/api/v1/chat"
 OPENAI_REALTIME_MODEL = "gpt-realtime"
 GEMINI_LIVE_MODEL     = "gemini-live-2.5-flash-preview-native-audio-09-2025"
 
-# Audio format sent from the browser — must match the mic capture sample rate
+# Browser audio format; used to keep the stream close to real-time speed.
 AUDIO_SAMPLE_RATE_HZ = 16000
-AUDIO_BYTES_PER_SAMPLE = 2  # 16-bit PCM, mono
-
-# Never let the browser->Gemini stream get more than this many seconds
-# ahead of real time. Anything beyond this is throttled with a short sleep.
-# This is a hard backstop independent of frontend pacing behaviour.
+AUDIO_BYTES_PER_SAMPLE = 2
 MAX_AUDIO_LEAD_SECONDS = 0.5
 
 # System prompt
@@ -63,7 +59,22 @@ When you don't have enough information, use ask_workmate_ai before answering.
 If a question is completely outside SLTMobitel workplace topics, politely say you
 can only help with work-related questions.
 
-Always greet the user warmly at the start of the conversation."""
+CRITICAL RULES — follow these in every single response without exception:
+
+RULE 1 — GREETING: At the very start of this conversation, you MUST say exactly:
+"Hello {USER_FIRST_NAME}! I am Workmate AI, your SLTMobitel workplace assistant.
+I can help you with HR policies, leave balances, finance, IT support, and more.
+What would you like to know today?"
+Do NOT paraphrase this. Do NOT skip the name. Say it exactly.
+
+RULE 2 — EVERY RESPONSE: Every single answer you give MUST begin with "{USER_FIRST_NAME}, "
+followed by your answer. No exceptions. Even short answers must start with the name.
+For example: "{USER_FIRST_NAME}, your annual leave balance is 14 days."
+Or: "{USER_FIRST_NAME}, to apply for leave you need to..."
+
+RULE 3 — NEVER skip the name. If you are about to respond without starting with
+"{USER_FIRST_NAME}", stop and restart your response with the name first."""
+
 
 # Single tool — routes all questions through the full agent pipeline
 WORKMATE_TOOL = {
@@ -153,7 +164,7 @@ def _active_provider():
     return "none"
 
 
-# Endpoint: which provider is active
+# which provider is active
 @router.get("/provider")
 async def get_voice_provider():
     provider = _active_provider()
@@ -167,7 +178,7 @@ async def get_voice_provider():
     return {"provider": provider, "model": model}
 
 
-# Endpoint: OpenAI ephemeral token for WebRTC
+#  OpenAI ephemeral token for WebRTC
 @router.get("/token")
 async def get_realtime_token():
     if not settings.OPENAI_API_KEY:
@@ -206,7 +217,7 @@ async def get_realtime_token():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Helper: Vertex AI access token from service account
+#  Vertex AI access token from service account
 def _get_vertex_access_token() -> str:
     import google.auth
     import google.auth.transport.requests
@@ -257,7 +268,7 @@ async def _gemini_keepalive(gemini_ws, done_event: asyncio.Event, interval_sec: 
         pass
 
 
-# Helper: call the full agent pipeline and return a complete answer
+# call the full agent pipeline and return a complete answer
 async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str) -> str:
     """
     Sends the user's question to /api/v1/chat with stream=False.
@@ -286,7 +297,7 @@ async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str
         else:
             logger.error(f"Chat API returned {resp.status_code}: {resp.text[:200]}")
             return "I had trouble finding that information. Please try again."
-    except httpx.TimeoutError:
+    except httpx.TimeoutException:
         logger.error("Chat API timed out")
         return "That took too long. Please try asking again."
     except Exception as e:
@@ -294,15 +305,14 @@ async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str
         return "I had trouble connecting. Please try again."
 
 
-# Helper: estimate the audio duration (seconds) of a base64-encoded PCM16 chunk
 def _estimate_chunk_seconds(b64_data: str) -> float:
-    # base64 expands bytes by ~4/3 — reverse that to get raw byte count
+    """Estimate the duration of a base64 PCM16 mono audio chunk."""
     approx_bytes = (len(b64_data) * 3) // 4
     samples = approx_bytes / AUDIO_BYTES_PER_SAMPLE
     return samples / AUDIO_SAMPLE_RATE_HZ
 
 
-# Endpoint: Gemini Live WebSocket proxy
+# Gemini Live WebSocket proxy
 @router.websocket("/ws/voice")
 async def gemini_voice_proxy(websocket: WebSocket):
     await websocket.accept()
@@ -343,27 +353,10 @@ async def gemini_voice_proxy(websocket: WebSocket):
 
             logger.info("Gemini Live WebSocket connected")
 
-            setup = {
-                "setup": {
-                    "model": model_resource,
-                    "generation_config": {
-                        "response_modalities": ["AUDIO"],
-                        "speech_config": {
-                            "voice_config": {
-                                "prebuilt_voice_config": {"voice_name": "Alnilam"}
-                            }
-                        },
-                    },
-                    "system_instruction": {"parts": [{"text": VOICE_SYSTEM_PROMPT}]},
-                    "tools": [{"function_declarations": [WORKMATE_TOOL]}],
-                }
-            }
-            await gemini_ws.send(json.dumps(setup))
-            logger.info(f"Gemini Live setup sent — voice: Alnilam")
-
+            # send ready to browser so it sends user identity
             await websocket.send_text(json.dumps({"type": "ready"}))
 
-            # receive user identity from browser right after ready
+            # receive user identity from browser
             session_email: str = ""
             session_name: str = ""
             try:
@@ -378,24 +371,36 @@ async def gemini_voice_proxy(websocket: WebSocket):
             except Exception as e:
                 logger.warning(f"Identity message error: {e}")
 
-            # unique thread per voice session so history is stored separately
+            # build personalised system prompt with the user's first name
+            first_name = session_name.split()[0] if session_name else "there"
+            personalized_prompt = VOICE_SYSTEM_PROMPT.replace("{USER_FIRST_NAME}", first_name)
+
+            # send setup to Gemini ONCE , after we have the name
+            setup = {
+                "setup": {
+                    "model": model_resource,
+                    "generation_config": {
+                        "response_modalities": ["AUDIO"],
+                        "speech_config": {
+                            "voice_config": {
+                                "prebuilt_voice_config": {"voice_name": "Alnilam"}
+                            }
+                        },
+                    },
+                    "system_instruction": {"parts": [{"text": personalized_prompt}]},
+                    "tools": [{"function_declarations": [WORKMATE_TOOL]}],
+                }
+            }
+            await gemini_ws.send(json.dumps(setup))
+            logger.info(f"Gemini Live setup sent — voice: Alnilam — user: {first_name}")
+
             voice_thread = f"voice_{id(websocket)}"
 
+            current_agent_task = [None]   # current_agent_task[0] holds the Task or None
+            current_agent_lock = asyncio.Lock()
+
             async def browser_to_gemini():
-                """
-                Forwards mic audio from the browser to Gemini Live.
-
-                Includes a pacing safety net: tracks how many seconds of audio
-                have been sent versus how much real wall-clock time has elapsed
-                since streaming started, and inserts a short sleep whenever the
-                stream gets more than MAX_AUDIO_LEAD_SECONDS ahead of real time.
-
-                This guarantees Gemini never receives a burst faster than
-                real-time playback speed — which is what triggers its
-                1011 "client sending data too fast" flow-control error —
-                regardless of how the browser batches or schedules chunks.
-                """
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 stream_start_time = None
                 audio_seconds_sent = 0.0
 
@@ -403,22 +408,16 @@ async def gemini_voice_proxy(websocket: WebSocket):
                     while True:
                         raw = await websocket.receive_text()
                         msg = json.loads(raw)
-
                         if msg.get("type") == "audio":
                             if stream_start_time is None:
                                 stream_start_time = loop.time()
                                 audio_seconds_sent = 0.0
 
-                            chunk_seconds = _estimate_chunk_seconds(msg["data"])
-                            audio_seconds_sent += chunk_seconds
-
+                            audio_seconds_sent += _estimate_chunk_seconds(msg["data"])
                             elapsed_real_time = loop.time() - stream_start_time
                             lead = audio_seconds_sent - elapsed_real_time
-
                             if lead > MAX_AUDIO_LEAD_SECONDS:
-                                sleep_for = lead - MAX_AUDIO_LEAD_SECONDS
-                                
-                                await asyncio.sleep(sleep_for)
+                                await asyncio.sleep(lead - MAX_AUDIO_LEAD_SECONDS)
 
                             await gemini_ws.send(json.dumps({
                                 "realtime_input": {
@@ -428,16 +427,9 @@ async def gemini_voice_proxy(websocket: WebSocket):
                                     }]
                                 }
                             }))
-
                         elif msg.get("type") == "end":
                             logger.info("Browser sent end signal")
                             break
-
-                        elif msg.get("type") == "user_identity":
-                            # already consumed before the loop started, but ignore
-                            # gracefully if it arrives again for any reason
-                            continue
-
                 except WebSocketDisconnect:
                     logger.info("Browser WebSocket disconnected")
                 except Exception as e:
@@ -482,46 +474,82 @@ async def gemini_voice_proxy(websocket: WebSocket):
                                 question = call.get("args", {}).get("question", "")
                                 logger.info(f"Voice tool call: '{question[:80]}'")
 
-                                # speak a filler in the user's language so there is no silence
+                                # cancel any previous in-progress agent call (user interrupted)
+                                async with current_agent_lock:
+                                    if current_agent_task[0] and not current_agent_task[0].done():
+                                        current_agent_task[0].cancel()
+                                        logger.info("Previous agent call cancelled — user interrupted")
+                                        try:
+                                            await current_agent_task[0]
+                                        except asyncio.CancelledError:
+                                            pass
+                                        # tell browser to stop playing current audio immediately
+                                        try:
+                                            await websocket.send_text(json.dumps({"type": "stop_audio"}))
+                                        except Exception:
+                                            pass
+
+                                # for interruptions while the pipeline runs
                                 filler = _pick_filler(question)
                                 await gemini_ws.send(json.dumps({
                                     "client_content": {
                                         "turns": [{"role": "model", "parts": [{"text": filler}]}],
-                                        "turn_complete": False,
+                                        "turn_complete": True,
                                     }
                                 }))
                                 logger.info(f"Filler sent ({_detect_language(question)}): '{filler}'")
 
-                                # call the full agent pipeline while keeping
-                                # the Gemini WebSocket alive with periodic pings
-                                done_event = asyncio.Event()
-                                keepalive_task = asyncio.create_task(
-                                    _gemini_keepalive(gemini_ws, done_event)
-                                )
-                                try:
-                                    answer = await _ask_agent(
-                                        question=question,
-                                        user_id=session_email,
-                                        user_name=session_name,
-                                        thread_id=voice_thread,
+                                async def run_agent_and_respond(q: str, call_name: str):
+                                    done_event = asyncio.Event()
+                                    keepalive_task = asyncio.create_task(
+                                        _gemini_keepalive(gemini_ws, done_event)
                                     )
-                                finally:
-                                    done_event.set()
-                                    keepalive_task.cancel()
                                     try:
-                                        await keepalive_task
-                                    except asyncio.CancelledError:
-                                        pass
-                                logger.info(f"Agent answer: {len(answer)} chars")
+                                        answer = await _ask_agent(
+                                            question=q,
+                                            user_id=session_email,
+                                            user_name=session_name,
+                                            thread_id=voice_thread,
+                                        )
+                                        logger.info(f"Agent answer: {len(answer)} chars")
 
-                                await gemini_ws.send(json.dumps({
-                                    "tool_response": {
-                                        "function_responses": [{
-                                            "name": "ask_workmate_ai",
-                                            "response": {"output": answer},
-                                        }]
-                                    }
-                                }))
+                                        await gemini_ws.send(json.dumps({
+                                            "tool_response": {
+                                                "function_responses": [{
+                                                    "name": call_name,
+                                                    "response": {"output": answer},
+                                                }]
+                                            }
+                                        }))
+                                    except asyncio.CancelledError:
+                                        logger.info(f"Agent task cancelled for question: '{q[:50]}'")
+                                        # send empty tool response so Gemini doesn't hang waiting
+                                        try:
+                                            await gemini_ws.send(json.dumps({
+                                                "tool_response": {
+                                                    "function_responses": [{
+                                                        "name": call_name,
+                                                        "response": {"output": ""},
+                                                    }]
+                                                }
+                                            }))
+                                        except Exception:
+                                            pass
+                                        raise
+                                    finally:
+                                        done_event.set()
+                                        keepalive_task.cancel()
+                                        try:
+                                            await keepalive_task
+                                        except asyncio.CancelledError:
+                                            pass
+
+                                # so new tool calls (interruptions) can arrive and cancel this one
+                                # start agent in background task
+                                async with current_agent_lock:
+                                    current_agent_task[0] = asyncio.create_task(
+                                        run_agent_and_respond(question, "ask_workmate_ai")
+                                    )
 
                 except Exception as e:
                     logger.error(f"gemini_to_browser error: {e}")

@@ -13,26 +13,15 @@
  * Utilities:
  *   constants.js    — PHASE, API_URL, WS_URL, SYSTEM_PROMPT
  *   audioHelpers.js — float32ToPcm16Base64, pcm16Base64ToFloat32
- *
- * Mic capture uses an AudioWorkletNode (not the deprecated ScriptProcessorNode).
- * ScriptProcessorNode runs on the main JS thread, so when the thread is briefly
- * blocked (rendering, GC, playback scheduling) several callbacks queue up and
- * then fire back-to-back — sending Gemini a burst of audio instead of a steady
- * real-time stream, which triggers its 1011 "sending data too fast" error.
- * AudioWorkletNode runs on the dedicated audio rendering thread and is immune
- * to that. The mic is also muted while the assistant is speaking, both to cut
- * load during the exact window where bursts previously happened and to avoid
- * the agent picking up its own voice as input.
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useMsal } from '@azure/msal-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 
 import sltLogo    from '../assets/slt-mobitel-logo.png';
 import embryoLogo from '../assets/embryo-removebg.png';
-import { loginRequest } from '../authConfig';
 import { useTheme } from '../contexts/ThemeContext';
 
 import { PHASE, API_URL, WS_URL, SYSTEM_PROMPT } from '../components/voice_agent/constants';
@@ -43,32 +32,20 @@ import TranscriptPanel from '../components/voice_agent/TranscriptPanel';
 import CallControls   from '../components/voice_agent/CallControls';
 import UserMenu       from '../components/voice_agent/UserMenu';
 
-//  AudioWorklet source — inlined via Blob URL, no separate file needed 
-// Runs on the dedicated audio thread. Batches raw Float32 frames and posts
-// them back to the main thread; muting is controlled via postMessage so it
-// takes effect immediately without tearing down the audio graph.
+// Capture microphone audio off the main thread. Keeping the worklet prevents
+// UI/rendering pauses from bursting queued audio at Gemini faster than real time.
 const MIC_WORKLET_CODE = `
 class MicProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.muted = false;
-    this.port.onmessage = (e) => {
-      if (e.data && e.data.type === 'mute') this.muted = e.data.value;
-    };
-  }
   process(inputs) {
     const input = inputs[0];
-    if (input && input[0] && !this.muted) {
-      // copy — the underlying buffer gets reused by the audio thread otherwise
-      this.port.postMessage(input[0].slice());
-    }
+    if (input && input[0]) this.port.postMessage(input[0].slice());
     return true;
   }
 }
 registerProcessor('mic-processor', MicProcessor);
 `;
 
-// Samples per outgoing chunk — ~256ms @ 16kHz, matches the cadence Gemini expects
+// Approximately 256 ms at 16 kHz, matching Gemini's expected input cadence.
 const MIC_CHUNK_SAMPLES = 4096;
 
 //  Main component 
@@ -87,37 +64,20 @@ const VoiceAgentPage = () => {
     const [transcript,    setTranscript]    = useState([]);
     const [statusText,    setStatusText]    = useState('Ready to connect');
     const [errorMessage,  setErrorMessage]  = useState('');
-    const [provider,      setProvider]      = useState(null);
     const [showUserMenu,  setShowUserMenu]  = useState(false);
-    const [showTranscript,setShowTranscript]= useState(false);
-    const [micMuted,      setMicMuted]      = useState(false); // UI indicator only
 
-    //  Refs ─
+    // Refs
     const pcRef              = useRef(null);
-    const dcRef               = useRef(null);
+    const dcRef              = useRef(null);
     const openaiAudioRef     = useRef(null);
     const geminiWsRef        = useRef(null);
     const audioContextRef    = useRef(null);
     const micWorkletRef      = useRef(null);
     const micStreamRef       = useRef(null);
     const nextPlayTimeRef    = useRef(0);
-    const sessionTokenRef    = useRef(null);
+    const activeAudioSourcesRef = useRef([]);
 
-    //  Auto-show transcript when entries arrive 
-    useEffect(() => {
-        if (transcript.length > 0) setShowTranscript(true);
-    }, [transcript.length]);
 
-    //  Fetch provider on mount 
-    useEffect(() => {
-        fetch(`${API_URL}/api/v1/realtime/provider`)
-            .then(r => r.json())
-            .then(d => setProvider(d.provider))
-            .catch(() => setProvider('openai'));
-    }, []);
-
-    //  Cleanup on unmount
-    useEffect(() => { return () => cleanupAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Apply the global theme by toggling the `dark` class on <html>. This route
     // lives outside AgentWrapper, so it manages the class itself (Tailwind's
@@ -128,16 +88,6 @@ const VoiceAgentPage = () => {
         else root.classList.remove('dark');
         return () => { root.classList.remove('dark'); };
     }, [theme]);
-
-    //  Mute mic while the assistant is speaking — for both providers.
-    //  This trims load during the exact window that previously caused
-    //  audio bursts, and stops the agent from hearing its own TTS.
-    useEffect(() => {
-        if (micWorkletRef.current) {
-            micWorkletRef.current.port.postMessage({ type: 'mute', value: isSpeaking });
-        }
-        setMicMuted(isSpeaking && phase === PHASE.CONNECTED);
-    }, [isSpeaking, phase]);
 
     //  Cleanup helpers 
     const cleanupOpenAI = useCallback(() => {
@@ -150,12 +100,18 @@ const VoiceAgentPage = () => {
         if (micWorkletRef.current)      { micWorkletRef.current.disconnect(); micWorkletRef.current = null; }
         if (micStreamRef.current)       { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
         if (geminiWsRef.current)        { geminiWsRef.current.close();  geminiWsRef.current = null; }
+        activeAudioSourcesRef.current.forEach(source => {
+            try { source.stop(); } catch { /* already stopped */ }
+        });
+        activeAudioSourcesRef.current = [];
+        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
         if (audioContextRef.current)    { audioContextRef.current.close(); audioContextRef.current = null; }
         nextPlayTimeRef.current = 0;
-        setMicMuted(false);
     }, []);
 
     const cleanupAll = useCallback(() => { cleanupOpenAI(); cleanupGemini(); }, [cleanupOpenAI, cleanupGemini]);
+
+    useEffect(() => () => cleanupAll(), [cleanupAll]);
 
     //  OpenAI helpers 
     const sendOpenAIEvent = useCallback((event) => {
@@ -238,7 +194,8 @@ const VoiceAgentPage = () => {
                 break;
 
             case 'filler':
-                   
+                    // play filler text via browser TTS so user hears it
+                    // while the agent pipeline runs in the background
                     if ('speechSynthesis' in window) {
                         window.speechSynthesis.cancel(); // stop any previous
                         const utter = new SpeechSynthesisUtterance(msg.text);
@@ -301,39 +258,44 @@ const VoiceAgentPage = () => {
 
             default: break;
         }
-    }, [configureOpenAISession, sendOpenAIEvent]);
+    }, [configureOpenAISession, sendOpenAIEvent, user.name, user.username]);
 
     //  Gemini audio playback 
     const playGeminiAudioChunk = useCallback((base64Data) => {
-        if (!audioContextRef.current) return;
-        const ctx     = audioContextRef.current;
-        const float32 = pcm16Base64ToFloat32(base64Data);
-        const buffer  = ctx.createBuffer(1, float32.length, 24000);
-        buffer.copyToChannel(float32, 0);
-        const source  = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-        const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
-        source.start(startTime);
-        nextPlayTimeRef.current = startTime + buffer.duration;
-        setIsSpeaking(true);
-        source.onended = () => { if (nextPlayTimeRef.current <= ctx.currentTime) setIsSpeaking(false); };
-    }, []);
+    if (!audioContextRef.current) return;
+    const ctx     = audioContextRef.current;
+    const float32 = pcm16Base64ToFloat32(base64Data);
+    const buffer  = ctx.createBuffer(1, float32.length, 24000);
+    buffer.copyToChannel(float32, 0);
+    const source  = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
+    source.start(startTime);
+    nextPlayTimeRef.current = startTime + buffer.duration;
+    setIsSpeaking(true);
 
-    //  Session token 
-    const getSessionToken = async () => {
-        try {
-            const tokenResponse = await instance.acquireTokenSilent({ ...loginRequest, account: accounts[0] });
-            const res  = await fetch(`${API_URL}/api/v1/realtime/session-token`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ msal_token: tokenResponse.accessToken }),
-            });
-            if (!res.ok) return null;
-            const data = await res.json();
-            return data.session_token || null;
-        } catch { return null; }
+    // track this source so it can be stopped on interruption
+    activeAudioSourcesRef.current.push(source);
+    source.onended = () => {
+        activeAudioSourcesRef.current = activeAudioSourcesRef.current.filter(s => s !== source);
+        if (activeAudioSourcesRef.current.length === 0 &&
+            nextPlayTimeRef.current <= ctx.currentTime) {
+            setIsSpeaking(false);
+        }
     };
+}, []);
+
+
+const stopAllAudio = useCallback(() => {
+    // stop all queued and playing audio chunks immediately
+    activeAudioSourcesRef.current.forEach(source => {
+        try { source.stop(); } catch { /* already stopped */ }
+    });
+    activeAudioSourcesRef.current = [];
+    nextPlayTimeRef.current = audioContextRef.current?.currentTime || 0;
+    setIsSpeaking(false);
+}, []);
 
     //  Start conversation 
     const startConversation = async () => {
@@ -341,15 +303,12 @@ const VoiceAgentPage = () => {
         setStatusText('Connecting...');
         setTranscript([]);
         setErrorMessage('');
-        setShowTranscript(false);
 
         try {
 
             const providerRes   = await fetch(`${API_URL}/api/v1/realtime/provider`);
             const providerData  = await providerRes.json();
             const activeProvider = providerData.provider;
-            setProvider(activeProvider);
-
             if (activeProvider === 'gemini') await startGeminiSession();
             else                             await startOpenAISession();
         } catch (err) {
@@ -368,7 +327,9 @@ const VoiceAgentPage = () => {
         if (!ephemeralKey) throw new Error('No ephemeral token returned');
 
         setStatusText('Setting up audio...');
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
         const pc     = new RTCPeerConnection();
         pcRef.current = pc;
 
@@ -402,7 +363,9 @@ const VoiceAgentPage = () => {
     //  Gemini WebSocket 
     const startGeminiSession = async () => {
         setStatusText('Requesting microphone...');
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
         micStreamRef.current = stream;
 
         const ctx = new AudioContext({ sampleRate: 16000 });
@@ -419,23 +382,22 @@ const VoiceAgentPage = () => {
             setTimeout(() => reject(new Error('Timeout')), 10000);
         });
 
-        // send user identity so backend can include it in chat API calls
-        ws.send(JSON.stringify({
-            type: 'user_identity',
-            user_id: user.username || '',    //user id
-            user_name: user.name || '',
-        }));
-
-        setStatusText('Connecting...');
 
         ws.onmessage = (event) => {
             try {
                 const msg = JSON.parse(event.data);
                 switch (msg.type) {
                     case 'ready':
-                    
-
-                    setStatusText('Speak to Workmate AI'); setPhase(PHASE.CONNECTED); startMicCapture(ctx, ws); break;
+                        // send user identity so backend can personalise the greeting
+                        ws.send(JSON.stringify({
+                            type: 'user_identity',
+                            user_id: user.username || '',
+                            user_name: user.name || '',
+                        }));
+                        setStatusText('Speak to Workmate AI');
+                        setPhase(PHASE.CONNECTED);
+                        startMicCapture(ctx, ws);
+                        break;
                     case 'audio':
                         window.speechSynthesis.cancel();
                         playGeminiAudioChunk(msg.data);
@@ -469,6 +431,11 @@ const VoiceAgentPage = () => {
                         setPhase(PHASE.IDLE);
                         cleanupGemini();
                         break;
+                    case 'stop_audio':
+                        stopAllAudio();
+                        setStatusText('Listening...');
+                        setIsListening(true);
+                        break;
                     case 'error':
                         setErrorMessage(msg.message || 'Connection error');
                         setPhase(PHASE.ERROR);
@@ -488,13 +455,6 @@ const VoiceAgentPage = () => {
         ws.onerror = () => { setErrorMessage('Connection to voice backend failed'); setPhase(PHASE.ERROR); };
     };
 
-    //  Mic capture — AudioWorkletNode, not ScriptProcessorNode.
-    //  Runs on the dedicated audio thread so main-thread jank (rendering,
-    //  GC, playback scheduling) can't cause chunks to queue up and burst
-    //  out together — which is what previously triggered Gemini's
-    //  1011 "client sending data too fast" error. Chunks are batched to
-    //  ~256ms (MIC_CHUNK_SAMPLES) before being sent, matching Gemini's
-    //  expected real-time cadence. 
     const startMicCapture = async (ctx, ws) => {
         try {
             const blob = new Blob([MIC_WORKLET_CODE], { type: 'application/javascript' });
@@ -509,22 +469,25 @@ const VoiceAgentPage = () => {
             let pending = [];
             let pendingLen = 0;
 
-            workletNode.port.onmessage = (e) => {
+            workletNode.port.onmessage = (event) => {
                 if (ws.readyState !== WebSocket.OPEN) return;
-                pending.push(e.data);
-                pendingLen += e.data.length;
-                if (pendingLen >= MIC_CHUNK_SAMPLES) {
-                    const merged = new Float32Array(pendingLen);
-                    let offset = 0;
-                    for (const c of pending) { merged.set(c, offset); offset += c.length; }
-                    pending = [];
-                    pendingLen = 0;
-                    ws.send(JSON.stringify({ type: 'audio', data: float32ToPcm16Base64(merged) }));
+                pending.push(event.data);
+                pendingLen += event.data.length;
+                if (pendingLen < MIC_CHUNK_SAMPLES) return;
+
+                const merged = new Float32Array(pendingLen);
+                let offset = 0;
+                for (const chunk of pending) {
+                    merged.set(chunk, offset);
+                    offset += chunk.length;
                 }
+                pending = [];
+                pendingLen = 0;
+                ws.send(JSON.stringify({ type: 'audio', data: float32ToPcm16Base64(merged) }));
             };
 
             source.connect(workletNode);
-            // deliberately NOT connected to ctx.destination — we don't want to hear our own mic
+            // Keep the mic off ctx.destination to avoid local playback/feedback.
         } catch (err) {
             console.error('Failed to start AudioWorklet mic capture:', err);
             setErrorMessage('Microphone setup failed. Please refresh and try again.');
@@ -550,7 +513,6 @@ const VoiceAgentPage = () => {
 
     const isActive     = phase === PHASE.CONNECTED;
     const displayStatus = isListening ? 'Listening...' : isSpeaking ? 'Speaking...' : statusText;
-
 
     return (
         <div className="h-screen flex bg-[#fafafa] dark:bg-[#111318] text-gray-900 dark:text-gray-100 overflow-hidden">
@@ -591,7 +553,7 @@ const VoiceAgentPage = () => {
                 {/* Top bar */}
                 <div className="relative flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-white/[0.06] shrink-0">
                     {/* Back to Chat Agent — arrow slides left on hover */}
-                    <motion.button
+                    <Motion.button
                         type="button"
                         onClick={() => { endConversation(); navigate('/workmateai'); }}
                         whileHover={{ scale: 1.05 }}
@@ -613,7 +575,7 @@ const VoiceAgentPage = () => {
                             <path fillRule="evenodd" d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.68 3.348-3.97z" clipRule="evenodd" />
                         </svg>
                         <span className="hidden sm:inline">Chat Agent</span>
-                    </motion.button>
+                    </Motion.button>
 
                     <h1 className="absolute left-1/2 top-[calc(50%_+_3px)] -translate-x-1/2 -translate-y-1/2 text-lg sm:text-xl font-bold tracking-tight text-gray-950 dark:text-gray-100">Voice Agent</h1>
 
@@ -626,7 +588,7 @@ const VoiceAgentPage = () => {
                     {/* Greeting — only on idle */}
                     <AnimatePresence>
                         {phase === PHASE.IDLE && (
-                            <motion.div
+                            <Motion.div
                                 initial={{ opacity: 0, y: -8 }}
                                 animate={{ opacity: 1, y: 0 }}
                                 exit={{ opacity: 0, y: -8 }}
@@ -635,7 +597,7 @@ const VoiceAgentPage = () => {
                             >
                                 <p className="text-[0.75rem] uppercase tracking-[0.18em] font-semibold text-gray-400 dark:text-gray-600 mb-1">Welcome back</p>
                                 <p className="text-xl font-semibold text-gray-800 dark:text-gray-200">{firstName}</p>
-                            </motion.div>
+                            </Motion.div>
                         )}
                     </AnimatePresence>
 
@@ -652,7 +614,7 @@ const VoiceAgentPage = () => {
                     </div>
 
                     {/* Status text */}
-                    <motion.p
+                    <Motion.p
                         key={displayStatus}
                         initial={{ opacity: 0, y: 3 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -667,37 +629,15 @@ const VoiceAgentPage = () => {
                         }`}
                     >
                         {displayStatus}
-                    </motion.p>
-
-                    {/* Mic-muted indicator , shown only while the assistant is
-                        speaking during an active call, so users understand why
-                        the orb isn't reacting to their voice at that moment */}
-                    <AnimatePresence>
-                        {micMuted && (
-                            <motion.div
-                                initial={{ opacity: 0, y: -4 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -4 }}
-                                transition={{ duration: 0.15 }}
-                                className="mt-2 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/[0.06] border border-white/[0.08]"
-                            >
-                                <svg viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-gray-500">
-                                    <path d="M10 2a3 3 0 00-3 3v4a3 3 0 006 0V5a3 3 0 00-3-3z" />
-                                    <path d="M5.5 9a.5.5 0 00-1 0 5.5 5.5 0 004.5 5.415V16H7a.5.5 0 000 1h6a.5.5 0 000-1h-2v-1.585A5.5 5.5 0 0015.5 9a.5.5 0 00-1 0 4.5 4.5 0 01-9 0z" />
-                                    <path d="M2 2l16 16" stroke="currentColor" strokeWidth="1.4" />
-                                </svg>
-                                <span className="text-[0.65rem] text-gray-500 font-medium">Mic paused while assistant speaks</span>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
+                    </Motion.p>
 
                     {phase === PHASE.ERROR && errorMessage && (
-                        <motion.p
+                        <Motion.p
                             initial={{ opacity: 0 }} animate={{ opacity: 1 }}
                             className="mt-2 text-xs text-red-500/70 dark:text-red-400/60 text-center max-w-xs leading-relaxed"
                         >
                             {errorMessage}
-                        </motion.p>
+                        </Motion.p>
                     )}
 
                     {/* Call controls */}
@@ -707,19 +647,20 @@ const VoiceAgentPage = () => {
 
                     {/* Transcript */}
                     <AnimatePresence>
-                        {showTranscript && transcript.length > 0 && (
+                        {transcript.length > 0 && (
                             <TranscriptPanel
                                 transcript={transcript}
-                                onClear={() => { setTranscript([]); setShowTranscript(false); }}
+                                onClear={() => setTranscript([])}
                             />
                         )}
                     </AnimatePresence>
 
                 </div>
 
-                {/* Powered by — docked at the bottom, matching the chat interface */}
+                {/* Attribution docked at the bottom, matching the chat interface */}
                 <div className="w-full flex items-center justify-center gap-1.5 pb-3 pt-1 shrink-0 select-none cursor-default">
-                    <span className="text-[0.65rem] uppercase tracking-wider font-semibold text-gray-500 dark:text-gray-400">Powered by</span>
+                    <span className="text-[0.65rem] uppercase tracking-wider font-semibold text-gray-500 dark:text-gray-400">WorkMate AI powered by VoiceGenie AI</span>
+                    <div className="w-px h-3 bg-gray-300 dark:bg-gray-600" />
                     <img src={embryoLogo} alt="Embryo Logo" className="h-[20px] w-auto object-contain dark:brightness-110" />
                 </div>
             </div>
