@@ -119,11 +119,14 @@ const VoiceAgentPage = () => {
     }, []);
 
     const configureOpenAISession = useCallback(() => {
-        sendOpenAIEvent({
-            type: 'session.update',
-            session: {
-                type: 'realtime',
-                instructions: SYSTEM_PROMPT,
+    const firstName = (user.name || 'there').split(' ')[0];
+    const personalizedPrompt = SYSTEM_PROMPT.replace(/{USER_FIRST_NAME}/g, firstName);
+
+    sendOpenAIEvent({
+        type: 'session.update',
+        session: {
+            type: 'realtime',
+            instructions: personalizedPrompt,
                 output_modalities: ['audio'],
                 audio: {
                     input:  { turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600 } },
@@ -153,10 +156,10 @@ const VoiceAgentPage = () => {
 
         switch (msg.type) {
             case 'session.created':
-                configureOpenAISession();
-                setStatusText('Speak to Workmate AI');
-                setPhase(PHASE.CONNECTED);
-                break;
+                    configureOpenAISession();
+                    setStatusText('Speak to Workmate AI');
+                    setPhase(PHASE.CONNECTED);
+                    break;
 
             case 'response.audio.delta':       setIsSpeaking(true);  break;
             case 'response.audio.done':        setIsSpeaking(false); break;
