@@ -63,9 +63,14 @@ class Settings(BaseSettings):
     GUARDRAIL_API_KEY: Optional[str] = None  # falls back to provider key
 
     # Internal SLM (Ollama) — used by the Ask HR SLM demo agent only.
+    # SLM_PROVIDER:
+    #   - "ollama": native Ollama API via langchain-ollama (default)
+    #   - "openai": OpenAI-compatible API via langchain-openai
+    SLM_PROVIDER: str = "ollama"
     SLM_BASE_URL: str = "http://localhost:11434"
     SLM_EMBEDDING_BASE_URL: str = "http://localhost:11434"
     SLM_MODEL: str = "deepseek-r1:1.5b"
+    SLM_API_KEY: Optional[str] = None
     SLM_EMBEDDING_MODEL: str = "nomic-embed-text"
     SLM_EMBEDDING_DIMENSIONS: int = 768
 

@@ -9,7 +9,15 @@ import "./IframeChatPage.css";
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "";
 
-const API_URL = import.meta.env.VITE_API_URL || API_BASE_URL;
+const isLocalHost =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (isLocalHost
+    ? `${window.location.protocol}//${window.location.hostname}:8100`
+    : API_BASE_URL);
 
 const AGENT_CONFIG = {
   asklifestore: {
@@ -241,16 +249,10 @@ function IframeProductSlideshow({ products }) {
   const safeProducts = useMemo(() => normalizeIframeProducts(products), [products]);
   const [activeIndex, setActiveIndex] = useState(0);
 
-  useEffect(() => {
-    setActiveIndex((current) => {
-      if (safeProducts.length === 0) return 0;
-      return Math.min(current, safeProducts.length - 1);
-    });
-  }, [safeProducts.length]);
-
   if (safeProducts.length === 0) return null;
 
-  const activeProduct = safeProducts[activeIndex];
+  const activeIndexSafe = Math.min(activeIndex, safeProducts.length - 1);
+  const activeProduct = safeProducts[activeIndexSafe];
   const hasMultiple = safeProducts.length > 1;
 
   const goPrevious = () => {
@@ -445,28 +447,28 @@ function MarkdownMessage({ content }) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          p: ({ node, ...props }) => (
+          p: ({ ...props }) => (
             <p className="iframe-chat__md-p" {...props} />
           ),
-          ul: ({ node, ...props }) => (
+          ul: ({ ...props }) => (
             <ul className="iframe-chat__md-ul" {...props} />
           ),
-          ol: ({ node, ...props }) => (
+          ol: ({ ...props }) => (
             <ol className="iframe-chat__md-ol" {...props} />
           ),
-          li: ({ node, ...props }) => (
+          li: ({ ...props }) => (
             <li className="iframe-chat__md-li" {...props} />
           ),
-          h1: ({ node, ...props }) => (
+          h1: ({ ...props }) => (
             <h1 className="iframe-chat__md-heading" {...props} />
           ),
-          h2: ({ node, ...props }) => (
+          h2: ({ ...props }) => (
             <h2 className="iframe-chat__md-heading" {...props} />
           ),
-          h3: ({ node, ...props }) => (
+          h3: ({ ...props }) => (
             <h3 className="iframe-chat__md-heading" {...props} />
           ),
-          a: ({ node, ...props }) => (
+          a: ({ ...props }) => (
             <a
               className="iframe-chat__md-link"
               target="_blank"
@@ -474,21 +476,21 @@ function MarkdownMessage({ content }) {
               {...props}
             />
           ),
-          table: ({ node, ...props }) => (
+          table: ({ ...props }) => (
             <div className="iframe-chat__table-wrap">
               <table className="iframe-chat__table" {...props} />
             </div>
           ),
-          th: ({ node, ...props }) => (
+          th: ({ ...props }) => (
             <th className="iframe-chat__table-th" {...props} />
           ),
-          td: ({ node, ...props }) => (
+          td: ({ ...props }) => (
             <td className="iframe-chat__table-td" {...props} />
           ),
-          tr: ({ node, ...props }) => (
+          tr: ({ ...props }) => (
             <tr className="iframe-chat__table-row" {...props} />
           ),
-          code: ({ node, inline, children, ...props }) =>
+          code: ({ inline, children, ...props }) =>
             inline ? (
               <code className="iframe-chat__inline-code" {...props}>
                 {children}
@@ -611,7 +613,7 @@ function FeedbackButtons({
   );
 }
 
-function RequestSuccessCard({ isLifeStore, referenceNumber }) {
+function RequestSuccessCard({ isLifeStore, referenceNumber, submittedData }) {
   if (isLifeStore) {
     return (
       <article className="iframe-chat__success-card">
@@ -619,6 +621,15 @@ function RequestSuccessCard({ isLifeStore, referenceNumber }) {
           <SuccessIcon />
           <h2>Order Submitted!</h2>
           <p>Your LifeStore order request was submitted successfully.</p>
+
+          {submittedData && (
+            <div className="iframe-chat__reference-box">
+              <span>SUBMITTED DETAILS</span>
+              <strong>Email: {submittedData.email || 'N/A'}</strong>
+              <strong>City / Area: {submittedData.city || 'N/A'}</strong>
+              <strong>Order note: {submittedData.note || 'N/A'}</strong>
+            </div>
+          )}
         </div>
       </article>
     );
@@ -630,6 +641,17 @@ function RequestSuccessCard({ isLifeStore, referenceNumber }) {
         <SuccessIcon />
         <h2>Request Submitted!</h2>
         <p>The Enterprise team will contact you shortly.</p>
+
+        {submittedData && (
+          <div className="iframe-chat__reference-box">
+            <span>SUBMITTED DETAILS</span>
+            <strong>Company name: {submittedData.company_name || 'N/A'}</strong>
+            <strong>Contact person: {submittedData.contact_person || 'N/A'}</strong>
+            <strong>Email: {submittedData.email || 'N/A'}</strong>
+            <strong>City / Area: {submittedData.city || 'N/A'}</strong>
+            <strong>Remarks: {submittedData.remarks || 'N/A'}</strong>
+          </div>
+        )}
 
         {referenceNumber && (
           <div className="iframe-chat__reference-box">
@@ -743,6 +765,7 @@ export default function IframeChatPage() {
     setSuccessInfo({
       isLifeStore,
       referenceNumber,
+      submittedData: isLifeStore ? payload : null,
     });
   }
 
@@ -773,8 +796,8 @@ export default function IframeChatPage() {
       // Ask LifeStore uses the dedicated MCP endpoint that returns a single
       // JSON object with an answer and a structured product list.
       const chatEndpoint = isLifeStore
-        ? `${API_BASE_URL}/api/v1/lifestore/mcp-chat`
-        : `${API_BASE_URL}/api/v1/chat`;
+        ? `${API_URL}/api/v1/lifestore/mcp-chat`
+        : `${API_URL}/api/v1/chat`;
 
       const response = await fetch(chatEndpoint, {
         method: "POST",
@@ -934,6 +957,7 @@ export default function IframeChatPage() {
             <RequestSuccessCard
               isLifeStore={successInfo.isLifeStore}
               referenceNumber={successInfo.referenceNumber}
+              submittedData={successInfo.submittedData}
             />
           )}
 

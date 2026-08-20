@@ -16,7 +16,7 @@ services:
       POSTGRES_PASSWORD: slt123
       POSTGRES_DB: slt_db
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     restart: always
 
   db_qdrant:
@@ -25,7 +25,7 @@ services:
     ports:
       - "6335:6333"
     volumes:
-      - ./data/qdrant:/qdrant/storage
+      - qdrant_data:/qdrant/storage
     restart: always
 
   backend:
@@ -43,8 +43,6 @@ services:
       PYTHONUNBUFFERED: 1
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
       QDRANT_URL: http://slt_qdrant:6333
-      # Ask LifeStore MCP — loaded in-process by the /api/v1/lifestore/mcp-chat router.
-      # The router's default path resolution is wrong inside the container, so pin it here.
       LIFESTORE_MCP_SERVER_PATH: /app/mcp_lifestore/server.py
       LIFESTORE_PRODUCTS_JSON: /app/data/real/lifestore_all.json
     env_file:
@@ -69,3 +67,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     restart: always
+
+volumes:
+  postgres_data:
+  qdrant_data:

@@ -1,17 +1,20 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-const LifestoreForm = () => {
+const LifestoreForm = ({ onSuccess } = {}) => {
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
+    const [submittedData, setSubmittedData] = useState(null);
     const [formData, setFormData] = useState({
         product: '',
         fullName: '',
         deliveryAddress: '',
         phone: '',
+        email: '',
+        city: '',
+        note: '',
     });
 
     const handleChange = (e) => {
@@ -19,8 +22,9 @@ const LifestoreForm = () => {
     };
 
     const handleCancel = () => {
-        setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '' });
+        setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
         setError('');
+        setSubmittedData(null);
     };
 
     const handleSubmit = async (e) => {
@@ -28,7 +32,13 @@ const LifestoreForm = () => {
         setError('');
 
         // Client-side required-field validation
-        if (!formData.fullName.trim() || !formData.deliveryAddress.trim() || !formData.phone.trim()) {
+        if (
+            !formData.fullName.trim() ||
+            !formData.deliveryAddress.trim() ||
+            !formData.phone.trim() ||
+            !formData.email.trim() ||
+            !formData.city.trim()
+        ) {
             setError('Please fill in all required fields.');
             return;
         }
@@ -46,8 +56,11 @@ const LifestoreForm = () => {
             }
 
             // Success
+            const payload = { ...formData };
+            setSubmittedData(payload);
             setIsSubmitted(true);
-            setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '' });
+            setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
+            onSuccess?.(payload);
         } catch (err) {
             console.error('Order submission failed:', err);
             setError('Failed to submit order. Please try again.');
@@ -59,12 +72,7 @@ const LifestoreForm = () => {
     // ── Success state ───────────────────────────────────────────────────
     if (isSubmitted) {
         return (
-            <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="w-full my-3"
-            >
+            <div className="w-full my-3">
                 <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-6 flex flex-col items-center text-center">
                     <svg className="w-12 h-12 text-green-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
@@ -73,19 +81,38 @@ const LifestoreForm = () => {
                     <p className="text-sm text-green-600 mt-1">
                         Thank you. The Lifestore team will contact you shortly.
                     </p>
+
+                    {submittedData && (
+                        <div className="mt-4 w-full max-w-md rounded-xl border border-green-100 bg-white/80 p-4 text-left shadow-sm">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-green-700 mb-3">
+                                Submitted details
+                            </p>
+                            <div className="space-y-2 text-sm text-gray-700">
+                                <div className="flex justify-between gap-3">
+                                    <span className="text-gray-500">Email</span>
+                                    <span className="font-medium text-gray-800 text-right">{submittedData.email}</span>
+                                </div>
+                                <div className="flex justify-between gap-3">
+                                    <span className="text-gray-500">City / Area</span>
+                                    <span className="font-medium text-gray-800 text-right">{submittedData.city}</span>
+                                </div>
+                                <div className="flex justify-between gap-3 items-start">
+                                    <span className="text-gray-500">Order note</span>
+                                    <span className="font-medium text-gray-800 text-right whitespace-pre-wrap">
+                                        {submittedData.note || 'N/A'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
-            </motion.div>
+            </div>
         );
     }
 
     // ── Form state ──────────────────────────────────────────────────────
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
-            className="w-full my-3"
-        >
+        <div className="w-full my-3">
             <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
                 {/* Title */}
                 <h3 className="text-lg font-bold text-gray-800 mb-4">Please fill the form</h3>
@@ -111,6 +138,22 @@ const LifestoreForm = () => {
                         />
                     </div>
 
+                    {/* Email (required for BizLeads) */}
+                    <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                            Email <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="email"
+                            name="email"
+                            placeholder="e.g., saman@example.com"
+                            value={formData.email}
+                            onChange={handleChange}
+                            required
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
+                        />
+                    </div>
+
                     {/* Full Name (required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
@@ -121,6 +164,22 @@ const LifestoreForm = () => {
                             name="fullName"
                             placeholder="e.g., Saman Perera"
                             value={formData.fullName}
+                            onChange={handleChange}
+                            required
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
+                        />
+                    </div>
+
+                    {/* City / Area (required for BizLeads) */}
+                    <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                            City / Area <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            name="city"
+                            placeholder="e.g., Colombo"
+                            value={formData.city}
                             onChange={handleChange}
                             required
                             className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
@@ -139,6 +198,21 @@ const LifestoreForm = () => {
                             value={formData.deliveryAddress}
                             onChange={handleChange}
                             required
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all resize-none"
+                        />
+                    </div>
+
+                    {/* Order Note (optional BizLeads note) */}
+                    <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                            Order Note
+                        </label>
+                        <textarea
+                            name="note"
+                            placeholder="Add delivery instructions or extra notes"
+                            rows={3}
+                            value={formData.note}
+                            onChange={handleChange}
                             className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all resize-none"
                         />
                     </div>
@@ -178,7 +252,7 @@ const LifestoreForm = () => {
                     </div>
                 </form>
             </div>
-        </motion.div>
+        </div>
     );
 };
 

@@ -12,3 +12,6 @@ class OrderSubmission(BaseModel):
     fullName: str
     deliveryAddress: str
     phone: str
+    email: Optional[str] = None
+    city: Optional[str] = None
+    note: Optional[str] = None

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -19,12 +18,14 @@ const EnterpriseForm = () => {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
     const [referenceNumber, setReferenceNumber] = useState(null);
+    const [submittedData, setSubmittedData] = useState(null);
     const [formData, setFormData] = useState({
         company_name: '',
         business_registration_number: '',
         email: '',
         contact_person: '',
         contact_number: '',
+        city: '',
         select_service: '',
         remarks: '',
     });
@@ -40,11 +41,13 @@ const EnterpriseForm = () => {
             email: '',
             contact_person: '',
             contact_number: '',
+            city: '',
             select_service: '',
             remarks: '',
         });
         setError('');
         setReferenceNumber(null);
+        setSubmittedData(null);
     };
 
     const handleSubmit = async (e) => {
@@ -57,6 +60,7 @@ const EnterpriseForm = () => {
             !formData.email.trim() ||
             !formData.contact_person.trim() ||
             !formData.contact_number.trim() ||
+            !formData.city.trim() ||
             !formData.select_service
         ) {
             setError('Please fill in all required fields.');
@@ -81,6 +85,7 @@ const EnterpriseForm = () => {
             }
 
             // Success
+            setSubmittedData({ ...formData });
             setIsSubmitted(true);
         } catch (err) {
             console.error('Lead submission failed:', err);
@@ -93,12 +98,7 @@ const EnterpriseForm = () => {
     // ── Success state ───────────────────────────────────────────────────
     if (isSubmitted) {
         return (
-            <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="w-full my-3"
-            >
+            <div className="w-full my-3">
                 <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-6 flex flex-col items-center text-center">
                     <svg className="w-12 h-12 text-blue-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
@@ -107,6 +107,37 @@ const EnterpriseForm = () => {
                     <p className="text-sm text-blue-600 mt-1">
                         Thank you. The Enterprise team will contact you shortly.
                     </p>
+                    {submittedData && (
+                        <div className="mt-4 w-full max-w-md rounded-xl border border-blue-100 bg-white/80 p-4 text-left shadow-sm">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-blue-700 mb-3">
+                                Submitted details
+                            </p>
+                            <div className="space-y-2 text-sm text-gray-700">
+                                <div className="flex justify-between gap-3">
+                                    <span className="text-gray-500">Company name</span>
+                                    <span className="font-medium text-gray-800 text-right">{submittedData.company_name || 'N/A'}</span>
+                                </div>
+                                <div className="flex justify-between gap-3">
+                                    <span className="text-gray-500">Contact person</span>
+                                    <span className="font-medium text-gray-800 text-right">{submittedData.contact_person || 'N/A'}</span>
+                                </div>
+                                <div className="flex justify-between gap-3">
+                                    <span className="text-gray-500">Email</span>
+                                    <span className="font-medium text-gray-800 text-right">{submittedData.email || 'N/A'}</span>
+                                </div>
+                                <div className="flex justify-between gap-3">
+                                    <span className="text-gray-500">City / Area</span>
+                                    <span className="font-medium text-gray-800 text-right">{submittedData.city || 'N/A'}</span>
+                                </div>
+                                <div className="flex justify-between gap-3 items-start">
+                                    <span className="text-gray-500">Remarks</span>
+                                    <span className="font-medium text-gray-800 text-right whitespace-pre-wrap">
+                                        {submittedData.remarks || 'N/A'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                     {referenceNumber && (
                         <div className="mt-4 p-3 bg-white rounded-lg border border-blue-100 shadow-sm w-full max-w-xs block mx-auto">
                             <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Your Reference Number</p>
@@ -114,18 +145,13 @@ const EnterpriseForm = () => {
                         </div>
                     )}
                 </div>
-            </motion.div>
+            </div>
         );
     }
 
     // ── Form state ──────────────────────────────────────────────────────
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
-            className="w-full my-3"
-        >
+        <div className="w-full my-3">
             <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
                 {/* Title */}
                 <h3 className="text-lg font-bold text-gray-800 mb-4">Submit Your Service Request</h3>
@@ -217,6 +243,22 @@ const EnterpriseForm = () => {
                         />
                     </div>
 
+                    {/* City / Area (required for BizLeads) */}
+                    <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                            City / Area <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            name="city"
+                            placeholder="e.g. Colombo"
+                            value={formData.city}
+                            onChange={handleChange}
+                            required
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
+                        />
+                    </div>
+
                     {/* Select Service (radio group – required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-2">
@@ -276,7 +318,7 @@ const EnterpriseForm = () => {
                     </div>
                 </form>
             </div>
-        </motion.div>
+        </div>
     );
 };
 

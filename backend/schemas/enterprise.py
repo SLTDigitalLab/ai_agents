@@ -13,5 +13,7 @@ class EnterpriseLead(BaseModel):
     contact_person: str
     contact_number: str
     email: str
+    city: Optional[str] = None
     select_service: str
     remarks: Optional[str] = None
+    note: Optional[str] = None
