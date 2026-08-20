@@ -21,6 +21,9 @@ from services.ingestion import router as ingestion_router
 from core.config import settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
 
+from fastapi.openapi.utils import get_openapi
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -33,6 +36,37 @@ async def lifespan(app: FastAPI):
     await aclose_async_pools()
     close_sync_pools()
 
+def custom_openapi():
+    """Configure OpenAPI schema with Azure AD security scheme."""
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+    openapi_schema["components"]["securitySchemes"] = {
+        "bearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Azure AD bearer token",
+        }
+    }
+
+    # Overwrite FastAPI's HTTPBearer scheme name so Swagger Authorize
+    # (bearerAuth) actually attaches the Authorization header.
+    http_methods = {"get", "post", "put", "delete", "patch", "options", "head", "trace"}
+    for path in openapi_schema["paths"].values():
+        for method, operation in path.items():
+            if method.lower() in http_methods and isinstance(operation, dict):
+                operation["security"] = [{"bearerAuth": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
 
 app = FastAPI(
     title="Ask SLT API",
@@ -41,6 +75,8 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     lifespan=lifespan,
 )
+
+app.openapi = custom_openapi
 
 # --- Evidence image storage ---
 # Cropped PDF image/table previews are rendered during ingestion and served
