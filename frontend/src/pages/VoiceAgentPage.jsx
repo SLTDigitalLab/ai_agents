@@ -107,6 +107,7 @@ const VoiceAgentPage = () => {
     const configureOpenAISession = useCallback(() => {
     const firstName = (user.name || 'there').split(' ')[0];
     const personalizedPrompt = SYSTEM_PROMPT.replace(/{USER_FIRST_NAME}/g, firstName);
+    console.log('Configuring OpenAI session with personalized prompt:', firstName);
 
     sendOpenAIEvent({
         type: 'session.update',
@@ -116,7 +117,7 @@ const VoiceAgentPage = () => {
                 output_modalities: ['audio'],
                 audio: {
                     input:  { turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600 } },
-                    output: { voice: 'ash' },
+                    output: { voice: 'cedar' },
                 },
                 tool_choice: 'auto',
                 tools: [
@@ -135,17 +136,17 @@ const VoiceAgentPage = () => {
                     ],
             },
         });
-    }, [sendOpenAIEvent]);
+    }, [sendOpenAIEvent , user]);
 
     const handleOpenAIMessage = useCallback(async (event) => {
         let msg; try { msg = JSON.parse(event.data); } catch { return; }
 
         switch (msg.type) {
             case 'session.created':
-                    configureOpenAISession();
-                    setStatusText('Speak to Workmate AI');
-                    setPhase(PHASE.CONNECTED);
-                    break;
+                configureOpenAISession();
+                setStatusText('Speak to Workmate AI');
+                setPhase(PHASE.CONNECTED);
+                break;
 
             case 'response.audio.delta':       setIsSpeaking(true);  break;
             case 'response.audio.done':        setIsSpeaking(false); break;
@@ -355,7 +356,7 @@ const stopAllAudio = useCallback(() => {
         await pc.setLocalDescription(offer);
         setStatusText('Negotiating connection...');
 
-        const sdpRes = await fetch('https://api.openai.com/v1/realtime/calls?model=gpt-realtime-2', {
+        const sdpRes = await fetch('https://api.openai.com/v1/realtime/calls?model=gpt-realtime', {
             method: 'POST',
             headers: { Authorization: `Bearer ${ephemeralKey}`, 'Content-Type': 'application/sdp' },
             body: offer.sdp,
@@ -387,7 +388,7 @@ const stopAllAudio = useCallback(() => {
 
        
 
-        ws.onmessage = (event) => {
+        ws.onmessage = async (event) => {
             try {
                 const msg = JSON.parse(event.data);
                 switch (msg.type) {
@@ -447,6 +448,17 @@ const stopAllAudio = useCallback(() => {
                         stopAllAudio();
                         setStatusText('Listening...');
                         setIsListening(true);
+                        break;
+                    case 'fallback_to_openai':
+                        logger.info('Gemini unavailable — switching to OpenAI');
+                        cleanupGemini();
+                        setProvider('openai');
+                        try {
+                            await startOpenAISession();
+                        } catch (err) {
+                            setErrorMessage(err.message || 'Both providers failed');
+                            setPhase(PHASE.ERROR);
+                        }
                         break;
                     case 'error':
                         setErrorMessage(msg.message || 'Connection error');
