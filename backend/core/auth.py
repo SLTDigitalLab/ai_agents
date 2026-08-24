@@ -6,7 +6,7 @@ Fetches public keys from Azure and validates incoming bearer tokens.
 import os
 import logging
 from typing import Optional
-from datetime import datetime
+
 
 import requests
 from fastapi import HTTPException, status
@@ -17,14 +17,13 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-# Load from .env
+
 AZURE_TENANT_ID = os.getenv("MS_TENANT_ID")
 AZURE_CLIENT_ID = os.getenv("MS_CLIENT_ID")
 JWKS_URL = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/discovery/v2.0/keys"
 ISSUER = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/v2.0"
 
-# auto_error=False so a missing Authorization header does not 403/401
-# before get_current_user can honour AZURE_AUTH_ENABLED=false.
+
 security = HTTPBearer(auto_error=False)
 
 
@@ -34,7 +33,7 @@ def _auth_enabled() -> bool:
 
 @lru_cache(maxsize=1)
 def get_jwks():
-    """Fetch Azure's public signing keys (cached for 1 hour)."""
+    """Fetch Azure's public signing keys."""
     try:
         response = requests.get(JWKS_URL, timeout=10)
         response.raise_for_status()
@@ -71,17 +70,14 @@ async def get_current_user(
     token = creds.credentials
 
     try:
-        # Fetch signing keys
         jwks = get_jwks()
         
-        # Decode token (without verification first to get the kid)
         unverified_header = jwt.get_unverified_header(token)
         kid = unverified_header.get("kid")
         
         if not kid:
             raise JWTError("Token missing kid header")
         
-        # Find the matching key
         key = None
         for k in jwks.get("keys", []):
             if k.get("kid") == kid:
@@ -91,7 +87,6 @@ async def get_current_user(
         if not key:
             raise JWTError("Signing key not found")
         
-        # Verify and decode the token
         payload = jwt.decode(
             token,
             key=key,
