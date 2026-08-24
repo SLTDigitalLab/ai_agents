@@ -33,6 +33,7 @@ services:
       context: ./backend
     container_name: slt_backend
     ports:
+      - "8000:8000"
       - "8100:8000"
     depends_on:
       db_postgres:
