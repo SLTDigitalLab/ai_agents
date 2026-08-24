@@ -16,6 +16,7 @@ import sltLogo from './assets/slt-mobitel-logo.png';
 import embryoLogo from './assets/embryo-removebg.png';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import ContactUsPage from './components/ContactUsPage';
+import RainbowPages from './components/RainbowPages';
 
 // Initialize MSAL outside the components
 const msalInstance = new PublicClientApplication(msalConfig);
@@ -646,6 +647,7 @@ function App() {
             <Route path="/admin/feedback" element={<FeedbackPanel />} />
           </Route>
 
+          <Route path="/rainbowpages" element={<RainbowPages />} />
           <Route path="/contact-us" element={<ContactUsPage />} />
 
           <Route path="/:agentType" element={<AgentWrapper />} />
