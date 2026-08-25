@@ -130,7 +130,7 @@ const VoiceAgentPage = () => {
                 output_modalities: ['audio'],
                 audio: {
                     input:  { turn_detection: { type: 'server_vad', threshold: 0.5, prefix_padding_ms: 300, silence_duration_ms: 600 } },
-                    output: { voice: 'ash' },
+                    output: { voice: 'cedar' },
                 },
                 tool_choice: 'auto',
                 tools: [
@@ -149,17 +149,17 @@ const VoiceAgentPage = () => {
                     ],
             },
         });
-    }, [sendOpenAIEvent]);
+    }, [sendOpenAIEvent, user.name]);
 
     const handleOpenAIMessage = useCallback(async (event) => {
         let msg; try { msg = JSON.parse(event.data); } catch { return; }
 
         switch (msg.type) {
             case 'session.created':
-                    configureOpenAISession();
-                    setStatusText('Speak to Workmate AI');
-                    setPhase(PHASE.CONNECTED);
-                    break;
+                configureOpenAISession();
+                setStatusText('Speak to Workmate AI');
+                setPhase(PHASE.CONNECTED);
+                break;
 
             case 'response.audio.delta':       setIsSpeaking(true);  break;
             case 'response.audio.done':        setIsSpeaking(false); break;
@@ -386,7 +386,7 @@ const stopAllAudio = useCallback(() => {
         });
 
 
-        ws.onmessage = (event) => {
+        ws.onmessage = async (event) => {
             try {
                 const msg = JSON.parse(event.data);
                 switch (msg.type) {
@@ -438,6 +438,16 @@ const stopAllAudio = useCallback(() => {
                         stopAllAudio();
                         setStatusText('Listening...');
                         setIsListening(true);
+                        break;
+                    case 'fallback_to_openai':
+                        console.info('Gemini unavailable — switching to OpenAI');
+                        cleanupGemini();
+                        try {
+                            await startOpenAISession();
+                        } catch (err) {
+                            setErrorMessage(err.message || 'Both providers failed');
+                            setPhase(PHASE.ERROR);
+                        }
                         break;
                     case 'error':
                         setErrorMessage(msg.message || 'Connection error');

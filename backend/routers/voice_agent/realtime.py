@@ -145,21 +145,26 @@ def _pick_filler(question: str) -> str:
     return random.choice(FILLERS.get(lang, FILLERS["en"]))
 
 
-def _active_provider():
-
-    provider = (
+def _active_provider() -> str:
+    provider_override = (
         getattr(settings, "VOICE_PROVIDER", "")
         or os.getenv("VOICE_PROVIDER", "")
     ).strip().lower()
 
-    if provider in ("openai", "gemini"):
-        return provider
+    # Keep an explicit OpenAI override for operational rollback. Otherwise,
+    # prefer Gemini and verify that its credentials can actually mint a token.
+    if provider_override == "openai":
+        return "openai" if settings.OPENAI_API_KEY else "none"
+
+    if settings.GOOGLE_APPLICATION_CREDENTIALS:
+        try:
+            _get_vertex_access_token()
+            return "gemini"
+        except Exception as e:
+            logger.warning(f"Gemini credentials failed ({e}) — falling back to OpenAI")
 
     if settings.OPENAI_API_KEY:
         return "openai"
-
-    if settings.GOOGLE_APPLICATION_CREDENTIALS:
-        return "gemini"
 
     return "none"
 
@@ -221,6 +226,7 @@ async def get_realtime_token():
 def _get_vertex_access_token() -> str:
     import google.auth
     import google.auth.transport.requests
+    import google.oauth2.service_account
 
     cred_path = settings.GOOGLE_APPLICATION_CREDENTIALS
     if not cred_path:
@@ -233,12 +239,14 @@ def _get_vertex_access_token() -> str:
     if not os.path.exists(cred_path):
         raise RuntimeError(f"service-account.json not found at: {cred_path}")
 
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
-    credentials, _ = google.auth.default(
-        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+    # load credentials directly from the file every time — bypasses any cache
+    credentials = google.oauth2.service_account.Credentials.from_service_account_file(
+        cred_path,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
     )
     auth_req = google.auth.transport.requests.Request()
     credentials.refresh(auth_req)
+    logger.info(f"Vertex AI token generated for project: {credentials.project_id or 'unknown'} / service account: {credentials.service_account_email}")
     return credentials.token
 
 
@@ -324,7 +332,17 @@ async def gemini_voice_proxy(websocket: WebSocket):
         try:
             access_token = _get_vertex_access_token()
         except Exception as e:
-            await websocket.send_text(json.dumps({"type": "error", "message": f"Vertex AI auth failed: {str(e)}"}))
+            logger.warning(f"Vertex AI auth failed at session start: {e}")
+            if settings.OPENAI_API_KEY:
+                logger.info("Falling back to OpenAI — notifying frontend")
+                await websocket.send_text(json.dumps({
+                    "type": "fallback_to_openai"
+                }))
+            else:
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "message": f"Vertex AI auth failed and no OpenAI key configured: {str(e)}"
+                }))
             return
 
         project_id = settings.PROJECT_ID
