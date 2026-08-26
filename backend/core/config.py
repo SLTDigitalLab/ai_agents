@@ -120,6 +120,20 @@ class Settings(BaseSettings):
 
     LIFESTORE_QDRANT_COLLECTION: str = "lifestore_docs"
 
+    # ── Semantic Cache (Redis) ───────────────────────────────────────────────
+    # Redis connection URL. For Docker: redis://slt_redis:6379
+    REDIS_URL: str = "redis://localhost:6379"
+    # Master switch — set to false to bypass cache entirely (useful in dev).
+    SEMANTIC_CACHE_ENABLED: bool = True
+    # How long a cached entry lives before expiry (seconds). Default: 7 days.
+    SEMANTIC_CACHE_TTL: int = 604800
+    # Cosine-similarity cutoff (0–1). Questions with similarity >= this value
+    # are treated as semantically identical. 0.92 is a solid default.
+    SEMANTIC_CACHE_THRESHOLD: float = 0.92
+    # Comma-separated agent IDs whose responses must never be cached because
+    # their data changes frequently (e.g. live product catalogue).
+    SEMANTIC_CACHE_EXEMPT_AGENTS: str = "lifestore"
+
     class Config:
         env_file = ".env"
         extra = "ignore"

@@ -27,6 +27,9 @@ from services.sessions import record_session
 # --- 1. Import Langfuse CallbackHandler ---
 from langfuse.langchain import CallbackHandler
 
+# --- Semantic cache (Redis + cosine similarity) ---
+from core.semantic_cache import cache_get, cache_set
+
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
 
@@ -502,6 +505,23 @@ async def chat(request: ChatRequest):
                 f"reason={guardrail.reason}"
             )
 
+            # ── Semantic cache check ─────────────────────────────────────
+            # Run AFTER guardrail so blocked messages are never cached, and
+            # BEFORE the agent so we skip the LLM entirely on a cache hit.
+            cached_answer = await cache_get(safe_user_message, request.agent_id)
+            if cached_answer is not None:
+                logger.info(
+                    "SemanticCache HIT — serving cached answer | agent=%s | thread=%s",
+                    request.agent_id,
+                    request.thread_id,
+                )
+                # Stream the cached answer in chunks so the UX feels identical
+                # to a live streamed response (avoids a jarring instant flash).
+                CHUNK_SIZE = 80  # characters per fake-stream chunk
+                for i in range(0, len(cached_answer), CHUNK_SIZE):
+                    yield cached_answer[i : i + CHUNK_SIZE]
+                return
+
             # Build initial state with real sentiment from classifier
             state = {
                 "messages": [("user", safe_user_message)],
@@ -624,6 +644,20 @@ async def chat(request: ChatRequest):
                                 streamed_response_text += text
                                 yield text
                                 break
+
+            # ── Semantic cache store ────────────────────────────────────
+            # Persist the full answer after streaming so future semantically
+            # similar questions can be served from cache without an LLM call.
+            if streamed_response_text:
+                try:
+                    await cache_set(
+                        question=safe_user_message,
+                        answer=streamed_response_text,
+                        agent_id=request.agent_id,
+                    )
+                except Exception as cache_exc:
+                    # Never let a cache write failure break the response.
+                    logger.warning("SemanticCache SET failed (non-fatal): %s", cache_exc)
 
             # ── Visual/table evidence ───────────────────────────────
             # Stream a hidden evidence block (cropped PDF images/tables)

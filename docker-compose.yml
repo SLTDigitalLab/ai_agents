@@ -28,6 +28,21 @@ services:
       - ./data/qdrant:/qdrant/storage
     restart: always
 
+  redis:
+    image: redis:7-alpine
+    container_name: slt_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -40,10 +55,13 @@ services:
         condition: service_healthy
       db_qdrant:
         condition: service_started
+      redis:
+        condition: service_healthy
     environment:
       PYTHONUNBUFFERED: 1
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
       QDRANT_URL: http://slt_qdrant:6333
+      REDIS_URL: redis://slt_redis:6379
       # Ask LifeStore MCP — loaded in-process by the /api/v1/lifestore/mcp-chat router.
       # The router's default path resolution is wrong inside the container, so pin it here.
       LIFESTORE_MCP_SERVER_PATH: /app/mcp_lifestore/server.py
