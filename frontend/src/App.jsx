@@ -399,6 +399,17 @@ const AgentWrapper = () => {
 
           {/* Right cluster: SLT logo + mobile avatar for internal authenticated agents */}
           <div className="flex items-center gap-2 sm:gap-0 shrink-0">
+            {agentConfig.externalAppUrl && (
+              <a
+                href={agentConfig.externalAppUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center min-h-9 mr-1 sm:mr-3 px-3 sm:px-4 rounded-full border border-cyan-700/20 bg-white dark:bg-gray-800 text-cyan-800 dark:text-cyan-200 text-xs font-semibold shadow-sm hover:shadow-md hover:border-cyan-600/40 transition-all"
+              >
+                <span className="sm:hidden">ABP</span>
+                <span className="hidden sm:inline">Open ABP Agent</span>
+              </a>
+            )}
             <img
               src={sltLogo}
               alt="SLTMobitel"

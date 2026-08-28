@@ -3,6 +3,7 @@ export const AGENTS = {
     workmateai: {
         id: "supervisor",
         title: "Workmate AI",
+        externalAppUrl: import.meta.env.VITE_ABP_AGENT_URL || (import.meta.env.DEV ? "http://localhost:3000" : null),
         subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
         color: "from-cyan-900 to-cyan-600",
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
