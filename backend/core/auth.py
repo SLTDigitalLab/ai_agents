@@ -112,3 +112,21 @@ async def get_current_user(
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def get_optional_user(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[dict]:
+    """Return the validated user when a bearer token is supplied.
+
+    A missing token is represented as ``None`` so individual routes can apply
+    an agent-aware access policy. Supplied tokens are always validated; an
+    invalid token is never silently treated as an anonymous request.
+    """
+    if not _auth_enabled():
+        return await get_current_user(creds)
+
+    if creds is None or not creds.credentials:
+        return None
+
+    return await get_current_user(creds)
