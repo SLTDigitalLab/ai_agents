@@ -9,12 +9,11 @@ import re
 from typing import AsyncGenerator
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
 
-from fastapi import Depends
-from core.auth import get_current_user
+from core.auth import get_optional_user
 
 from core.config import settings
 from domain.registry import (
@@ -32,6 +31,29 @@ from langfuse.langchain import CallbackHandler
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
+
+# Public-facing agents and external integrations may use the shared chat API
+# without an Azure AD session. Everything not explicitly listed here is
+# protected by default, including any agent added in the future.
+PUBLIC_AGENT_IDS = frozenset(
+    {
+        "aiexpo",
+        "backoffice_email",
+        "enterprise",
+        "lifestore",
+        "rainbowpages",
+    }
+)
+
+
+def _enforce_agent_auth(agent_id: str, user: dict | None) -> None:
+    """Require a validated Azure AD user for non-public agents."""
+    if agent_id not in PUBLIC_AGENT_IDS and user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
 
@@ -426,9 +448,11 @@ def _build_evidence_stream_chunk(answer_text: str, thread_id: str) -> str:
 @router.post("")
 async def chat(
     request: ChatRequest,
-    user: dict = Depends(get_current_user),
+    user: dict | None = Depends(get_optional_user),
 ):
     """Handle an incoming chat message from the frontend with streaming."""
+    _enforce_agent_auth(request.agent_id, user)
+
     try:
         builder_fn = get_agent_builder(request.agent_id)
     except ValueError as exc:
@@ -664,8 +688,14 @@ async def chat(
 
 
 @router.get("/{agent_id}/{thread_id}")
-async def get_history(agent_id: str, thread_id: str, user: dict = Depends(get_current_user),):
+async def get_history(
+    agent_id: str,
+    thread_id: str,
+    user: dict | None = Depends(get_optional_user),
+):
     """Retrieve the chat history for a specific session."""
+    _enforce_agent_auth(agent_id, user)
+
     try:
         builder_fn = get_agent_builder(agent_id)
     except ValueError as exc:
@@ -711,5 +741,3 @@ async def get_history(agent_id: str, thread_id: str, user: dict = Depends(get_cu
     except Exception as exc:
         logger.error(f"Error fetching history: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
-    
-    
