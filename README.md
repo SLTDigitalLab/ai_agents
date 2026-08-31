@@ -154,7 +154,7 @@ VITE_API_URL=http://localhost:8000
 VITE_MSAL_CLIENT_ID=your_azure_client_id
 VITE_MSAL_AUTHORITY=https://login.microsoftonline.com/your_tenant_id
 VITE_ADMIN_EMAILS=admin1@slt.com.lk,admin2@slt.com.lk
-VITE_ABP_AGENT_URL=https://your-abp-agent-url
+VITE_ABP_AGENT_URL=/abpagent/
 
 # ── Microsoft Graph (OneDrive ingestion) ──────────────────────────────────
 MS_CLIENT_ID=your_client_id
