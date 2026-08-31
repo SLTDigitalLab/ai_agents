@@ -13,6 +13,9 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
 
+from fastapi import Depends
+from core.auth import get_current_user
+
 from core.config import settings
 from domain.registry import (
     get_agent_builder,
@@ -421,7 +424,10 @@ def _build_evidence_stream_chunk(answer_text: str, thread_id: str) -> str:
 
 
 @router.post("")
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    user: dict = Depends(get_current_user),
+):
     """Handle an incoming chat message from the frontend with streaming."""
     try:
         builder_fn = get_agent_builder(request.agent_id)
@@ -658,7 +664,7 @@ async def chat(request: ChatRequest):
 
 
 @router.get("/{agent_id}/{thread_id}")
-async def get_history(agent_id: str, thread_id: str):
+async def get_history(agent_id: str, thread_id: str, user: dict = Depends(get_current_user),):
     """Retrieve the chat history for a specific session."""
     try:
         builder_fn = get_agent_builder(agent_id)

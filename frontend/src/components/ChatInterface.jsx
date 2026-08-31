@@ -10,6 +10,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Buttons from './Buttons';
 import { fetchUserProfile } from '../userProfile';
+import { getChatAuthHeaders } from '../apiAuth';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -1299,7 +1300,10 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
             if (isExistingSession) {
                 try {
-                    const response = await fetch(`${API_URL}/api/v1/chat/${agentConfig.id}/${currentThreadId}`);
+                    const headers = await getChatAuthHeaders(instance, accounts[0]);
+                    const response = await fetch(`${API_URL}/api/v1/chat/${agentConfig.id}/${currentThreadId}`, {
+                        headers,
+                    });
                     if (!response.ok) throw new Error("Failed to fetch history");
 
                     const data = await response.json();
@@ -1356,7 +1360,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         };
 
         loadAgentState();
-    }, [agentConfig.id, agentConfig.title, user.name]);
+    }, [agentConfig.id, agentConfig.title, user.name, instance, accounts]);
 
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -1572,7 +1576,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
             const response = await fetch(`${API_URL}/api/v1/chat`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: await getChatAuthHeaders(instance, accounts[0], {
+                    'Content-Type': 'application/json',
+                }),
                 body: JSON.stringify({
                     message: maskedText,
                     agent_id: agentConfig.id,
