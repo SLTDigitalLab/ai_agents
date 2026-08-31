@@ -452,7 +452,12 @@ export default function IframeChatPage() {
     ]);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/chat`, {
+      const chatEndpoint =
+        config.agentId === "lifestore"
+          ? `${API_BASE_URL}/api/v1/lifestore/mcp-chat`
+          : `${API_BASE_URL}/api/v1/chat`;
+
+      const response = await fetch(chatEndpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
