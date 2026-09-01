@@ -1976,7 +1976,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                         color={agentConfig.color}
                                                         onImageClick={setPreviewImage}
                                                     />
-                                                    <SourcesSection sources={sources} color={agentConfig.color} />
+                                                    {agentConfig.id !== 'embryo' && (
+                                                        <SourcesSection sources={sources} color={agentConfig.color} />
+                                                    )}
 
                                                     {Array.isArray(msg.productCards) && msg.productCards.length > 0 && (
                                                         <ProductCards
