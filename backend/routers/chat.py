@@ -39,6 +39,7 @@ PUBLIC_AGENT_IDS = frozenset(
     {
         "aiexpo",
         "backoffice_email",
+        "embryo",
         "enterprise",
         "lifestore",
         "rainbowpages",

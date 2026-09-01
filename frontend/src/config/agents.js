@@ -198,5 +198,17 @@ export const AGENTS = {
         buttonColor: "bg-lime-600 hover:bg-lime-700",
         idlePrompt: "Ask about MintCRM modules, workflows, or how to complete a task.",
         disclaimer: "If you need any further clarifications, please reach out to the MintCRM support team."
+    },
+
+    // 16. Embryo (public — knowledge base crawled from the Embryo website)
+    askembryo: {
+        public: true,
+        id: "embryo",
+        title: "ASK EMBRYO",
+        subtitle: "Explore Embryo's purpose, offerings, initiatives, projects, partnerships, news, and events.",
+        color: "from-cyan-900 to-teal-600",
+        buttonColor: "bg-teal-600 hover:bg-teal-700",
+        idlePrompt: "Ask me anything about Embryo.",
+        disclaimer: "Information is sourced from the Embryo website and may change. Please verify critical details on the official website."
     }
 };
