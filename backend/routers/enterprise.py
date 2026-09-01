@@ -6,16 +6,38 @@ POST /api/v1/enterprise/lead
 """
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 
 from core.config import settings
 from schemas.enterprise import EnterpriseLead
+from services.bizleads import submit_bizlead
 
 router = APIRouter(prefix="/api/v1/enterprise", tags=["Enterprise"])
 
 
+def _has_bizleads_fields(payload: EnterpriseLead) -> bool:
+    return all(
+        [
+            payload.company_name.strip(),
+            payload.contact_person.strip(),
+            payload.contact_number.strip(),
+            payload.email.strip(),
+            payload.city.strip() if payload.city else "",
+            payload.select_service.strip(),
+        ]
+    )
+
+
+def _parse_bitrix_response(response: httpx.Response):
+    """Return JSON if Bitrix sends JSON, otherwise return the raw body text."""
+    try:
+        return response.json()
+    except Exception:
+        return response.text
+
+
 @router.post("/lead")
-async def create_lead(payload: EnterpriseLead):
+async def create_lead(payload: EnterpriseLead, background_tasks: BackgroundTasks):
     """Accept an enterprise lead and push it to Bitrix24 CRM."""
 
     webhook_url = settings.BITRIX24_WEBHOOK_URL
@@ -37,6 +59,7 @@ async def create_lead(payload: EnterpriseLead):
         "fields[UF_CRM_64DDC37491441]": payload.select_service,
         "fields[COMMENTS]": (
             f"BRN: {payload.business_registration_number or 'N/A'} | "
+            f"City: {payload.city or 'N/A'} | "
             f"Remarks: {payload.remarks or 'N/A'}"
         ),
     }
@@ -45,16 +68,44 @@ async def create_lead(payload: EnterpriseLead):
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(webhook_url, data=bitrix_payload)
 
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Bitrix24 returned status {response.status_code}",
+    bitrix_response = _parse_bitrix_response(response)
+    bitrix_ok = response.status_code == 200
+
+    if not bitrix_ok:
+        # Keep the user flow alive even if Bitrix is temporarily rejecting the lead.
+        # The BizLeads handoff still runs so the submission is not blocked.
+        bitrix_response = {
+            "status": response.status_code,
+            "body": bitrix_response,
+        }
+
+    if _has_bizleads_fields(payload):
+        background_tasks.add_task(
+            submit_bizlead,
+            name=payload.contact_person,
+            phone=payload.contact_number,
+            email=payload.email,
+            city=payload.city,
+            product=payload.select_service,
+            note=payload.note
+            or (
+                f"Company: {payload.company_name} | "
+                f"BRN: {payload.business_registration_number or 'N/A'} | "
+                f"Remarks: {payload.remarks or 'N/A'}"
+            ),
         )
+
+    if not bitrix_ok:
+        return {
+            "status": "partial_success",
+            "message": "Enterprise lead was queued, but Bitrix24 returned a non-200 response.",
+            "bitrix_response": bitrix_response,
+        }
 
     return {
         "status": "success",
         "message": "Lead submitted to Bitrix24 successfully.",
-        "bitrix_response": response.json(),
+        "bitrix_response": bitrix_response,
     }
 
 
@@ -96,14 +147,19 @@ async def test_webhook(
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(webhook_url, data=bitrix_payload)
 
+    bitrix_response = _parse_bitrix_response(response)
     if response.status_code != 200:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Bitrix24 returned status {response.status_code}",
-        )
+        return {
+            "status": "partial_success",
+            "message": "Test payload reached Bitrix24 but returned a non-200 response.",
+            "bitrix_response": {
+                "status": response.status_code,
+                "body": bitrix_response,
+            },
+        }
 
     return {
         "status": "success",
         "message": "Test payload submitted to Bitrix24.",
-        "bitrix_response": response.json(),
+        "bitrix_response": bitrix_response,
     }
