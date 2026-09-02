@@ -28,11 +28,12 @@ services:
     restart: always
 
   backend:
-    image: ghcr.io/sltdigitallab/ai_agents/backend:latest
+    build:
+      context: ./backend
     container_name: slt_backend
     command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--log-level", "info"]
     ports:
-      - "127.0.0.1:8100:8000"
+      - "8100:8000"
     depends_on:
       db_postgres:
         condition: service_healthy
@@ -49,6 +50,8 @@ services:
       LIFESTORE_MCP_URL: http://mcp_lifestore:8001/mcp
     env_file:
       - ./.env
+    volumes:
+      - ./backend:/app
     restart: always
 
   mcp_lifestore:
@@ -80,14 +83,18 @@ services:
     restart: always
 
   frontend:
-    image: ghcr.io/sltdigitallab/ai_agents/frontend:latest
+    build:
+      context: ./frontend
     container_name: slt_frontend
     ports:
-      - "127.0.0.1:3100:3000"
+      - "3000:3000"
     depends_on:
       - backend
     env_file:
       - ./.env
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     restart: always
 
 volumes:
