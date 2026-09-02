@@ -5,9 +5,16 @@ import logging
 import asyncio
 import hashlib
 import re
+import sys
+import fitz
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile
+# Support direct CLI execution: `python services/ingestion.py <path>`.
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+from fastapi import APIRouter, UploadFile, BackgroundTasks
 from pydantic import BaseModel
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_core.documents import Document
@@ -18,14 +25,15 @@ from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from qdrant_client import QdrantClient, models
 import pytesseract
 
+from services.visual_extractor import process_pdf_visuals, process_document_visuals
+
 # Explicitly set Tesseract path for Windows environments
-import sys
 if sys.platform == "win32":
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-from qdrant_client import QdrantClient, models
 
-from core.config import settings, agent_collection_name
+
+from core.config import evidence_storage_dir, settings, agent_collection_name
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +51,7 @@ class IngestionService:
         self.sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
 
         # 3. Initialize Qdrant Client
-        self.client = QdrantClient(url=settings.QDRANT_URL)
+        self.client = QdrantClient(url=settings.QDRANT_URL, check_compatibility=False, timeout=60.0)
 
         # 4. Secondary splitter for chunks that are still too large.
         # chunk_size is aligned with Unstructured's max_characters (1800) so
@@ -191,6 +199,60 @@ class IngestionService:
             )
         return docs
 
+    def _extract_visual_documents(self, file_path: Path, doc_id: str) -> list[Document]:
+        """Extract visual elements from multiple formats (PDF, DOCX, PPTX, XLSX)."""
+        visual_docs = []
+        file_ext = file_path.suffix.lower()
+        
+        # Process visual content for all supported formats
+        if file_ext in (".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls"):
+            try:
+                from services.visual_extractor import process_document_visuals
+                
+                records, doc_chunks = process_document_visuals(file_path=str(file_path), doc_id=doc_id)
+                
+                # Add extracted visual documents to the list
+                visual_docs.extend(doc_chunks)
+                
+                log.info(f"✅ Extracted {len(doc_chunks)} visual elements from {file_path.name}")
+            except Exception as e:
+                log.warning(f"Visual extraction skipped/failed for {file_path.name}: {e}")
+
+            # For PDFs, also generate evidence crops for display
+            if file_ext == ".pdf":
+                try:
+                    doc = fitz.open(str(file_path))
+                    total_pages = len(doc)
+                    doc.close()
+
+                    for page_num in range(1, total_pages + 1):
+                        # This explicitly triggers saving crop PNGs into storage/evidence/
+                        previews = self._render_pdf_evidence_previews(
+                            file_path=file_path,
+                            page_number=page_num,
+                            max_crops=6
+                        )
+                        
+                        # Attach preview URL metadata to extracted documents
+                        for prev in previews:
+                            visual_docs.append(
+                                Document(
+                                    page_content=f"[Visual Evidence Crop from Page {page_num}]",
+                                    metadata={
+                                        "doc_id": doc_id,
+                                        "source": file_path.name,
+                                        "page_number": page_num,
+                                        "evidence_url": prev["url"],
+                                        "type": "visual_crop",
+                                    }
+                                )
+                            )
+                except Exception as e:
+                    log.error(f"Failed to render local evidence crops for {file_path}: {e}")
+
+        return visual_docs
+    
+
     def _load_with_strategy(self, file_path: Path, strategy: str) -> list[Document]:
         """Run UnstructuredLoader with a specific strategy."""
         loader = UnstructuredLoader(
@@ -205,10 +267,7 @@ class IngestionService:
 
     def _evidence_storage_dir(self) -> Path:
         """Return the local directory used to store generated evidence previews."""
-        evidence_dir = Path(settings.EVIDENCE_STORAGE_DIR)
-        if not evidence_dir.is_absolute():
-            evidence_dir = Path(__file__).resolve().parent.parent / evidence_dir
-
+        evidence_dir = evidence_storage_dir()
         evidence_dir.mkdir(parents=True, exist_ok=True)
         return evidence_dir
 
@@ -241,6 +300,7 @@ class IngestionService:
             min(page_rect.y1, rect.y1 + margin),
         )
 
+    
     def _rect_overlap_ratio(self, a, b) -> float:
         """Return overlap ratio against the smaller rectangle area."""
         x0 = max(a.x0, b.x0)
@@ -756,37 +816,29 @@ class IngestionService:
                 matrix = fitz.Matrix(zoom, zoom)
 
                 for idx, crop_rect in enumerate(crop_rects, start=1):
-                    if not self._is_useful_evidence_crop(page, crop_rect, source_doc):
-                        continue
+                    pix = page.get_pixmap(clip=crop_rect, dpi=150)
+                    filename = f"{base_name}_p{page_number}_crop{idx}_{file_hash}.png"
+                    output_path = evidence_dir / filename
 
-                    output_name = (
-                        f"{base_name}-{file_hash}-page-{page_number}-crop-{idx}.png"
-                    )
-                    output_path = evidence_dir / output_name
+                    pix.save(str(output_path))
 
-                    if not output_path.exists():
-                        pix = page.get_pixmap(
-                            matrix=matrix,
-                            alpha=False,
-                            clip=crop_rect,
-                        )
-                        pix.save(str(output_path))
+                    # Store relative URL path for API/frontend rendering
+                    relative_url = f"{settings.EVIDENCE_URL_PREFIX}/{filename}"
 
                     rendered_items.append({
-                        "url": f"{settings.EVIDENCE_URL_PREFIX}/{output_name}",
                         "crop_index": idx,
-                        "is_crop": True,
+                        "path": str(output_path),
+                        "url": relative_url
                     })
+
+                return rendered_items
 
             finally:
                 doc.close()
 
-            return rendered_items
 
         except Exception as e:
-            log.warning(
-                f"Could not render evidence preview for {file_path.name} page {page_number}: {e}"
-            )
+            log.error(f"Error rendering PDF evidence previews for {file_path}: {e}")
             return []
 
     def _doc_has_visual_or_image_signal(self, doc: Document) -> bool:
@@ -1088,7 +1140,7 @@ class IngestionService:
 
         return sub_chunks
 
-    def _load_and_chunk_file(self, file_path: Path) -> list[Document]:
+    def _load_and_chunk_file(self, file_path: Path, doc_id: str = None) -> list[Document]:
         """Use unstructured's native semantic chunking by headers and sections.
 
         Strategy ladder:
@@ -1136,6 +1188,13 @@ class IngestionService:
             # those pages instead of silently dropping them.
             elif ext == ".pdf":
                 docs = self._ocr_missing_pdf_pages(file_path, docs)
+
+
+        #
+        for doc in docs:
+            doc.metadata["type"] = "text"
+            if doc_id:
+                doc.metadata["doc_id"] = doc_id        
 
         # Re-split any chunks that are still too large after semantic
         # chunking.  Oversized chunks dilute embedding precision because
@@ -1191,7 +1250,57 @@ class IngestionService:
             else:
                 final_docs.append(doc)
 
+        if ext == ".pdf":
+            try:
+                log.info(f"  👁️ Extracting visual evidence from {file_path.name}...")
+                visual_docs = self._extract_visual_documents(file_path, doc_id=doc_id or file_path.stem)
+                final_docs.extend(visual_docs)
+                log.info(f"  ✅ Added {len(visual_docs)} visual evidence chunks.")
+            except Exception as e:
+                log.error(f"Visual extraction failed for {file_path.name}: {e}")
+        
+
         return final_docs
+
+    def _normalize_chunk_payloads(
+        self, docs: list[Document], doc_id: str, file_name: str
+    ) -> list[Document]:
+        """Ensures all text and visual chunks strictly adhere to the unified dual-payload schema.
+        
+        Payload Schema:
+        - text: Chunk content (either raw text or visual description)
+        - type: 'text' | 'visual_description'
+        - doc_id: Unique document identifier
+        - source: File name
+        - image_path: Local path to PNG evidence asset (only for visual_description)
+        - page_number: Page number in original document
+        """
+        normalized_docs = []
+
+        for doc in docs:
+            # Preserve existing metadata while enforcing required unified schema fields
+            chunk_type = doc.metadata.get("type", "text")
+
+            updated_metadata = {
+                **doc.metadata,
+                "doc_id": doc.metadata.get("doc_id", doc_id),
+                "source": doc.metadata.get("source", file_name),
+                "type": chunk_type,
+            }
+
+            # Handle Visual Evidence Specific Metadata
+            if chunk_type == "visual_description":
+                updated_metadata["image_path"] = doc.metadata.get("image_path", "")
+                updated_metadata["page_number"] = doc.metadata.get("page_number", 1)
+            else:
+                # Text chunks leave image_path empty or None
+                updated_metadata["image_path"] = None
+                updated_metadata["page_number"] = doc.metadata.get("page_number", 1)
+
+            doc.metadata = updated_metadata
+            normalized_docs.append(doc)
+
+        return normalized_docs
 
     def _ocr_missing_pdf_pages(self, file_path: Path, docs: list[Document]) -> list[Document]:
         """OCR only the scanned pages a 'fast' PDF pass missed.
@@ -1342,6 +1451,76 @@ class IngestionService:
             self._process_onedrive_sync, folder_id, access_token, agent_name, force
         )
 
+    async def ingest_document_async(self, file_path: Path, agent_name: str, doc_id: str):
+        """
+        Async wrapper entry point for background tasks.
+        Offloads CPU/IO-heavy parsing and vector upserting to a worker thread.
+        """
+        return await asyncio.to_thread(
+            self.ingest_document, file_path, agent_name, doc_id
+        )
+
+    def ingest_document(self, file_path: Path, agent_name: str, doc_id: str):
+        """
+        Synchronous worker method executed by FastAPI BackgroundTasks.
+        Parses text, runs PyMuPDF/GPT-4o visual extraction, and upserts to Qdrant.
+        """
+        log.info(f"🚀 Starting background ingestion for {file_path.name} (Doc ID: {doc_id})")
+
+        try:
+            # 1. Run text chunking and PyMuPDF + GPT-4o visual extraction
+            chunks = self._load_and_chunk_file(file_path=file_path, doc_id=doc_id)
+
+            if not chunks:
+                log.warning(f"No chunks extracted from {file_path.name}")
+                return {"status": "warning", "message": "No extractable content found."}
+
+            # 2: Normalize metadata into the Unified Dual-Payload Schema
+            final_docs = self._normalize_chunk_payloads(
+                docs=chunks, doc_id=doc_id, file_name=file_path.name
+            )
+
+            # 3. Ensure target Qdrant collection exists
+            collection_name = agent_collection_name(agent_name)
+            self._ensure_collection_exists(collection_name)
+
+            # 4. Initialize Qdrant Vector Store with Hybrid Search
+            vector_store = QdrantVectorStore(
+                client=self.client,
+                collection_name=collection_name,
+                embedding=self.embeddings,
+                sparse_embedding=self.sparse_embeddings,
+                retrieval_mode=RetrievalMode.HYBRID,
+                vector_name="dense",
+                sparse_vector_name="sparse",
+            )
+
+            # 5. Upsert combined text + visual chunks to Qdrant in sub-batches
+            batch_size = 15
+            total_docs = len(final_docs)
+
+            log.info(f"Uploading {total_docs} documents in batches of {batch_size}...")
+
+            for i in range(0, total_docs, batch_size):
+                sub_batch = final_docs[i : i + batch_size]
+                vector_store.add_documents(sub_batch)
+                log.info(f"  -> Upserted batch {i // batch_size + 1}/{(total_docs + batch_size - 1) // batch_size}")
+
+            log.info(
+                f"✅ Successfully ingested {total_docs} total chunks "
+                f"(text + visual) into collection '{collection_name}'"
+            )
+
+            return {
+                "status": "success",
+                "chunks_ingested": total_docs,
+                "collection": collection_name,
+            }
+
+        except Exception as e:
+            log.exception(f"❌ Ingestion failed for {file_path.name}: {e}")
+            raise e
+
     def _process_onedrive_sync(self, folder_id: str, access_token: str, agent_name: str, force: bool = False):
         """
         Ingest PDFs, Word docs, Powerpoint and Excel from a OneDrive folder
@@ -1451,7 +1630,7 @@ class IngestionService:
                 try:
                     # Download FIRST. Do NOT delete old vectors until we're
                     # sure we have replacement chunks ready to upsert —
-                    # otherwise a download/parse failure wipes existing data.
+                
                     log.info(f"Downloading {file_name}...")
                     file_resp = session.get(download_url, timeout=120)
                     if file_resp.status_code != 200:
@@ -1536,3 +1715,84 @@ class IngestionService:
 
 
 ingestion_service = IngestionService()
+
+
+@router.post("/upload")
+async def upload_document(
+    agent_name: str,
+    background_tasks: BackgroundTasks,
+    file: UploadFile,
+):
+    """
+    Endpoint to receive document uploads and queue ingestion 
+    (Text + PyMuPDF/GPT-4o Visual Extraction) in the background.
+    """
+    # 1. Generate unique file storage location
+    file_id = hashlib.md5(file.filename.encode()).hexdigest()[:8]
+    temp_dir = Path(tempfile.gettempdir()) / "workmate_uploads"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    
+    saved_file_path = temp_dir / f"{file_id}_{file.filename}"
+
+    # 2. Save the uploaded file payload to local disk
+    with saved_file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # 3. Schedule the ingestion process in the background
+    
+    background_tasks.add_task(
+        ingestion_service.ingest_document, 
+        file_path=saved_file_path, 
+        agent_name=agent_name,
+        doc_id=file_id
+    )
+
+    return {
+        "status": "queued",
+        "message": f"File '{file.filename}' uploaded successfully. Ingestion running in background.",
+        "doc_id": file_id,
+        "agent_name": agent_name
+    }
+
+if __name__ == "__main__":
+    import sys
+    from pathlib import Path
+
+    # Raw-document folders predate the UI agent IDs. Keep those folder names
+    # working while indexing into the collections the live agents query.
+    LEGACY_FOLDER_AGENT_IDS = {
+        "askhr": "hr",
+        "askit": "it",
+    }
+
+    if len(sys.argv) > 1:
+        target_path = Path(sys.argv[1]).resolve()
+        service = IngestionService()
+
+        def process_file(file_path: Path, inferred_agent: str):
+            if file_path.is_file() and not file_path.name.startswith("."):
+                doc_id = file_path.stem
+                print(f"Ingesting into [{inferred_agent}]: {file_path.name} (Doc ID: {doc_id})")
+                service.ingest_document(file_path, inferred_agent, doc_id)
+
+        if target_path.is_dir():
+            # Directory name becomes the agent name (e.g., storage/raw_documents/askit -> askit)
+            folder_agent_name = target_path.name.lower()
+            agent_name = LEGACY_FOLDER_AGENT_IDS.get(folder_agent_name, folder_agent_name)
+            print(f"Detected Agent: '{agent_name}' from folder '{target_path.name}'")
+            
+            for file_path in target_path.glob("*"):
+                process_file(file_path, agent_name)
+
+        elif target_path.is_file():
+            # Parent folder name becomes the agent name (e.g., storage/raw_documents/askhr/doc.pdf -> askhr)
+            folder_agent_name = target_path.parent.name.lower()
+            agent_name = LEGACY_FOLDER_AGENT_IDS.get(folder_agent_name, folder_agent_name)
+            print(f"Detected Agent: '{agent_name}' from parent folder '{target_path.parent.name}'")
+            
+            process_file(target_path, agent_name)
+
+        else:
+            print(f"Provided path does not exist: {target_path}")
+    else:
+        print("Usage: python backend/services/ingestion.py <path_to_directory_or_file>")

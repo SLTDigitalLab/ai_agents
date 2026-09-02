@@ -1,6 +1,6 @@
 """
 Ask HR SLM agent — RAG + leave-balance API, all powered by the internal SLM
-(deepseek-r1:1.5b via Ollama).
+(qwen2.5:14b via Ollama).
 
 Flow (option-3 two-stage):
   1. Classifier SLM call (non-streaming, hidden from user) tags the query
@@ -12,8 +12,8 @@ Flow (option-3 two-stage):
   3. Streaming SLM call answers using that context. <think> tokens are
      stripped at the chat-router layer.
 
-Tool-calling is intentionally avoided — deepseek-r1:1.5b doesn't reliably
-emit valid tool-call JSON, so we route deterministically.
+Tool-calling is intentionally avoided — the local SLM is kept deterministic
+and route-based rather than relying on raw tool-call JSON output.
 """
 
 import logging
@@ -37,16 +37,21 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
 _LEAVE_BALANCE_RE = re.compile(
     r"\b("
     r"my\s+leave|leave\s+(balance|details)|leaves?\s+(remaining|left|available|details)|"
-    r"how\s+many\s+leaves?|"
-    r"(annual|casual|sick|medical)\s+leave\s+(balance|remaining|left|details)|"
-    r"days?\s+(of\s+)?leave\s+(remaining|left|available|do\s+i\s+have)"
+    r"how\s+many\s+leaves?|casual\s+leave|annual\s+leave|sick\s+leave|medical\s+leave|"
+    r"(annual|casual|sick|medical|casual)\s+leave\s+(balance|remaining|left|details|days)?|"
+    r"days?\s+(of\s+)?leave\s+(remaining|left|available|do\s+i\s+have)|"
+    r"slt\s+erp"
     r")\b",
     re.IGNORECASE,
 )
 
+# Standardized greeting regex
 _GREETING_RE = re.compile(
-    r"^\s*(hi|hello|hey|hola|good\s+(morning|afternoon|evening)|"
-    r"thanks?|thank\s+you|thx|ty|bye|goodbye|cheers)[\s!.?]*$",
+    r"^\s*("
+    r"hi(\s+there|\s+bot)?|hello(\s+there)?|hey(\s+there)?|hola|"
+    r"good\s+(morning|afternoon|evening)|"
+    r"thanks?(\s+you)?|thx|ty|bye|goodbye|cheers|howdy"
+    r")[\s!.?]*$",
     re.IGNORECASE,
 )
 
@@ -78,9 +83,9 @@ def _last_ai_text(messages) -> str:
             return content if isinstance(content, str) else str(content)
     return ""
 
-
+"""
 def _classify_intent(query: str, messages: list) -> str:
-    """Tag the query. Checks conversation history first to see if we are awaiting a Yes/No."""
+    #Tag the query. Checks conversation history first to see if we are awaiting a Yes/No.
     last_ai_msg = _last_ai_text(messages)
     
     # Check if the user is responding to our Yes/No prompt
@@ -103,6 +108,37 @@ def _classify_intent(query: str, messages: list) -> str:
         
     log.info(f"[SLM router] intent=KB_QUERY | query={query!r}")
     return "KB_QUERY"
+"""
+
+def _classify_intent(query: str, messages: list) -> str:
+    """Tag the query based on strict intent priorities."""
+    cleaned_query = query.strip()
+    last_ai_msg = _last_ai_text(messages)
+    
+    # Priority 1: Check if user is responding to the HITL Yes/No confirmation prompt
+    if _LEAVE_CLARIFICATION_MSG in last_ai_msg:
+        if _YES_RE.search(cleaned_query):
+            log.info(f"[SLM router] intent=LEAVE_YES | query={cleaned_query!r}")
+            return "LEAVE_YES"
+        if _NO_RE.search(cleaned_query):
+            log.info(f"[SLM router] intent=LEAVE_NO | query={cleaned_query!r}")
+            return "LEAVE_NO"
+
+    # Priority 2: Standalone Greetings
+    if _GREETING_RE.match(cleaned_query):
+        log.info(f"[SLM router] intent=GREETING | query={cleaned_query!r}")
+        return "GREETING"
+
+    # Priority 3: Direct Leave Balance / ERP Queries (runs BEFORE Knowledge Base)
+    if _LEAVE_BALANCE_RE.search(cleaned_query):
+        log.info(f"[SLM router] intent=LEAVE_BALANCE_ASK | query={cleaned_query!r}")
+        return "LEAVE_BALANCE_ASK"
+        
+    # Priority 4: Knowledge Base Fallback
+    log.info(f"[SLM router] intent=KB_QUERY | query={cleaned_query!r}")
+    return "KB_QUERY"
+
+
 
 async def call_model(state: AgentState) -> dict:
     user_query = _last_user_text(state["messages"])
@@ -140,13 +176,11 @@ async def call_model(state: AgentState) -> dict:
     
     # STANDARD FLOW (GREETING & KB)
     elif intent == "GREETING":
-        context_block = ""
-        rules = (
-            "Respond with a short, warm greeting. Briefly mention you are the "
-            "Ask HR assistant powered by SLTMobitel's internal SLM. Do not cite sources."
-        )
-        system_prompt = _build_system_prompt(context_block, rules)
-        return await _invoke_slm(state, system_prompt)
+        return {
+            "messages": [
+                AIMessage(content="Hello! I'm the Ask HR assistant. How can I help you with HR-related queries today?")
+            ]
+        }
 
     else:  # KB_QUERY
         context = await search_hr_slm_kb.ainvoke({"query": user_query})

@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   db_postgres:
@@ -24,6 +24,7 @@ services:
     container_name: slt_qdrant
     ports:
       - "6335:6333"
+    
     volumes:
       - ./data/qdrant:/qdrant/storage
     restart: always
@@ -33,7 +34,7 @@ services:
       context: ./backend
     container_name: slt_backend
     ports:
-      - "8100:8000"
+      - "8000:8000"
     depends_on:
       db_postgres:
         condition: service_healthy
@@ -43,12 +44,17 @@ services:
       PYTHONUNBUFFERED: 1
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
       QDRANT_URL: http://slt_qdrant:6333
+
+      HF_HOME: /root/.cache/huggingface
+      CUDA_VISIBLE_DEVICES: "-1"
     env_file:
       - ./.env
     volumes:
       - ./backend:/app
       - ./data/evidence:/app/storage/evidence
+      - ./hf_cache:/root/.cache/huggingface # Map host directory to container's HF cache directory
     restart: always
+    
 
   frontend:
     build:

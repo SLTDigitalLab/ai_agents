@@ -6,6 +6,7 @@ Includes input guardrails (LLM-based intent + sentiment classification) run befo
 import json
 import logging
 import re
+import traceback
 from typing import AsyncGenerator
 from urllib.parse import urlparse
 
@@ -13,7 +14,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
 
-from core.config import settings
+from core.config import agent_collection_name, settings
 from domain.registry import (
     get_agent_builder,
     get_compiled_async_graph,
@@ -23,6 +24,7 @@ from domain.guardrails import classify_intent
 from domain.tools.rag_tools import clear_thread_evidence, consume_thread_evidence
 from schemas.chat import ChatRequest
 from services.sessions import record_session
+from routers.router import run_multi_agent_pipeline,AGENT_COLLECTION_MAP
 
 # --- 1. Import Langfuse CallbackHandler ---
 from langfuse.langchain import CallbackHandler
@@ -45,6 +47,9 @@ GENERIC_ERROR_MESSAGE = (
     "Sorry, something went wrong on my end. Please try again."
 )
 
+ERROR_JSON_OPEN = "[[ERROR_JSON]]"
+ERROR_JSON_CLOSE = "[[/ERROR_JSON]]"
+
 # Substrings that indicate the LLM provider rejected the call due to
 # quota/rate limits rather than a real application bug.
 _QUOTA_ERROR_MARKERS = (
@@ -64,6 +69,15 @@ def _is_quota_error(exc: Exception) -> bool:
     """True if the exception looks like a provider quota / rate-limit error."""
     text = f"{type(exc).__name__} {exc}".lower()
     return any(marker in text for marker in _QUOTA_ERROR_MARKERS)
+
+
+def _build_error_stream_chunk(message: str, code: str) -> str:
+    """Build a terminal structured error frame for interrupted SSE responses."""
+    return (
+        f"{ERROR_JSON_OPEN}"
+        + json.dumps({"code": code, "message": message})
+        + f"{ERROR_JSON_CLOSE}"
+    )
 
 # Product agents skip query PII masking: model/SKU numbers in product
 # searches would otherwise be mangled (e.g. masked as [PHONE]/[CARD_NUMBER])
@@ -424,39 +438,56 @@ def _build_evidence_stream_chunk(answer_text: str, thread_id: str) -> str:
 async def chat(request: ChatRequest):
     """Handle an incoming chat message from the frontend with streaming."""
     try:
-        builder_fn = get_agent_builder(request.agent_id)
+        # Integration: Run Multi-Agent Router
+        if not request.agent_id or request.agent_id == "auto":
+            route_info = await run_multi_agent_pipeline(request.message)
+            effective_agent_id = route_info["selected_agent"]
+            target_collection = route_info["target_collection"]
+            logger.info(f"Router decision | selected={effective_agent_id} | collection={target_collection}")
+        else:
+            effective_agent_id = request.agent_id
+            # Fallback: Default target collection to match the explicit agent_id or set default
+            target_collection = AGENT_COLLECTION_MAP.get(
+                effective_agent_id,
+                agent_collection_name(effective_agent_id),
+            )
+
+        builder_fn = get_agent_builder(effective_agent_id)
+        agent = builder_fn()
     except ValueError as exc:
+        logger.error(f"Validation error in chat setup: {exc}")
         raise HTTPException(status_code=404, detail=str(exc))
 
     async def event_generator() -> AsyncGenerator[str, None]:
         clear_thread_evidence(request.thread_id)
+
         # Skip masking for product agents so SKU/model numbers survive.
-        if request.agent_id in PII_MASK_EXEMPT_AGENTS:
+        if effective_agent_id in PII_MASK_EXEMPT_AGENTS:
             safe_user_message = request.message
         else:
             safe_user_message = mask_pii(request.message)
-        # Tracked outside the try so the error handler can tell whether a
-        # partial answer was already streamed before the failure.
+
+        # Tracked outside try block to determine if partial answer was streamed
         streamed_any_text = False
+
         try:
-            # --- 2. Initialize Langfuse Handler (Empty in v3+) ---
+            # --- Initialize Langfuse Handler ---
             langfuse_handler = CallbackHandler()
 
-            # --- 3. Inject callbacks and Langfuse metadata into the config ---
+            # --- Inject callbacks and metadata ---
             config = {
                 "configurable": {"thread_id": request.thread_id},
                 "callbacks": [langfuse_handler],
                 "metadata": {
                     "langfuse_session_id": request.thread_id,
                     "langfuse_user_id": request.user_id,
-                    "langfuse_tags": [request.agent_id, "prod"]
+                    "langfuse_tags": [effective_agent_id, "prod"]
                 }
             }
 
-            # Record who is behind this session (id + display name) so the admin
-            # panel can attribute sessions and agents can personalize by name.
+            # Record session details
             record_session(
-                agent_id=request.agent_id,
+                agent_id=effective_agent_id,
                 thread_id=request.thread_id,
                 user_id=request.user_id,
                 user_name=request.user_name,
@@ -464,23 +495,19 @@ async def chat(request: ChatRequest):
                 job_title=request.job_title,
             )
 
-            # ── Run guardrail classifier FIRST ──────────────────────────
-            # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
-            # and lets us pass real sentiment into the agent state.
+            # ── Run guardrail classifier ──
             guardrail = await classify_intent(safe_user_message)
 
             if guardrail.action == "BLOCK":
                 logger.info(f"Guardrail BLOCK | reason={guardrail.reason}")
-                # Save the blocked exchange to chat history
                 try:
-                    # Reuse the cached, pre-compiled graph bound to a long-lived pool.
-                    graph = await get_compiled_async_graph(request.agent_id)
+                    graph = await get_compiled_async_graph(effective_agent_id)
                     blocked_state = {
                         "messages": [
                             HumanMessage(content=safe_user_message),
                             AIMessage(content=BLOCK_MESSAGE),
                         ],
-                        "agent_id": request.agent_id,
+                        "agent_id": effective_agent_id,
                         "user_id": request.user_id,
                         "thread_id": request.thread_id,
                         "form_slots": {},
@@ -488,62 +515,44 @@ async def chat(request: ChatRequest):
                         "sentiment": guardrail.sentiment,
                     }
                     await graph.aupdate_state(config, blocked_state)
-                except Exception as e:
-                    logger.warning(f"Failed to save blocked exchange: {e}")
+                except Exception:
+                    logger.exception(
+                        "Guardrail checkpoint persistence failed | agent=%s | thread=%s",
+                        effective_agent_id,
+                        request.thread_id,
+                    )
 
                 yield BLOCK_MESSAGE
                 return
 
             logger.info(
-                f"Guardrail PASS | sentiment={guardrail.sentiment} | "
-                f"reason={guardrail.reason}"
+                f"Guardrail PASS | sentiment={guardrail.sentiment} | reason={guardrail.reason}"
             )
 
-            # Build initial state with real sentiment from classifier
+            # Build initial state with real sentiment
             state = {
                 "messages": [("user", safe_user_message)],
-                "agent_id": request.agent_id,
+                "agent_id": effective_agent_id,
                 "user_id": request.user_id,
                 "thread_id": request.thread_id,
                 "form_slots": {},
                 "next_node": "",
                 "sentiment": guardrail.sentiment,
+                "target_collection": target_collection,
             }
 
-            # Reuse the cached, pre-compiled graph bound to a long-lived pool.
-            graph = await get_compiled_async_graph(request.agent_id)
-
+            graph = await get_compiled_async_graph(effective_agent_id)
             streamed_response_text = ""
 
-            # We use astream_events (v2) for fine-grained streaming.
-            #
-            # Nodes whose token stream must be SUPPRESSED — these fan
-            # out multiple concurrent LLM calls whose tokens would
-            # otherwise interleave in the HTTP stream and render as
-            # garbled text on the client. The final merged reply from
-            # the downstream synthesis node still streams cleanly.
-            #
-            # Specialists invoked inside multi_delegate run as compiled
-            # subgraphs, so their LLM events bubble up with the subgraph's
-            # internal node name ("agent") rather than the parent node.
-            # We must also match on ``langgraph_checkpoint_ns`` (a
-            # namespace string like "multi_delegate:<hash>|agent:<hash>")
-            # to suppress nested events too.
             SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
             logged_metadata_sample = False
 
-            # ── DeepSeek-R1 <think> stripper ─────────────
-            # The internal SLM (deepseek-r1) prefixes its output
-            # with <think>...</think> reasoning tokens. We hide
-            # those from the user but let the final answer stream.
             strip_think = request.agent_id == "askhrslm"
             think_buffer = ""
             in_think_block = False
             think_done = False
 
-            # --- 4. The `config` object here now contains the Langfuse callbacks ---
             async for event in graph.astream_events(state, config, version="v2"):
-                # ── Extract tokens from stream events ────────
                 kind = event["event"]
 
                 if kind == "on_chat_model_stream":
@@ -581,16 +590,13 @@ async def chat(request: ChatRequest):
                             text = ""
                         if in_think_block:
                             if "</think>" in think_buffer:
-                                # Drop everything up to and including </think>;
-                                # whatever follows is the real answer.
                                 text = think_buffer.split("</think>", 1)[1].lstrip()
                                 in_think_block = False
                                 think_done = True
                                 think_buffer = ""
                             else:
-                                text = ""  # still inside think block
+                                text = ""
                         elif "<think>" not in think_buffer:
-                            # No think tag at all — flush buffer as normal output.
                             text = think_buffer
                             think_buffer = ""
                             think_done = True
@@ -600,8 +606,7 @@ async def chat(request: ChatRequest):
                         streamed_response_text += text
                         yield text
 
-            # Fallback: if the graph responded without streaming tokens,
-            # fetch the latest AI message from final graph state.
+            # Non-streaming fallback
             if not streamed_any_text:
                 snapshot = await graph.aget_state(config)
 
@@ -621,10 +626,7 @@ async def chat(request: ChatRequest):
                                 yield text
                                 break
 
-            # ── Visual/table evidence ───────────────────────────────
-            # Stream a hidden evidence block (cropped PDF images/tables)
-            # after the answer. The frontend parses and renders it as a
-            # "Relevant Evidence" section.
+            # Evidence streaming
             evidence_chunk = _build_evidence_stream_chunk(
                 streamed_response_text,
                 request.thread_id,
@@ -634,21 +636,24 @@ async def chat(request: ChatRequest):
                 yield evidence_chunk
 
         except Exception as exc:
-            import traceback
-            error_details = traceback.format_exc()
-            logger.error(f"Streaming error: {exc}\n{error_details}")
+            # Print full stack trace to backend terminal for debugging
+            print("\n" + "=" * 50)
+            print("EXACT BACKEND STREAMING CRASH REASON:")
+            traceback.print_exc()
+            print("=" * 50 + "\n")
+            
+            logger.error(f"Streaming error: {exc}")
 
-            # Show a friendly message instead of leaking raw provider errors
-            # (quota exhausted, rate limits, etc.) to the user.
             if _is_quota_error(exc):
                 user_message = BUSY_MESSAGE
+                error_code = "provider_unavailable"
             else:
                 user_message = GENERIC_ERROR_MESSAGE
+                error_code = "stream_interrupted"
 
-            # If we already streamed part of an answer, separate the notice.
             if streamed_any_text:
                 yield "\n\n"
-            yield user_message
+            yield _build_error_stream_chunk(user_message, error_code)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

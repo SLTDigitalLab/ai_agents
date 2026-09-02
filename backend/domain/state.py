@@ -5,10 +5,17 @@ All agent graphs share this single state schema. Fields are accumulated
 (messages) or overwritten (everything else) on each graph step.
 """
 
-from typing import Annotated, TypedDict, Literal, NotRequired
+from typing import Annotated, TypedDict, Literal, NotRequired, List
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
+
+class VisualEvidence(TypedDict):
+    doc_id: str
+    source: str
+    page_number: int
+    image_path: str
+    visual_description: str
 
 
 class AgentState(TypedDict):
@@ -60,3 +67,6 @@ class AgentState(TypedDict):
     # (Workmate AI). Specialists use this to keep the unified "Workmate AI"
     # voice and never reveal that multiple agents exist.
     via_supervisor: NotRequired[bool]
+
+    #Store paths to diagrams retrieved during execution
+    image_paths: List[str]

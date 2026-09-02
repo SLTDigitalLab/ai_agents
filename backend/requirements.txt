@@ -2,7 +2,7 @@ aiohttp==3.13.2
 fastapi==0.129.0
 uvicorn==0.41.0
 python-dotenv==1.2.1
-qdrant-client==1.16.2
+qdrant-client>=1.18.0,<1.19.0
 langchain==1.2.10
 langgraph==1.0.8
 langgraph-prebuilt==1.0.7

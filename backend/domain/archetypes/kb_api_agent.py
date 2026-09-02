@@ -8,12 +8,16 @@ The LLM acts as a supervisor that decides which tool to call:
   • get_employee_leave_balance → personal leave data queries
 
 Flow:
-    START ──► agent (LLM supervisor) ──► tools_condition ──► tools ──► agent ──► END
+    START ──► agent (LLM supervisor) ──► tools_condition ──► tools ──► multimodal_check ──► agent ──► END
 """
 
+import base64
+import json
+import logging
+import os
 import re
 
-from langchain_core.messages import AIMessage, trim_messages
+from langchain_core.messages import AIMessage, trim_messages, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
@@ -24,6 +28,8 @@ from domain.state import AgentState
 from domain.tools.api_tools import _extract_sid_from_email, get_employee_leave_balance
 from domain.tools.rag_tools import search_knowledge_base
 
+log = logging.getLogger(__name__)
+
 # Refusal shown when a user asks for someone else's leave balance.
 _OTHER_EMPLOYEE_LEAVE_REFUSAL = (
     "Sorry, I can't do that. You can only view your own leave balance."
@@ -33,6 +39,22 @@ _OTHER_EMPLOYEE_LEAVE_REFUSAL = (
 _LEAVE_KEYWORDS = ("leave balance", "leave bal", "annual leave", "casual leave",
                    "sick leave", "leaves", "my leave", "leave")
 _EMP_ID_RE = re.compile(r"\b\d{4,8}\b")
+
+
+def encode_image_to_base64(image_path: str) -> str | None:
+    """Helper to safely read and encode a local image file to Base64."""
+    if not os.path.exists(image_path):
+        log.warning(f"Evidence image missing on disk: {image_path}")
+        return None
+    try:
+        with open(image_path, "rb") as img_file:
+            encoded = base64.b64encode(img_file.read()).decode("utf-8")
+            ext = os.path.splitext(image_path)[1].lower().replace(".", "")
+            mime_type = "image/png" if ext == "png" else "image/jpeg"
+            return f"data:{mime_type};base64,{encoded}"
+    except Exception as err:
+        log.error(f"Failed to encode image '{image_path}': {err}")
+        return None
 
 
 def _latest_human_text(messages: list) -> str:
@@ -173,6 +195,85 @@ The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledg
     return {"messages": [response]}
 
 
+async def multimodal_check(state: AgentState) -> dict:
+    """Check if the last tool call returned images; if so, re-invoke with multimodal."""
+    messages = state["messages"]
+    
+    # Look for the most recent ToolMessage
+    tool_message = None
+    for msg in reversed(messages):
+        if getattr(msg, "type", None) == "tool":
+            tool_message = msg
+            break
+    
+    if not tool_message:
+        return {}  # No tool message, nothing to do
+    
+    # Extract image_paths from tool result
+    tool_result = tool_message.content
+    if isinstance(tool_result, str):
+        try:
+            tool_result = json.loads(tool_result)
+        except json.JSONDecodeError:
+            log.warning("RAG tool returned non-JSON content; skipping multimodal analysis")
+            tool_result = {}
+
+    image_paths = tool_result.get("image_paths", []) if isinstance(tool_result, dict) else []
+    
+    # If no images, return as-is
+    if not image_paths:
+        return {}
+    
+    # Encode images
+    encoded_images = []
+    for path in image_paths:
+        b64_str = encode_image_to_base64(path)
+        if b64_str:
+            encoded_images.append(b64_str)
+    
+    if not encoded_images:
+        return {}  # Failed to encode images
+    
+    # Find the last user message
+    user_messages = [m for m in messages if getattr(m, "type", None) == "human"]
+    if not user_messages:
+        return {}
+    
+    # Use multimodal LLM to process the context with images
+    context_from_tool = tool_result.get("context", "")
+    user_query = user_messages[-1].content if isinstance(user_messages[-1].content, str) else str(user_messages[-1].content)
+    
+    system_prompt = f"""You are analyzing retrieved HR context with visual evidence to answer a user question.
+    
+Retrieved Context:
+{context_from_tool}
+
+User Question: {user_query}
+
+Analyze the provided images alongside the text context to give the most accurate answer. Be clear and concise."""
+    
+    # Build multimodal message
+    content_blocks = [{"type": "text", "text": system_prompt}]
+    for b64_img in encoded_images:
+        content_blocks.append({
+            "type": "image_url",
+            "image_url": {"url": b64_img}
+        })
+    
+    llm = get_chat_model()
+    multimodal_message = HumanMessage(content=content_blocks)
+    response = await llm.ainvoke([multimodal_message])
+    
+    # Replace the last AI message with the multimodal response
+    new_messages = list(messages)
+    for i in range(len(new_messages) - 1, -1, -1):
+        if getattr(new_messages[i], "type", None) == "ai":
+            new_messages[i] = response
+            break
+    
+    return {"messages": new_messages}
+
+
 # ── Build the (uncompiled) workflow ──────────────────────────────────────
 def build_kb_api_workflow() -> StateGraph:
     """Return an uncompiled StateGraph - registry.py will compile it
@@ -182,10 +283,12 @@ def build_kb_api_workflow() -> StateGraph:
     # Nodes
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", ToolNode(tools))
+    workflow.add_node("multimodal_check", multimodal_check)
 
     # Edges
     workflow.add_edge(START, "agent")
     workflow.add_conditional_edges("agent", tools_condition)   # → "tools" or END
-    workflow.add_edge("tools", "agent")
+    workflow.add_edge("tools", "multimodal_check")
+    workflow.add_edge("multimodal_check", "agent")
 
     return workflow

@@ -28,11 +28,11 @@ class ChatRequest(BaseModel):
         max_length=MAX_CHAT_MESSAGE_CHARS,
         description="User message. Limited to prevent spam/oversized prompt abuse.",
     )
-    agent_id: str = Field(
-        ...,
+    agent_id: Optional[str] = Field(
+        default="auto",
         min_length=1,
         max_length=MAX_AGENT_ID_CHARS,
-        description="Target agent identifier.",
+        description="Target agent identifier.Defaults to 'auto' for dynamic routing.",
     )
     user_id: str = Field(
         ...,

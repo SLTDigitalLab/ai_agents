@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
 from services.ingestion import router as ingestion_router
-from core.config import settings
+from core.config import evidence_storage_dir, settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
 
 
@@ -45,10 +45,7 @@ app = FastAPI(
 # --- Evidence image storage ---
 # Cropped PDF image/table previews are rendered during ingestion and served
 # as static files so the frontend can display them as "Relevant Evidence".
-evidence_dir = Path(settings.EVIDENCE_STORAGE_DIR)
-if not evidence_dir.is_absolute():
-    evidence_dir = Path(__file__).resolve().parent / evidence_dir
-
+evidence_dir = evidence_storage_dir()
 evidence_dir.mkdir(parents=True, exist_ok=True)
 
 app.mount(
@@ -60,7 +57,10 @@ app.mount(
 # --- 1. Add CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], # React URL
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

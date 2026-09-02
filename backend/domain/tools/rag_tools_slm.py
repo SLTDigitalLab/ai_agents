@@ -48,23 +48,38 @@ async def search_hr_slm_kb(query: str) -> str:
             log.error(f"Collection '{_COLLECTION}' does not exist.")
             return "[KB_UNAVAILABLE] No HR knowledge base is configured yet."
 
-        vector_store = QdrantVectorStore(
-            client=client,
-            collection_name=_COLLECTION,
-            embedding=embeddings,
-            sparse_embedding=_sparse_embeddings,
-            retrieval_mode=RetrievalMode.HYBRID,
-            vector_name="dense",
-            sparse_vector_name="sparse",
-        )
+        try:
+            vector_store = QdrantVectorStore(
+                client=client,
+                collection_name=_COLLECTION,
+                embedding=embeddings,
+            )
+            results = await vector_store.asimilarity_search(query=query, k=4)
+        except Exception as dense_err:
+            log.warning(f"Standard dense search failed, trying hybrid named vectors: {dense_err}")
 
-        results = await vector_store.asimilarity_search(query=query, k=4)
+            vector_store = QdrantVectorStore(
+                client=client,
+                collection_name=_COLLECTION,
+                embedding=embeddings,
+                sparse_embedding=_sparse_embeddings,
+                retrieval_mode=RetrievalMode.HYBRID,
+                vector_name="dense",
+                sparse_vector_name="sparse",
+            )
+
+            results = await vector_store.asimilarity_search(query=query, k=4)
         if not results:
             return "No relevant documents found."
 
         context_parts = []
         for doc in results:
-            source = doc.metadata.get("source", "Unknown Source")
+            source = (
+                doc.metadata.get("source")
+                or doc.metadata.get("filename")
+                or doc.metadata.get("file_name")
+                or "Unknown Source"
+            )
             link = doc.metadata.get("link", "#")
             context_parts.append(f"[Source: {source} | Link: {link}]\n{doc.page_content}")
 

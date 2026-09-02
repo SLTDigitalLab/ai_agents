@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useMsal } from "@azure/msal-react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
@@ -21,6 +22,8 @@ const FORM_TOKENS = {
 // ── Visual/table evidence emitted by the backend ────────────────────────
 const EVIDENCE_OPEN = '[[EVIDENCE_JSON]]';
 const EVIDENCE_CLOSE = '[[/EVIDENCE_JSON]]';
+const ERROR_OPEN = '[[ERROR_JSON]]';
+const ERROR_CLOSE = '[[/ERROR_JSON]]';
 
 // Product agents skip client-side PII masking so SKU/model numbers in
 // queries are not corrupted. Mirrors PII_MASK_EXEMPT_AGENTS in the backend.
@@ -82,6 +85,28 @@ const parseEvidencePayload = (text = '') => {
             text: `${before}${after}`.trimEnd(),
             evidence: null,
         };
+    }
+};
+
+const parseStreamError = (text = '') => {
+    const openIndex = text.indexOf(ERROR_OPEN);
+    if (openIndex === -1) return { text, error: null };
+
+    const closeIndex = text.indexOf(ERROR_CLOSE, openIndex + ERROR_OPEN.length);
+    if (closeIndex === -1) {
+        return { text: text.slice(0, openIndex).trimEnd(), error: null };
+    }
+
+    const before = text.slice(0, openIndex);
+    const jsonText = text.slice(openIndex + ERROR_OPEN.length, closeIndex);
+    const after = text.slice(closeIndex + ERROR_CLOSE.length);
+
+    try {
+        const error = JSON.parse(jsonText);
+        return { text: `${before}${after}`.trimEnd(), error };
+    } catch (error) {
+        console.error('Failed to parse stream error:', error);
+        return { text: `${before}${after}`.trimEnd(), error: null };
     }
 };
 
@@ -559,32 +584,34 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, ex
 
     return (
         <>
-            <button
-                onClick={() => handleFeedback('up')}
-                disabled={submitting}
-                className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'up'
-                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
-                    }`}
-                title="Helpful"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                    <path d="M1 8.998a1 1 0 011-1h.764a1.483 1.483 0 00-.076.506v5.996a1.483 1.483 0 00.076.506H2a1 1 0 01-1-1V8.998zM5.25 7.726a2 2 0 01.944-1.697l3.476-2.14a1.5 1.5 0 012.33 1.25v2.363h2.5a2 2 0 011.96 2.4l-.782 3.908A2 2 0 0113.72 15.5H5.25V7.726z" />
-                </svg>
-            </button>
-            <button
-                onClick={() => handleFeedback('down')}
-                disabled={submitting}
-                className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'down'
-                    ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
-                    }`}
-                title="Not helpful"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                    <path d="M19 11.002a1 1 0 01-1 1h-.764a1.483 1.483 0 00.076-.506V5.5a1.483 1.483 0 00-.076-.506H18a1 1 0 011 1v5.008zM14.75 12.274a2 2 0 01-.944 1.697l-3.476 2.14a1.5 1.5 0 01-2.33-1.25V12.5h-2.5a2 2 0 01-1.96-2.4l.782-3.908A2 2 0 016.28 4.5h8.47v7.774z" />
-                </svg>
-            </button>
+            <div className="flex items-center gap-1 sm:gap-2 z-10 shrink-0">
+                <button
+                    onClick={() => handleFeedback('up')}
+                    disabled={submitting}
+                    className={`p-1.5 rounded-md transition-all duration-200 shrink-0 ${rating === 'up'
+                        ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                        : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
+                        }`}
+                    title="Helpful"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5.5 h-5.5 sm:w-5 sm:h-5">
+                        <path d="M1 8.998a1 1 0 011-1h.764a1.483 1.483 0 00-.076.506v5.996a1.483 1.483 0 00.076.506H2a1 1 0 01-1-1V8.998zM5.25 7.726a2 2 0 01.944-1.697l3.476-2.14a1.5 1.5 0 012.33 1.25v2.363h2.5a2 2 0 011.96 2.4l-.782 3.908A2 2 0 0113.72 15.5H5.25V7.726z" />
+                    </svg>
+                </button>
+                <button
+                    onClick={() => handleFeedback('down')}
+                    disabled={submitting}
+                    className={`p-1.5 rounded-md transition-all duration-200 shrink-0 ${rating === 'down'
+                        ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
+                        : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
+                        }`}
+                    title="Not helpful"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+                        <path d="M19 11.002a1 1 0 01-1 1h-.764a1.483 1.483 0 00.076-.506V5.5a1.483 1.483 0 00-.076-.506H18a1 1 0 011 1v5.008zM14.75 12.274a2 2 0 01-.944 1.697l-3.476 2.14a1.5 1.5 0 01-2.33-1.25V12.5h-2.5a2 2 0 01-1.96-2.4l.782-3.908A2 2 0 016.28 4.5h8.47v7.774z" />
+                    </svg>
+                </button>
+            </div>
         </>
     );
 };
@@ -636,6 +663,7 @@ const ScrollToLatestPill = ({ onClick, color }) => (
 const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const { instance, accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
+    const navigate = useNavigate();
 
     // Department + job title resolved from Azure AD (Graph /me). Best-effort:
     // stay null if the directory lacks them or the Graph call fails.
@@ -966,7 +994,8 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
                 // Detect and strip the hidden evidence metadata block first.
                 const parsedEvidence = parseEvidencePayload(accumulatedText);
-                let cleanText = parsedEvidence.text;
+                const parsedError = parseStreamError(parsedEvidence.text);
+                let cleanText = parsedError.text;
 
                 if (parsedEvidence.evidence) {
                     evidenceItems = parsedEvidence.evidence;
@@ -986,9 +1015,10 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     const lastIdx = newMessages.length - 1;
                     newMessages[lastIdx] = {
                         ...newMessages[lastIdx],
-                        text: cleanText,
+                        text: cleanText || parsedError.error?.message || newMessages[lastIdx].text,
                         formType: currentFormType || newMessages[lastIdx].formType,
                         evidence: evidenceItems.length > 0 ? evidenceItems : newMessages[lastIdx].evidence,
+                        error: Boolean(parsedError.error) || newMessages[lastIdx].error,
                     };
                     return newMessages;
                 });
@@ -1072,6 +1102,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const firstName = (user.name || "User").split(" ")[0];
     const isIdle = isIdleForEffects;
 
+    const shouldShowFeedbackLink =
+        !agentConfig.public && messages.some((msg) => msg.type === 'user');
+
     // Pick a fresh greeting whenever we (re-)enter idle, change agent, or start a new thread.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     const idleGreeting = useMemo(() => pickGreeting(firstName), [isIdle, agentConfig.id, firstName, threadId]);
@@ -1141,7 +1174,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         }
 
         return (
-            <form onSubmit={handleSend} className="relative flex items-end w-full pointer-events-auto">
+            <form onSubmit={handleSend} className="relative flex items-end w-full pr-20 lg:pr-28 pointer-events-auto">
                 <div className="relative flex items-end w-full bg-white dark:bg-[#2a2e36] rounded-3xl border border-gray-200 dark:border-[#3a3f48] shadow-[0_8px_30px_-10px_rgba(0,0,0,0.08)] dark:shadow-[0_8px_30px_-10px_rgba(0,0,0,0.5)] p-1.5 focus-within:border-gray-300 dark:focus-within:border-[#4a505a] focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.12)] dark:focus-within:shadow-[0_12px_40px_-10px_rgba(0,0,0,0.7)] transition-shadow">
                     {controls}
                 </div>
@@ -1163,7 +1196,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-            className="flex-1 flex flex-col min-h-0 w-full overflow-hidden z-10"
+            className="relative flex-1 flex flex-col min-h-0 w-full overflow-hidden z-10"
         >
             {isIdle ? (
                 // ── IDLE LANDING SCREEN ─────────────────────────────────
@@ -1398,14 +1431,67 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     </div>
 
                     {/* Docked composer — centered, content constrained */}
-                    <div className="w-full flex flex-col items-center px-4 sm:px-6 pb-3 pt-1 z-20 shrink-0">
-                        <div className="w-full max-w-[820px] flex flex-col items-center">
+                    <div className="w-full flex flex-col items-center px-4 sm:px-6 pb-3 pt-1 z-20 shrink-0 relative">
+                        <div className="w-full max-w-[820px]">
                             {renderComposer()}
-                            {disclaimerText}
-                            <div className="mt-3.5 flex items-center justify-center gap-1.5 pointer-events-auto cursor-default select-none">
+                        </div>
+
+                        {shouldShowFeedbackLink && (
+                            <motion.div className="hidden lg:flex absolute right-12 sm:right-14 top-[32%] -translate-y-1/2">
+                                <motion.button
+                                    type="button"
+                                    onClick={() => navigate('/contact-us')}
+                                    initial={{ opacity: 0, x: 12, scale: 0.96 }}
+                                    animate={{ opacity: 1, x: 0, scale: 1 }}
+                                    exit={{ opacity: 0, x: 12, scale: 0.96 }}
+                                    transition={{ duration: 0.22, ease: 'easeOut' }}
+                                    whileHover={{ scale: 1.04 }}
+                                    whileTap={{ scale: 0.96 }}
+                                    className="flex items-center gap-2 rounded-full bg-white dark:bg-[#1f2937] border border-gray-200 dark:border-[#334155] text-gray-700 dark:text-gray-100 px-4 py-2.5 text-sm font-semibold shadow-[0_8px_24px_-14px_rgba(0,0,0,0.35)] hover:bg-gray-50 hover:border-gray-300 dark:hover:bg-[#263447] dark:hover:border-[#475569] transition-all whitespace-nowrap"
+                                    title="Send feedback"
+                                >
+                                    <span className={`flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-br ${agentConfig.color} text-white shadow-sm`}>
+                                        <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            viewBox="0 0 20 20"
+                                            fill="currentColor"
+                                            className="w-4 h-4"
+                                        >
+                                            <path d="M3.505 2.365A1.5 1.5 0 012.25 3.845v10.31a1.5 1.5 0 001.255 1.48l4.745.79V17.5a.75.75 0 001.2.6l2.04-1.53 5.005-.835A1.5 1.5 0 0017.75 14.155V3.845a1.5 1.5 0 00-1.255-1.48A41.052 41.052 0 0010 1.75c-2.196 0-4.364.18-6.495.615z" />
+                                        </svg>
+                                    </span>
+                                    Feedback
+                                </motion.button>
+                            </motion.div>
+                        )}
+
+                        {disclaimerText}
+                        <div className="mt-3.5 flex items-center justify-center gap-1.5 pointer-events-auto cursor-default select-none">
+                            <div className="flex items-center gap-1.5">
                                 <span className="text-[0.65rem] uppercase tracking-wider font-semibold text-gray-500 dark:text-gray-400">Powered by</span>
                                 <img src={embryoLogo} alt="Embryo Logo" className="h-[20px] w-auto object-contain dark:brightness-110" />
-                            </div>
+                            </div>    
+
+                            {/* Mobile: Feedback button sits beside the Powered-by logo */}
+                            {shouldShowFeedbackLink && (
+                                <motion.button
+                                    type="button"
+                                    onClick={() => navigate('/contact-us')}
+                                    initial={{ opacity: 0, x: 8 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ duration: 0.22, ease: 'easeOut' }}
+                                    whileTap={{ scale: 0.96 }}
+                                    className="flex lg:hidden items-center gap-1.5 rounded-full bg-white dark:bg-[#1f2937] border border-gray-200 dark:border-[#334155] text-gray-700 dark:text-gray-100 px-3 py-1.5 text-xs font-semibold shadow-[0_8px_24px_-14px_rgba(0,0,0,0.35)] mr-4"
+                                    title="Send feedback"
+                                >
+                                    <span className={`flex items-center justify-center w-5 h-5 rounded-full bg-gradient-to-br ${agentConfig.color} text-white shadow-sm`}>
+                                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+                                            <path d="M3.505 2.365A1.5 1.5 0 012.25 3.845v10.31a1.5 1.5 0 001.255 1.48l4.745.79V17.5a.75.75 0 001.2.6l2.04-1.53 5.005-.835A1.5 1.5 0 0017.75 14.155V3.845a1.5 1.5 0 00-1.255-1.48A41.052 41.052 0 0010 1.75c-2.196 0-4.364.18-6.495.615z" />
+                                        </svg>
+                                    </span>
+                                    Feedback
+                                </motion.button>
+                            )}
                         </div>
                     </div>
                 </motion.div>

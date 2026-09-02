@@ -15,7 +15,9 @@ Neo4j:
 
 import json
 import logging
-from typing import Annotated, Any, Optional
+import os
+from pathlib import Path
+from typing import Annotated, Any, Optional, Dict, List
 
 import httpx
 from langchain_core.tools import tool
@@ -23,8 +25,10 @@ from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langgraph.prebuilt import InjectedState
 from qdrant_client import QdrantClient
 
-from core.config import settings, agent_collection_name, collection_suffix
+from core.config import evidence_storage_dir, settings, agent_collection_name, collection_suffix
 from core.llm import get_embedding_model
+
+from core.reranker import rerank_documents
 
 log = logging.getLogger(__name__)
 
@@ -160,9 +164,10 @@ def _absolutize_remote_evidence(evidence_items: Any, base_url: str) -> list[dict
 async def _search_remote(
     agent_id: str,
     query: str,
-    k: int = 10,
+    k: int = 5,
     thread_id: str | None = None,
 ) -> str:
+    
     """Proxy retrieval to a remote Ask SLT instance's /api/v1/kb endpoint.
 
     Used by local dev environments to skip ingestion and read prod vectors.
@@ -173,31 +178,86 @@ async def _search_remote(
     base = settings.KB_REMOTE_URL.rstrip("/")
     url = f"{base}/api/v1/kb/{agent_id}/retrieve"
     headers = {"X-API-Key": settings.KB_REMOTE_API_KEY or ""}
+
+    #Step 1: Over-fetch 30 candidate chunks from remote endpoint
+    OVERFETCH_K = 12
     async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(url, json={"query": query, "top_k": k}, headers=headers)
+        resp = await client.post(url, json={"query": query, "top_k": OVERFETCH_K}, headers=headers)
         if resp.status_code == 404:
             return "[KB_UNAVAILABLE] No knowledge base is configured for this agent."
         resp.raise_for_status()
-        chunks = resp.json().get("chunks", [])
+        candidate_chunks = resp.json().get("chunks", [])
 
-    if not chunks:
+    if not candidate_chunks:
         return "No relevant documents found."
+    
+    #Step 2. Extract text and run cross-encodeer reranking
+    candidate_texts = [c.get("text", "") for c in candidate_chunks]
 
-    for c in chunks:
+    try:
+        scores = rerank_documents(query=query, documents=candidate_texts)
+    except Exception as rerank_err:
+        log.warning(
+            "Remote reranking failed for agent='%s'; falling back to raw remote order: %s: %s",
+            agent_id,
+            type(rerank_err).__name__,
+            rerank_err,
+        )
+
+        # Fallback: maintain raw remote order if cross-encoder fails
+        scores = [1.0 - (i * 0.01) for i in range(len(candidate_chunks))]
+
+    # Pair and sort chunks descending by score
+    scored_chunks = list(zip(candidate_chunks, scores))
+    scored_chunks.sort(key=lambda item: item[1], reverse=True)
+
+    # Step 3: Filter by relevance score threshold & truncate to requested top-k
+    SCORE_THRESHOLD = 0.25
+    relevant_scored_chunks = [
+        (c, score) for c, score in scored_chunks if score >= SCORE_THRESHOLD
+    ]
+    top_scored_chunks = relevant_scored_chunks[:k]
+
+    if not top_scored_chunks:
+        top_raw_score = scored_chunks[0][1] if scored_chunks else 0.0
+        log.info(
+            "No remote candidate documents met score threshold (>= %.2f) for agent='%s'. Best raw score: %.4f",
+            SCORE_THRESHOLD,
+            agent_id,
+            top_raw_score,
+        )
+        return "No relevant remote documents found in the knowledge base matching this query."
+    
+    # Step 4: Collect evidence and build context ONLY for top reranked chunks
+    context_parts = []
+    for idx, (c, score) in enumerate(top_scored_chunks):
+        source = c.get("source", "Unknown Source")
+        link = c.get("link", "#")
+        title = c.get("title") or source or "Untitled"
+
         evidence = c.get("evidence")
         if evidence:
             _add_thread_evidence(
                 thread_id=thread_id,
                 evidence_items=_absolutize_remote_evidence(evidence, base),
-                source=c.get("source", "Unknown Source"),
-                link=c.get("link", "#"),
+                source=source,
+                link=link,
             )
+        context_parts.append(
+            f"--- Document Chunk #{idx + 1} ---\n"
+            f"[Remote Source: {source} | Link: {link} | Title: {title} | Relevancy Score: {score:.4f}]\n"
+            f"{c.get('text', '')}"
+        )
 
-    return "\n\n---\n\n".join(
-        f"[Source: {c.get('source', 'Unknown Source')} | Link: {c.get('link', '#')}]\n{c.get('text', '')}"
-        for c in chunks
+    log.info(
+        "Remote KB retrieval + rerank success agent='%s' candidate_count=%d final_count=%d top_score=%.4f",
+        agent_id,
+        len(candidate_chunks),
+        len(context_parts),
+        top_scored_chunks[0][1],
     )
 
+    return "\n\n---\n\n".join(context_parts)        
 
 _neo4j_driver = None
 
@@ -275,11 +335,47 @@ def _get_neo4j_driver():
 
     return _neo4j_driver
 
+"""
+async def get_agent_context(
+    query: str,
+    agent_id: str,
+    k: int = 6,
+    thread_id: str | None = None,
+) -> str:
+
+    # 1. Fetch reranked vector context (automatically routes local vs. remote)
+    vector_context = await _search_qdrant_knowledge_base(
+        query=query, agent_id=agent_id, k=k, thread_id=thread_id
+    )
+
+    # 2. Fetch graph context if Neo4j is configured
+    graph_context = await _search_neo4j_graph(query=query, agent_id=agent_id)
+
+    # 3. Assemble combined payload
+    context_sections = []
+
+    if graph_context:
+        context_sections.append(
+            f"### STRUCTURED KNOWLEDGE GRAPH FACTS:\n{graph_context}"
+        )
+
+    if vector_context:
+        context_sections.append(
+            f"### UNSTRUCTURED VECTOR DOCUMENT CHUNKS:\n{vector_context}"
+        )
+
+    if not context_sections:
+        return "No relevant knowledge base or graph context found for this query."
+
+    return "\n\n========================================\n\n".join(context_sections)
+"""
+   
+
 
 async def _search_qdrant_knowledge_base(
     query: str,
     agent_id: str,
-    k: int = 12,
+    k: int = 5, # final top-k chunks to keep after reranking
     thread_id: str | None = None,
 ) -> str:
     """Search the Qdrant knowledge base for documents relevant to the user's query.
@@ -287,6 +383,8 @@ async def _search_qdrant_knowledge_base(
     Uses hybrid retrieval (dense semantic + BM25 lexical) to balance
     semantic understanding with exact-match recall on codes, IDs, and
     proper nouns.
+
+    + cross-encoder reranking
 
     Args:
         query: The user's natural-language question.
@@ -301,13 +399,16 @@ async def _search_qdrant_knowledge_base(
 
     if settings.KB_REMOTE_URL:
         try:
-            return await _search_remote(agent_id, query, k=10, thread_id=thread_id)
+            remote_res = await _search_remote(agent_id, query, k=5, thread_id=thread_id)
+            if isinstance(remote_res, dict):
+                return remote_res
+            return {"context": str(remote_res), "image_paths": []}
         except Exception as e:
             log.exception(
                 f"Remote KB retrieval failed for agent='{agent_id}' "
                 f"url='{settings.KB_REMOTE_URL}': {type(e).__name__}: {e}"
             )
-            return "No relevant documents found."
+            return {"context": "No relevant documents found.", "image_paths": []}
 
 
     try:
@@ -331,7 +432,10 @@ async def _search_qdrant_knowledge_base(
                 collection_name,
                 agent_id,
             )
-            return "[QDRANT_UNAVAILABLE] No Qdrant knowledge base is configured for this agent."
+            return {
+                "context": "[QDRANT_UNAVAILABLE] No Qdrant knowledge base is configured for this agent.",
+                "image_paths": [],
+            }
 
         vector_store = QdrantVectorStore(
             client=client,
@@ -343,21 +447,74 @@ async def _search_qdrant_knowledge_base(
             sparse_vector_name="sparse",
         )
 
+        #Step -1 Over -fetch candidates from Qdrant (Fetch top 30)
+        OVERFETCH_K = 12
+        candidate_docs = await vector_store.asimilarity_search(query=query, k=OVERFETCH_K)
 
-        results = await vector_store.asimilarity_search(query=query, k=k)
-
-        if not results:
+        if not candidate_docs:
             log.info(
                 "Qdrant search returned 0 results for agent='%s' collection='%s' query='%s'",
                 agent_id,
                 collection_name,
                 query,
             )
-            return "No relevant vector documents found."
+            return {"context": "No relevant vector documents found.", "image_paths": []}
+        
+        #Step -2 Perform cross-encoder reranking
+        candidate_texts = [doc.page_content for doc in candidate_docs]
+        
+        try:
+            scores = rerank_documents(query=query, documents=candidate_texts)
+        except Exception as rerank_err:
+            log.warning(
+                "Reranking failed for agent='%s'; falling back to raw Qdrant order: %s: %s",
+                agent_id,
+                type(rerank_err).__name__,
+                rerank_err,
+            )
+            # Fallback: maintain Qdrant's original similarity ranking if model fails
+            scores = [1.0 - (i * 0.01) for i in range(len(candidate_docs))]
 
+        # Pair each document with its  reranking corresponding score
+        scored_docs = list(zip(candidate_docs, scores))
+
+        # Sort documents by score in descending order
+        scored_docs.sort(key=lambda item: item[1], reverse=True)
+
+
+        #Step -3 Apply relevence score threshold & Truncate
+        # BGE-Reranker v2 M3 normalized scores: 
+        # >= 0.50: Very high relevance
+        # 0.25 - 0.49: Moderate relevance
+        # < 0.25: Low relevance / Noise
+        SCORE_THRESHOLD = 0.25
+
+        #Keep only docs that satisfy the score threshold
+        relevant_scored_docs = [
+            (doc, score) for doc, score in scored_docs if score >= SCORE_THRESHOLD]
+
+        # Truncate to final top-k requested chunks
+        top_scored_docs = relevant_scored_docs[:k]
+
+        # FALLBACK: If nothing passed the threshold, log and notify
+        if not top_scored_docs:
+            top_raw_score = scored_docs[0][1] if scored_docs else 0.0
+            log.info(
+                "No candidate documents met score threshold (>= %.2f) for agent='%s'. Best raw score: %.4f",
+                SCORE_THRESHOLD,
+                agent_id,
+                top_raw_score,
+            )
+            return {
+                "context": "No relevant vector documents found in the knowledge base matching this query.",
+                "image_paths": [],
+            }
+        
+        #Step -4 Collect evidence and format final context for return
         context_parts = []
+        extracted_image_paths = []
 
-        for doc in results:
+        for idx, (doc, score) in enumerate(top_scored_docs):
             source = (
                 doc.metadata.get("source")
                 or doc.metadata.get("source_url")
@@ -370,12 +527,41 @@ async def _search_qdrant_knowledge_base(
                 or "#"
             )
 
-            # Prefer the section heading captured at ingestion; fall back to
-            # the filename so citations never read "Untitled".
             title = doc.metadata.get("title") or source or "Untitled"
 
-            # Collect any visual/table evidence attached to this chunk at
-            # ingestion time so chat.py can stream it to the frontend.
+            # Extract visual image path from metadata if present
+            img_path = (
+                doc.metadata.get("image_path")
+                or doc.metadata.get("visual_path")
+                or doc.metadata.get("evidence_path")
+            )
+            asset_path = evidence_storage_dir() / os.path.basename(str(img_path or ""))
+            if img_path and not asset_path.is_file():
+                log.warning(
+                    "Skipping missing visual evidence asset for agent='%s': %s",
+                    agent_id,
+                    asset_path,
+                )
+            elif img_path and img_path not in extracted_image_paths:
+                extracted_image_paths.append(img_path)
+                
+                # Convert image path to evidence item for frontend rendering
+                visual_evidence_item = {
+                    "type": "image",
+                    "url": f"{settings.EVIDENCE_URL_PREFIX}/{asset_path.name}",
+                    "source": source,
+                    "link": link,
+                    "title": f"Visual Evidence - {title}",
+                    "page": doc.metadata.get("page_number", 1),
+                }
+                _add_thread_evidence(
+                    thread_id=thread_id,
+                    evidence_items=[visual_evidence_item],
+                    source=source,
+                    link=link,
+                )
+
+            #Collect visual/table evidence ONLY for top reranked chunks
             _add_thread_evidence(
                 thread_id=thread_id,
                 evidence_items=doc.metadata.get("evidence") or [],
@@ -384,19 +570,25 @@ async def _search_qdrant_knowledge_base(
             )
 
             context_parts.append(
-                f"[Vector Source: {source} | Link: {link} | Title: {title}]\n"
+                f"--- Document Chunk #{idx + 1} ---\n"
+                f"[Vector Source: {source} | Link: {link} | Title: {title} | Relevancy Score: {score:.4f}]\n"
                 f"{doc.page_content}"
             )
 
         log.info(
-            "Qdrant search success agent='%s' collection='%s' results=%s",
+            "Qdrant search + rerank success agent='%s' collection='%s' candidate_count=%d final_count=%d top_score=%.4f",
             agent_id,
             collection_name,
-            len(results),
+            len(candidate_docs),
+            len(context_parts),
+            top_scored_docs[0][1],
         )
 
-        return "\n\n---\n\n".join(context_parts)
-
+        return {
+            "context": "\n\n---\n\n".join(context_parts),
+            "image_paths": extracted_image_paths,
+        }
+    
     except Exception as exc:
         log.exception(
             "Qdrant hybrid search failed for agent='%s' collection='%s': %s: %s",
@@ -405,7 +597,9 @@ async def _search_qdrant_knowledge_base(
             type(exc).__name__,
             exc,
         )
-        return "No relevant vector documents found."
+
+        return {"context": "No relevant vector documents found.", "image_paths": []}
+    
 
 
 def _clean_search_terms(query: str) -> list[str]:
@@ -658,7 +852,7 @@ async def search_knowledge_base(
     query: str,
     agent_id: Annotated[str, InjectedState("agent_id")],
     thread_id: Annotated[str | None, InjectedState("thread_id")] = None,
-) -> str:
+) -> Dict[str, Any]:
     """
     Search knowledge base.
 
@@ -675,8 +869,20 @@ async def search_knowledge_base(
         thread_id=thread_id,
     )
 
+    # Standardize result structure if helper returns string vs dict
+    if isinstance(qdrant_context, str):
+        context = qdrant_context
+        image_paths = []
+    else:
+        
+        context = qdrant_context.get("context", "")
+        image_paths = qdrant_context.get("image_paths", [])
+
     if not _is_lifestore_agent(agent_id):
-        return qdrant_context
+        return {
+            "context":context,
+            "image_paths": image_paths
+        }
 
     log.info(
         "Hybrid retrieval triggered for LifeStore agent='%s' query='%s'",
@@ -686,10 +892,15 @@ async def search_knowledge_base(
 
     graph_context = _search_lifestore_graph(query=query, limit=12)
 
-    return f"""
+    combined_context = f"""
 [NEO4J GRAPH FACTS - VERIFIED PRODUCT FACTS. USE THESE FOR NAME, BRAND, SELLER, PRICE, STOCK, CATEGORY, PRODUCT TYPE, URL, DESCRIPTION, FEATURES, AND SPECIFICATIONS]
 {graph_context}
 
 [QDRANT VECTOR CONTEXT - VERIFIED PRODUCT PAGE CONTENT. USE THIS FOR DESCRIPTIONS, FUNCTIONALITIES, FEATURES, SPECIFICATIONS, AND GENERAL PRODUCT DETAILS]
 {qdrant_context}
 """.strip()
+
+    return {
+        "context": combined_context,
+        "image_paths": image_paths
+    }

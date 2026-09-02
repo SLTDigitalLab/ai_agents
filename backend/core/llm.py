@@ -112,6 +112,19 @@ def get_chat_model():
             streaming=True,
             temperature=0,
         )
+    elif provider == "ollama":
+        from langchain_ollama import ChatOllama
+
+        ollama_url = base_url or "http://localhost:11434"
+
+        log.info(f"Initialized Ollama chat model: {model_name} @ {ollama_url}")
+        return ChatOllama(
+            model=model_name,
+            base_url=ollama_url,
+            num_ctx=4096,
+            timeout=120.0,
+            temperature=0,
+        )
     else:
         raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
 

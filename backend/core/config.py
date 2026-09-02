@@ -8,6 +8,7 @@ from fastapi_mail import ConnectionConfig
 
 # backend/core/config.py → backend/core → backend → project root
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+BACKEND_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 
@@ -51,12 +52,13 @@ class Settings(BaseSettings):
     GUARDRAIL_API_KEY: Optional[str] = None  # falls back to provider key
 
     # Internal SLM (Ollama) — used by the Ask HR SLM demo agent only.
+    
     SLM_BASE_URL: str = "http://localhost:11434"
     SLM_EMBEDDING_BASE_URL: str = "http://localhost:11434"
-    SLM_MODEL: str = "deepseek-r1:1.5b"
+    SLM_MODEL: str = "qwen2.5:14b"
     SLM_EMBEDDING_MODEL: str = "nomic-embed-text"
     SLM_EMBEDDING_DIMENSIONS: int = 768
-
+    
     QDRANT_URL: str
     POSTGRES_URL: str
 
@@ -65,6 +67,7 @@ class Settings(BaseSettings):
     EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
     EVIDENCE_RENDER_ZOOM: float = 1.75
     EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
+    VISUAL_AUDIT_ALL_PDF_PAGES: bool = False
 
     # API key for external clients (e.g. voice assistant) hitting the Finance retrieval endpoint
     VOICE_ASSISTANT_API_KEY: Optional[str] = None
@@ -114,6 +117,12 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def evidence_storage_dir() -> Path:
+    """Return the canonical local directory exposed by the evidence endpoint."""
+    configured_dir = Path(settings.EVIDENCE_STORAGE_DIR)
+    return configured_dir if configured_dir.is_absolute() else BACKEND_DIR / configured_dir
 
 
 # Make the Vertex service-account credentials discoverable by the Google SDK.
