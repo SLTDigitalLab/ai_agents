@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const PRODUCT_SEARCH_DEBOUNCE_MS = 300;
 
 const LifestoreForm = ({ onSuccess } = {}) => {
     const [isSubmitted, setIsSubmitted] = useState(false);
@@ -9,7 +10,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
     const [submitNotice, setSubmitNotice] = useState('');
     const [submittedData, setSubmittedData] = useState(null);
     const [formData, setFormData] = useState({
-        product: '',
         fullName: '',
         deliveryAddress: '',
         phone: '',
@@ -18,12 +18,60 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         note: '',
     });
 
+    // Product is search-and-pick, not free text: productQuery drives the input
+    // display, productId is the only thing actually submitted.
+    const [productQuery, setProductQuery] = useState('');
+    const [productId, setProductId] = useState('');
+    const [productSuggestions, setProductSuggestions] = useState([]);
+    const [showProductSuggestions, setShowProductSuggestions] = useState(false);
+    const productSearchTimeout = useRef(null);
+
     const handleChange = (e) => {
         setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
     };
 
+    const handleProductInputChange = (e) => {
+        const value = e.target.value;
+        setProductQuery(value);
+        setProductId(''); // any manual edit invalidates the previous selection
+
+        if (productSearchTimeout.current) {
+            clearTimeout(productSearchTimeout.current);
+        }
+
+        if (!value.trim()) {
+            setProductSuggestions([]);
+            setShowProductSuggestions(false);
+            return;
+        }
+
+        productSearchTimeout.current = setTimeout(async () => {
+            try {
+                const response = await fetch(
+                    `${API_URL}/api/v1/orders/products/search?q=${encodeURIComponent(value)}`
+                );
+                const body = await response.json();
+                setProductSuggestions(body?.results || []);
+                setShowProductSuggestions(true);
+            } catch (err) {
+                console.error('Product search failed:', err);
+            }
+        }, PRODUCT_SEARCH_DEBOUNCE_MS);
+    };
+
+    const handleProductSelect = (product) => {
+        setProductQuery(product.name);
+        setProductId(product.product_id);
+        setShowProductSuggestions(false);
+        setProductSuggestions([]);
+    };
+
     const handleCancel = () => {
-        setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
+        setFormData({ fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
+        setProductQuery('');
+        setProductId('');
+        setProductSuggestions([]);
+        setShowProductSuggestions(false);
         setError('');
         setSubmitNotice('');
         setSubmittedData(null);
@@ -71,7 +119,10 @@ const LifestoreForm = ({ onSuccess } = {}) => {
             const response = await fetch(`${API_URL}/api/v1/orders/submit`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData),
+                body: JSON.stringify({
+                    ...formData,
+                    product_id: productId || undefined,
+                }),
             });
 
             let responseBody = null;
@@ -95,10 +146,12 @@ const LifestoreForm = ({ onSuccess } = {}) => {
             setSubmitNotice(responseBody?.message || 'Order placed successfully.');
 
             // Success
-            const payload = { ...formData };
+            const payload = { ...formData, product: productQuery };
             setSubmittedData(payload);
             setIsSubmitted(true);
-            setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
+            setFormData({ fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
+            setProductQuery('');
+            setProductId('');
             onSuccess?.(payload);
         } catch (err) {
             console.error('Order submission failed:', err);
@@ -167,17 +220,42 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Product (optional) */}
-                    <div>
+                    {/* Product (search and pick, not free text) */}
+                    <div className="relative">
                         <label className="block text-sm text-gray-600 mb-1">Product</label>
                         <input
                             type="text"
-                            name="product"
-                            placeholder="e.g., router / Archer AX20"
-                            value={formData.product}
-                            onChange={handleChange}
+                            name="productSearch"
+                            placeholder="Start typing to search products..."
+                            value={productQuery}
+                            onChange={handleProductInputChange}
+                            onFocus={() => productSuggestions.length > 0 && setShowProductSuggestions(true)}
+                            onBlur={() => setTimeout(() => setShowProductSuggestions(false), 150)}
+                            autoComplete="off"
                             className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
                         />
+                        {productId && (
+                            <p className="text-xs text-green-600 mt-1">Selected from catalog ✓</p>
+                        )}
+                        {showProductSuggestions && productSuggestions.length > 0 && (
+                            <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+                                {productSuggestions.map((product) => (
+                                    <li key={product.product_id}>
+                                        <button
+                                            type="button"
+                                            onMouseDown={(e) => e.preventDefault()}
+                                            onClick={() => handleProductSelect(product)}
+                                            className="w-full text-left px-3 py-2 text-sm hover:bg-green-50 flex justify-between gap-2"
+                                        >
+                                            <span className="text-gray-700">{product.name}</span>
+                                            {product.price && (
+                                                <span className="text-gray-400 whitespace-nowrap">{product.price}</span>
+                                            )}
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
                     </div>
 
                     {/* Email (required for BizLeads) */}
