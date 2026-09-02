@@ -1,7 +1,6 @@
 import { BrowserCacheLocation } from "@azure/msal-browser";
-import { Capacitor } from "@capacitor/core";
 
-const isNativePlatform = Capacitor.isNativePlatform();
+const isNativePlatform = typeof window !== "undefined" && Boolean(window?.Capacitor?.isNativePlatform?.());
 
 const trimTrailingSlash = (value) => value?.replace(/\/+$/, "");
 
@@ -9,12 +8,12 @@ const appBaseUrl = trimTrailingSlash(
     isNativePlatform
         ? import.meta.env.VITE_CAPACITOR_APP_BASE_URL
         : import.meta.env.VITE_APP_BASE_URL
-) || window.location.origin;
+) || (typeof window !== "undefined" ? window.location.origin : "");
 
 const redirectUri = `${appBaseUrl}/auth/callback`;
 const workmateRoute = `${appBaseUrl}/workmateai`;
 
-export const authFlowStorage = isNativePlatform ? window.localStorage : window.sessionStorage;
+export const authFlowStorage = isNativePlatform ? window.localStorage : (typeof window !== "undefined" ? window.sessionStorage : null);
 
 export const msalConfig = {
     auth: {
