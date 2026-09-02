@@ -7,6 +7,8 @@ agent logic.
 
 from __future__ import annotations
 
+from core.config import settings as _settings
+
 SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
     "hr": {
         "display_name": "HR",
@@ -846,7 +848,6 @@ FOLLOW_UP_PATTERNS: tuple[str, ...] = (
 # MULTI_DELEGATE_MAX_GAP: fan out on "both strongly scored" ONLY when the top
 # two are within this gap (a genuine close call / compound query). For openai
 # it is effectively disabled (1.0) to preserve the original behavior.
-from core.config import settings as _settings
 
 _ROUTING_THRESHOLDS: dict[str, dict[str, float]] = {
     "openai": {
