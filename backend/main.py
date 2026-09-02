@@ -7,7 +7,7 @@ logging.basicConfig(
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, lifestore_mcp_chat
 from routers import lifestore_payments
 from routers.voice_agent import lifestore_realtime, realtime
 from services.ingestion import router as ingestion_router
@@ -51,6 +51,7 @@ app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev l
 app.include_router(ingestion_router)
 app.include_router(realtime.router)  # Live Voice Agent — Realtime API (/api/v1/realtime/*)
 app.include_router(lifestore_realtime.router)  # LifeStore Voice Agent — isolated realtime API
+app.include_router(lifestore_mcp_chat.router)  # LifeStore MCP Chat (/api/v1/lifestore/*)
 
 @app.get("/")
 def read_root():
