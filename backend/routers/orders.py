@@ -9,9 +9,35 @@ from fastapi import APIRouter, BackgroundTasks
 from fastapi_mail import FastMail, MessageSchema, MessageType
 
 from core.config import get_mail_config
+from services.bizleads import submit_bizlead
+from services.lifestore_catalog import search_products
 from schemas.order import OrderSubmission
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Lifestore"])
+
+
+@router.get("/products/search")
+async def search_lifestore_products(q: str = ""):
+    """Autocomplete search over the real LifeStore product catalog."""
+    matches = search_products(q, limit=10)
+    return {
+        "results": [
+            {"product_id": p["product_id"], "name": p["name"], "price": p.get("price")}
+            for p in matches
+        ]
+    }
+
+
+def _has_bizleads_fields(order: OrderSubmission) -> bool:
+    return all(
+        [
+            order.fullName.strip(),
+            order.deliveryAddress.strip(),
+            order.phone.strip(),
+            order.email.strip() if order.email else "",
+            order.city.strip() if order.city else "",
+        ]
+    )
 
 
 @router.post("/submit")
@@ -45,7 +71,7 @@ async def submit_order(order: OrderSubmission, background_tasks: BackgroundTasks
     # ── Configure the message ────────────────────────────────────────────
     message = MessageSchema(
         subject="New LifeStore Order",
-        recipients=["dialogtv456@gmail.com"],
+        recipients=["lifestore@slt.lk"],
         body=html_body,
         subtype=MessageType.html,
     )
@@ -53,5 +79,16 @@ async def submit_order(order: OrderSubmission, background_tasks: BackgroundTasks
     # ── Send in the background so the API responds instantly ─────────────
     fm = FastMail(get_mail_config())
     background_tasks.add_task(fm.send_message, message)
+
+    if _has_bizleads_fields(order):
+        background_tasks.add_task(
+            submit_bizlead,
+            name=order.fullName,
+            phone=order.phone,
+            email=order.email,
+            city=order.city,
+            product=order.product or "LifeStore Order",
+            note=order.note or order.deliveryAddress,
+        )
 
     return {"status": "success", "message": "Order placed successfully"}
