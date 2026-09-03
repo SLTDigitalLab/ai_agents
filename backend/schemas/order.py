@@ -46,16 +46,14 @@ class OrderSubmission(BaseModel):
 
     @model_validator(mode="after")
     def validate_product(self) -> "OrderSubmission":
-        # A product_id must resolve to a real catalog entry; the display name is
-        # always taken from the catalog, never trusted from free-typed input.
         if self.product_id:
             catalog_product = get_product_by_id(self.product_id)
             if not catalog_product:
                 raise ValueError("Selected product was not found in the catalog")
             self.product = catalog_product["name"]
-        elif self.product and catalog_available():
-            # No product_id supplied but the catalog is loaded: free-typed product
-            # names are no longer trusted, so reject instead of silently accepting.
+        elif catalog_available():
+        # No product_id supplied and the catalog is loaded — reject regardless
+        # of whether free text was typed, since a product selection is required.
             raise ValueError("Please select a product from the search suggestions")
         return self
 

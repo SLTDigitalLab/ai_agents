@@ -128,6 +128,11 @@ const handleCancel = () => {
             return;
         }
 
+        if (!productId) {
+            setError('Please select a product from the search suggestions.');
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const response = await fetch(`${API_URL}/api/v1/orders/submit`, {
