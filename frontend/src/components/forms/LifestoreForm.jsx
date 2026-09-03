@@ -1,6 +1,12 @@
 import React, { useRef, useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const isLocalHost =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (isLocalHost ? `${window.location.protocol}//${window.location.hostname}:8100` : "");
 const PRODUCT_SEARCH_DEBOUNCE_MS = 300;
 
 const LifestoreForm = ({ onSuccess } = {}) => {
@@ -9,6 +15,7 @@ const LifestoreForm = ({ onSuccess } = {}) => {
     const [error, setError] = useState('');
     const [submitNotice, setSubmitNotice] = useState('');
     const [submittedData, setSubmittedData] = useState(null);
+    const [searchError, setSearchError] = useState('');
     const [formData, setFormData] = useState({
         fullName: '',
         deliveryAddress: '',
@@ -18,8 +25,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         note: '',
     });
 
-    // Product is search-and-pick, not free text: productQuery drives the input
-    // display, productId is the only thing actually submitted.
     const [productQuery, setProductQuery] = useState('');
     const [productId, setProductId] = useState('');
     const [productSuggestions, setProductSuggestions] = useState([]);
@@ -33,7 +38,8 @@ const LifestoreForm = ({ onSuccess } = {}) => {
     const handleProductInputChange = (e) => {
         const value = e.target.value;
         setProductQuery(value);
-        setProductId(''); // any manual edit invalidates the previous selection
+        setProductId('');
+        setSearchError('');
 
         if (productSearchTimeout.current) {
             clearTimeout(productSearchTimeout.current);
@@ -50,11 +56,17 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                 const response = await fetch(
                     `${API_URL}/api/v1/orders/products/search?q=${encodeURIComponent(value)}`
                 );
+                if (!response.ok) {
+                    throw new Error(`Search failed (HTTP ${response.status})`);
+                }
                 const body = await response.json();
                 setProductSuggestions(body?.results || []);
                 setShowProductSuggestions(true);
             } catch (err) {
                 console.error('Product search failed:', err);
+                setSearchError('Product search is temporarily unavailable. You can still type, but selecting a catalog match is required to submit.');
+                setProductSuggestions([]);
+                setShowProductSuggestions(false);
             }
         }, PRODUCT_SEARCH_DEBOUNCE_MS);
     };
@@ -64,6 +76,7 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         setProductId(product.product_id);
         setShowProductSuggestions(false);
         setProductSuggestions([]);
+        setSearchError('');
     };
 
     const handleCancel = () => {
@@ -72,6 +85,7 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         setProductId('');
         setProductSuggestions([]);
         setShowProductSuggestions(false);
+        setSearchError('');
         setError('');
         setSubmitNotice('');
         setSubmittedData(null);
@@ -82,18 +96,12 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         if (typeof detail === 'string' && detail.trim()) {
             return detail;
         }
-
         if (Array.isArray(detail) && detail.length > 0) {
-            return detail
-                .map((item) => item?.msg)
-                .filter(Boolean)
-                .join(', ');
+            return detail.map((item) => item?.msg).filter(Boolean).join(', ');
         }
-
         if (typeof responseBody?.message === 'string' && responseBody.message.trim()) {
             return responseBody.message;
         }
-
         return `Order submission failed (HTTP ${responseStatus}). Please try again.`;
     };
 
@@ -102,7 +110,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         setError('');
         setSubmitNotice('');
 
-        // Client-side required-field validation
         if (
             !formData.fullName.trim() ||
             !formData.deliveryAddress.trim() ||
@@ -114,6 +121,11 @@ const LifestoreForm = ({ onSuccess } = {}) => {
             return;
         }
 
+        if (!productId) {
+            setError('Please select a product from the search suggestions.');
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const response = await fetch(`${API_URL}/api/v1/orders/submit`, {
@@ -121,6 +133,7 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...formData,
+                    product: productQuery || undefined,
                     product_id: productId || undefined,
                 }),
             });
@@ -145,7 +158,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
 
             setSubmitNotice(responseBody?.message || 'Order placed successfully.');
 
-            // Success
             const payload = { ...formData, product: productQuery };
             setSubmittedData(payload);
             setIsSubmitted(true);
@@ -161,7 +173,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         }
     };
 
-    // ── Success state ───────────────────────────────────────────────────
     if (isSubmitted) {
         return (
             <div className="w-full my-3">
@@ -176,7 +187,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                     {submitNotice && (
                         <p className="text-xs text-green-700 mt-2 font-medium">{submitNotice}</p>
                     )}
-
                     {submittedData && (
                         <div className="mt-4 w-full max-w-md rounded-xl border border-green-100 bg-white/80 p-4 text-left shadow-sm">
                             <p className="text-xs font-semibold uppercase tracking-wider text-green-700 mb-3">
@@ -205,14 +215,11 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         );
     }
 
-    // ── Form state ──────────────────────────────────────────────────────
     return (
         <div className="w-full my-3">
             <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-                {/* Title */}
                 <h3 className="text-lg font-bold text-gray-800 mb-4">Please fill the form</h3>
 
-                {/* Error banner */}
                 {error && (
                     <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">
                         {error}
@@ -220,7 +227,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Product (search and pick, not free text) */}
                     <div className="relative">
                         <label className="block text-sm text-gray-600 mb-1">Product</label>
                         <input
@@ -236,6 +242,9 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                         />
                         {productId && (
                             <p className="text-xs text-green-600 mt-1">Selected from catalog ✓</p>
+                        )}
+                        {searchError && (
+                            <p className="text-xs text-red-500 mt-1">{searchError}</p>
                         )}
                         {showProductSuggestions && productSuggestions.length > 0 && (
                             <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
@@ -258,7 +267,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                         )}
                     </div>
 
-                    {/* Email (required for BizLeads) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Email <span className="text-red-500">*</span>
@@ -274,7 +282,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                         />
                     </div>
 
-                    {/* Full Name (required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Full Name <span className="text-red-500">*</span>
@@ -290,7 +297,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                         />
                     </div>
 
-                    {/* City / Area (required for BizLeads) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             City / Area <span className="text-red-500">*</span>
@@ -306,7 +312,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                         />
                     </div>
 
-                    {/* Delivery Address (required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Delivery Address <span className="text-red-500">*</span>
@@ -322,7 +327,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                         />
                     </div>
 
-                    {/* Order Note (optional BizLeads note) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Order Note
@@ -337,7 +341,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                         />
                     </div>
 
-                    {/* Phone (required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Phone <span className="text-red-500">*</span>
@@ -353,7 +356,6 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                         />
                     </div>
 
-                    {/* Action buttons */}
                     <div className="flex justify-end gap-4 mt-4">
                         <button
                             type="button"
