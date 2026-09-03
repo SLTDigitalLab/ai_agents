@@ -1,6 +1,12 @@
 import React, { useRef, useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const isLocalHost =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (isLocalHost ? `${window.location.protocol}//${window.location.hostname}:8100` : "");
 const PRODUCT_SEARCH_DEBOUNCE_MS = 300;
 
 const LifestoreForm = ({ onSuccess } = {}) => {
@@ -9,6 +15,7 @@ const LifestoreForm = ({ onSuccess } = {}) => {
     const [error, setError] = useState('');
     const [submitNotice, setSubmitNotice] = useState('');
     const [submittedData, setSubmittedData] = useState(null);
+    const [searchError, setSearchError] = useState('');
     const [formData, setFormData] = useState({
         fullName: '',
         deliveryAddress: '',
@@ -31,52 +38,59 @@ const LifestoreForm = ({ onSuccess } = {}) => {
     };
 
     const handleProductInputChange = (e) => {
-        const value = e.target.value;
-        setProductQuery(value);
-        setProductId(''); // any manual edit invalidates the previous selection
+    const value = e.target.value;
+    setProductQuery(value);
+    setProductId(''); // any manual edit invalidates the previous selection
+    setSearchError('');
 
-        if (productSearchTimeout.current) {
-            clearTimeout(productSearchTimeout.current);
-        }
+    if (productSearchTimeout.current) {
+        clearTimeout(productSearchTimeout.current);
+    }
 
-        if (!value.trim()) {
+    if (!value.trim()) {
+        setProductSuggestions([]);
+        setShowProductSuggestions(false);
+        return;
+    }
+
+    productSearchTimeout.current = setTimeout(async () => {
+        try {
+            const response = await fetch(
+                `${API_URL}/api/v1/orders/products/search?q=${encodeURIComponent(value)}`
+            );
+            if (!response.ok) {
+                throw new Error(`Search failed (HTTP ${response.status})`);
+            }
+            const body = await response.json();
+            setProductSuggestions(body?.results || []);
+            setShowProductSuggestions(true);
+        } catch (err) {
+            console.error('Product search failed:', err);
+            setSearchError('Product search is temporarily unavailable. You can still type, but selecting a catalog match is required to submit.');
             setProductSuggestions([]);
             setShowProductSuggestions(false);
-            return;
         }
-
-        productSearchTimeout.current = setTimeout(async () => {
-            try {
-                const response = await fetch(
-                    `${API_URL}/api/v1/orders/products/search?q=${encodeURIComponent(value)}`
-                );
-                const body = await response.json();
-                setProductSuggestions(body?.results || []);
-                setShowProductSuggestions(true);
-            } catch (err) {
-                console.error('Product search failed:', err);
-            }
-        }, PRODUCT_SEARCH_DEBOUNCE_MS);
-    };
-
+    }, PRODUCT_SEARCH_DEBOUNCE_MS);
+};
     const handleProductSelect = (product) => {
-        setProductQuery(product.name);
-        setProductId(product.product_id);
-        setShowProductSuggestions(false);
-        setProductSuggestions([]);
-    };
+    setProductQuery(product.name);
+    setProductId(product.product_id);
+    setShowProductSuggestions(false);
+    setProductSuggestions([]);
+    setSearchError('');
+};
 
-    const handleCancel = () => {
-        setFormData({ fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
-        setProductQuery('');
-        setProductId('');
-        setProductSuggestions([]);
-        setShowProductSuggestions(false);
-        setError('');
-        setSubmitNotice('');
-        setSubmittedData(null);
-    };
-
+const handleCancel = () => {
+    setFormData({ fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
+    setProductQuery('');
+    setProductId('');
+    setProductSuggestions([]);
+    setShowProductSuggestions(false);
+    setSearchError('');
+    setError('');
+    setSubmitNotice('');
+    setSubmittedData(null);
+};
     const buildApiErrorMessage = (responseStatus, responseBody) => {
         const detail = responseBody?.detail;
         if (typeof detail === 'string' && detail.trim()) {
@@ -234,8 +248,11 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                             autoComplete="off"
                             className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
                         />
-                        {productId && (
+                                                {productId && (
                             <p className="text-xs text-green-600 mt-1">Selected from catalog ✓</p>
+                        )}
+                        {searchError && (
+                            <p className="text-xs text-red-500 mt-1">{searchError}</p>
                         )}
                         {showProductSuggestions && productSuggestions.length > 0 && (
                             <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
