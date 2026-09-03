@@ -52,6 +52,7 @@ services:
       - ./.env
     volumes:
       - ./backend:/app
+      - ./mcp_lifestore:/app/mcp_lifestore:ro
     restart: always
 
   mcp_lifestore:
