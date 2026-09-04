@@ -1,11 +1,13 @@
 """
 Orders router - receives LifeStore order submissions from the React
-frontend and sends an email notification via fastapi-mail.
+frontend, sends an email notification, and syncs the lead to BizLeads.
 
 POST /api/v1/orders/submit
 """
 
-from fastapi import APIRouter, BackgroundTasks
+import logging
+
+from fastapi import APIRouter, HTTPException
 from fastapi_mail import FastMail, MessageSchema, MessageType
 
 from core.config import get_mail_config
@@ -13,6 +15,7 @@ from services.bizleads import submit_bizlead
 from services.lifestore_catalog import search_products
 from schemas.order import OrderSubmission
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/orders", tags=["Lifestore"])
 
 
@@ -41,10 +44,10 @@ def _has_bizleads_fields(order: OrderSubmission) -> bool:
 
 
 @router.post("/submit")
-async def submit_order(order: OrderSubmission, background_tasks: BackgroundTasks):
-    """Accept an order and queue an email notification in the background."""
+async def submit_order(order: OrderSubmission):
+    """Accept an order. Both the email notification and the BizLeads sync
+    must succeed for the order to be reported as successful."""
 
-    # ── Build a clean HTML email body ────────────────────────────────────
     html_body = f"""
     <h2>New LifeStore Order</h2>
     <table border="1" cellpadding="8" cellspacing="0"
@@ -68,7 +71,6 @@ async def submit_order(order: OrderSubmission, background_tasks: BackgroundTasks
     </table>
     """
 
-    # ── Configure the message ────────────────────────────────────────────
     message = MessageSchema(
         subject="New LifeStore Order",
         recipients=["lifestore@slt.lk"],
@@ -76,13 +78,23 @@ async def submit_order(order: OrderSubmission, background_tasks: BackgroundTasks
         subtype=MessageType.html,
     )
 
-    # ── Send in the background so the API responds instantly ─────────────
+    # ── Email — the primary way the team is notified. Must succeed.
     fm = FastMail(get_mail_config())
-    background_tasks.add_task(fm.send_message, message)
+    try:
+        await fm.send_message(message)
+    except Exception:
+        logger.exception(
+            "Failed to send LifeStore order notification email for phone=%s",
+            order.phone,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="We couldn't confirm your order right now. Please try again, or contact us directly.",
+        )
 
+    # ── BizLeads — now critical, with a message tailored to the failure type.
     if _has_bizleads_fields(order):
-        background_tasks.add_task(
-            submit_bizlead,
+        result = await submit_bizlead(
             name=order.fullName,
             phone=order.phone,
             email=order.email,
@@ -90,5 +102,21 @@ async def submit_order(order: OrderSubmission, background_tasks: BackgroundTasks
             product=order.product or "LifeStore Order",
             note=order.note or order.deliveryAddress,
         )
+
+        if result == "network_error":
+            logger.error("BizLeads network error after email succeeded for phone=%s", order.phone)
+            raise HTTPException(
+                status_code=503,
+                detail="We're having trouble reaching our systems right now. Please try again in a moment.",
+            )
+
+        if result == "server_error":
+            logger.error("BizLeads server error after email succeeded for phone=%s", order.phone)
+            raise HTTPException(
+                status_code=502,
+                detail="Your order notification was sent, but we couldn't complete the full submission. Please contact us to confirm your order.",
+            )
+
+        # "success", "duplicate", and "skipped" are all fine — order proceeds.
 
     return {"status": "success", "message": "Order placed successfully"}
