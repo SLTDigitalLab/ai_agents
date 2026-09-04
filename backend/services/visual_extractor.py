@@ -432,13 +432,113 @@ def process_xlsx_visuals(xlsx_path: str, doc_id: str) -> Tuple[List[dict], List[
     return visual_records, vector_documents
 
 
+def process_image_visuals(image_path: str, doc_id: str) -> Tuple[List[dict], List[Document]]:
+    """
+    Process direct image files (PNG, JPG, JPEG) as visual evidence.
+    """
+    visual_records = []
+    vector_documents = []
+
+    try:
+        source_file = os.path.basename(image_path)
+        page_counter = 1
+
+        # Copy/reference the image
+        image_filename = f"{doc_id}_image_1.png"
+        dest_path = STORAGE_DIR / image_filename
+
+        try:
+            from PIL import Image
+            img = Image.open(image_path)
+            img.save(str(dest_path), "PNG")
+        except Exception:
+            # Fallback: just copy the file
+            import shutil
+            shutil.copy(image_path, dest_path)
+
+        # Analyze with GPT-4o
+        visual_description = analyze_image_with_gpt4o(str(dest_path))
+
+        if "NO_VISUAL_CONTENT" in visual_description:
+            if dest_path.exists():
+                os.remove(dest_path)
+            log.info(f"Image file {source_file} contained no meaningful visual content")
+            return [], []
+
+        base64_img = encode_image(str(dest_path))
+        record = save_visual_record(doc_id, source_file, page_counter, dest_path, visual_description)
+        vector_doc = create_vector_document(doc_id, source_file, page_counter, str(dest_path), visual_description, base64_img)
+
+        visual_records.append(record)
+        vector_documents.append(vector_doc)
+
+        log.info(f"Image visual extraction: extracted 1 visual from {image_path}")
+    except Exception as e:
+        log.error(f"Image visual extraction failed for {image_path}: {e}")
+
+    return visual_records, vector_documents
+
+
+def process_eml_visuals(eml_path: str, doc_id: str) -> Tuple[List[dict], List[Document]]:
+    """
+    Extract embedded images from EML (email) files.
+    """
+    visual_records = []
+    vector_documents = []
+
+    try:
+        import email
+        from email import policy
+        from email.mime.multipart import MIMEMultipart
+
+        source_file = os.path.basename(eml_path)
+        page_counter = 0
+
+        with open(eml_path, "rb") as f:
+            msg = email.message_from_bytes(f.read(), policy=policy.default)
+
+        # Extract images from multipart message
+        for part in msg.iter_parts():
+            if part.get_content_maintype() == "image":
+                try:
+                    page_counter += 1
+                    image_data = part.get_payload(decode=True)
+                    image_filename = f"{doc_id}_email_img_{page_counter}.png"
+                    image_path = STORAGE_DIR / image_filename
+
+                    with open(image_path, "wb") as f:
+                        f.write(image_data)
+
+                    visual_description = analyze_image_with_gpt4o(str(image_path))
+
+                    if "NO_VISUAL_CONTENT" in visual_description:
+                        if image_path.exists():
+                            os.remove(image_path)
+                        continue
+
+                    base64_img = encode_image(str(image_path))
+                    record = save_visual_record(doc_id, source_file, page_counter, image_path, visual_description)
+                    vector_doc = create_vector_document(doc_id, source_file, page_counter, str(image_path), visual_description, base64_img)
+
+                    visual_records.append(record)
+                    vector_documents.append(vector_doc)
+                except Exception as e:
+                    log.warning(f"Failed to extract image from EML: {e}")
+
+        log.info(f"EML visual extraction: extracted {len(vector_documents)} visuals from {eml_path}")
+    except Exception as e:
+        log.error(f"EML visual extraction failed for {eml_path}: {e}")
+
+    return visual_records, vector_documents
+
+
 def process_document_visuals(file_path: str, doc_id: str) -> Tuple[List[dict], List[Document]]:
     """
     Route visual extraction based on file format.
-    Supports: PDF, DOCX, PPTX, XLSX
+    Supports: PDF, DOCX, PPTX, XLSX, PNG, JPG, JPEG, EML
     """
     file_ext = os.path.splitext(file_path)[1].lower()
-    
+
     if file_ext == ".pdf":
         return process_pdf_visuals(file_path, doc_id)
     elif file_ext in (".docx", ".doc"):
@@ -447,6 +547,10 @@ def process_document_visuals(file_path: str, doc_id: str) -> Tuple[List[dict], L
         return process_pptx_visuals(file_path, doc_id)
     elif file_ext in (".xlsx", ".xls"):
         return process_xlsx_visuals(file_path, doc_id)
+    elif file_ext in (".png", ".jpg", ".jpeg"):
+        return process_image_visuals(file_path, doc_id)
+    elif file_ext == ".eml":
+        return process_eml_visuals(file_path, doc_id)
     else:
         log.warning(f"Unsupported file format for visual extraction: {file_ext}")
         return [], []

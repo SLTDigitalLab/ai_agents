@@ -1250,7 +1250,9 @@ class IngestionService:
             else:
                 final_docs.append(doc)
 
-        if ext == ".pdf":
+        # Visual RAG: Extract visual evidence from all supported document types
+        supported_visual_formats = {".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".eml"}
+        if ext in supported_visual_formats:
             try:
                 log.info(f"  👁️ Extracting visual evidence from {file_path.name}...")
                 visual_docs = self._extract_visual_documents(file_path, doc_id=doc_id or file_path.stem)
