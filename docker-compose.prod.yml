@@ -1,105 +1,100 @@
-version: '3.8'
+name: workmate-staging
+
+x-common: &common
+  env_file:
+    - ${WORKMATE_ENV_FILE:-/root/slt-app/.env}
+  restart: unless-stopped
+  networks:
+    - workmate
 
 services:
-  db_postgres:
-    image: ankane/pgvector:latest
-    container_name: slt_postgres
+  postgres:
+    <<: *common
+    image: ${POSTGRES_IMAGE:-ankane/pgvector:latest}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-slt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-slt123}
+      POSTGRES_DB: ${POSTGRES_DB:-slt_db}
+    volumes:
+      - ${WORKMATE_DATA_DIR:-/root/slt-app/data}/postgres:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U slt -d slt_db" ]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 10
-    # No host ports — only reachable within the Docker network
-    expose:
-      - "5432"
-    environment:
-      POSTGRES_USER: slt
-      POSTGRES_PASSWORD: slt123
-      POSTGRES_DB: slt_db
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    restart: always
 
-  db_qdrant:
-    image: qdrant/qdrant:latest
-    container_name: slt_qdrant
-    # No host ports — only reachable within the Docker network
-    expose:
-      - "6333"
+  qdrant:
+    <<: *common
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:latest}
     volumes:
-      - qdrantdata:/qdrant/storage
-    restart: always
+      - ${WORKMATE_DATA_DIR:-/root/slt-app/data}/qdrant:/qdrant/storage
 
   backend:
-    build:
-      context: ./backend
-    container_name: slt_backend
-    command: [ "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000" ]
-    ports:
-      - "127.0.0.1:8100:8000" # Only bind to localhost — Nginx will proxy
-    depends_on:
-      db_postgres:
-        condition: service_healthy
-      db_qdrant:
-        condition: service_started
-    environment:
-      PYTHONUNBUFFERED: 1
-      POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
-      QDRANT_URL: http://db_qdrant:6333
-      # Ask LifeStore MCP — the backend talks to the mcp_lifestore container over
-      # the Docker network. Must override .env's LIFESTORE_MCP_URL, which points at
-      # 127.0.0.1 (that would resolve to the backend container itself).
-      LIFESTORE_MCP_TRANSPORT: streamable_http
-      LIFESTORE_MCP_URL: http://mcp_lifestore:8001/mcp
-    env_file:
-      - ./.env
-    volumes:
-      - ./backend:/app
-    restart: always
-
-  mcp_lifestore:
+    <<: *common
+    image: ${WORKMATE_BACKEND_IMAGE:-workmate-backend:local}
     build:
       context: .
-      dockerfile: mcp_lifestore/Dockerfile
-    container_name: slt_mcp_lifestore
-    working_dir: /app
-    env_file:
-      - ./.env
+      dockerfile: Dockerfile
+      target: backend
+    ports:
+      - "127.0.0.1:${WORKMATE_BACKEND_PORT:-8100}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    environment:
+      PYTHONUNBUFFERED: "1"
+      POSTGRES_URL: postgresql://${POSTGRES_USER:-slt}:${POSTGRES_PASSWORD:-slt123}@postgres:5432/${POSTGRES_DB:-slt_db}
+      QDRANT_URL: http://qdrant:6333
+      LIFESTORE_MCP_TRANSPORT: streamable_http
+      LIFESTORE_MCP_URL: http://mcp-lifestore:8001/mcp
+      GOOGLE_APPLICATION_CREDENTIALS: /app/service-account.json
+    volumes:
+      - ${WORKMATE_DATA_DIR:-/root/slt-app/data}/evidence:/app/storage/evidence
+      - ${GOOGLE_CREDENTIALS_FILE:-/root/slt-app/service-account.json}:/app/service-account.json:ro
+
+  mcp-lifestore:
+    <<: *common
+    image: ${WORKMATE_MCP_IMAGE:-workmate-mcp-lifestore:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: mcp-lifestore
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      backend:
+        condition: service_healthy
     environment:
       MCP_TRANSPORT: streamable-http
       MCP_HOST: 0.0.0.0
-      MCP_PORT: 8001
+      MCP_PORT: "8001"
       PYTHONPATH: /app/backend:/app
-      QDRANT_URL: http://db_qdrant:6333
+      QDRANT_URL: http://qdrant:6333
       ADMIN_BASE_URL: http://backend:8000
-    expose:
-      - "8001"
-    depends_on:
-      db_qdrant:
-        condition: service_started
-      db_postgres:
-        condition: service_healthy
-      backend:
-        condition: service_started
     volumes:
-      - ./backend/data/real:/app/backend/data/real:ro
-    restart: always
+      - ${WORKMATE_DATA_DIR:-/root/slt-app/data}/real:/app/backend/data/real:ro
 
   frontend:
+    <<: *common
+    image: ${WORKMATE_FRONTEND_IMAGE:-workmate-frontend:local}
     build:
       context: ./frontend
-    container_name: slt_frontend
     ports:
-      - "127.0.0.1:3100:3000" # Only bind to localhost — Nginx will proxy
+      - "127.0.0.1:${WORKMATE_FRONTEND_PORT:-3100}:3000"
     depends_on:
-      - backend
-    env_file:
-      - ./.env
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    restart: always
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
-volumes:
-  pgdata:
-  qdrantdata:
+networks:
+  workmate:
+    name: workmate-staging
