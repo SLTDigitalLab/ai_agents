@@ -1854,6 +1854,8 @@ IMAGE_LOOKUP_JSON_ENV = os.getenv(
 IMAGE_LOOKUP_JSON_PATH = PROJECT_ROOT / IMAGE_LOOKUP_JSON_ENV
 
 BAD_IMAGE_MARKERS = {
+    "970_90",
+    "inline-images/970_90",
     "/themes/shop/images/",
     "chat-bot",
     "chat_bot",
