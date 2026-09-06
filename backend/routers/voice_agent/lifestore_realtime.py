@@ -30,7 +30,7 @@ router = APIRouter(
 
 OPENAI_REALTIME_MODEL = "gpt-realtime"
 
-GEMINI_LIVE_MODEL = "gemini-live-2.5-flash-preview-native-audio-09-2025"
+GEMINI_LIVE_MODEL = "gemini-live-2.5-flash-native-audio"
 
 LIFESTORE_VOICE_PROMPT = """You are Ask LifeStore, a live voice assistant for SLTMobitel LifeStore customers.
 For every LifeStore product, category, availability, comparison, cart, or checkout request, call the ask_lifestore_chat function.

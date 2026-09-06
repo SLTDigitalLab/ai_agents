@@ -38,7 +38,7 @@ CHAT_API_URL = "http://localhost:8000/api/v1/chat"
 
 # Model identifiers
 OPENAI_REALTIME_MODEL = "gpt-realtime"
-GEMINI_LIVE_MODEL     = "gemini-live-2.5-flash-preview-native-audio-09-2025"
+GEMINI_LIVE_MODEL     = "gemini-live-2.5-flash-native-audio"
 
 # Browser audio format; used to keep the stream close to real-time speed.
 AUDIO_SAMPLE_RATE_HZ = 16000
