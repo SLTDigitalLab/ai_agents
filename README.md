@@ -44,6 +44,23 @@ User Message (React)
 | Ask HR SLM *(demo)* | `askhrslm`   | KB + SLM          | On-prem inference via Ollama (DeepSeek-R1 1.5B)                               |
 
 ### Five Agent Archetypes (`backend/domain/archetypes/`)
+I’m locating the existing Python test/setup pattern first so I can add the smallest possible compatibility check for your local Ollama/OpenAI-style endpoint.
+
+
+
+I found an existing SLM/OpenAI-compat path in the backend, so I’m adding a tiny standalone smoke test that exercises the same OpenAI(base_url=...) flow without touching the app code.
+
+
+
+I’ve got the shape of the smoke test. Next I’m adding a self-contained script that can be run with your Ollama-compatible base URL, model, and API key to confirm chat completions work end to end.
+
+Edited
+test_openai_compat_ollama.py+103-1
+The script is in place. I’m doing a fast syntax-level check first so I can catch any obvious issues before I try the live endpoint.
+
+Input
+Output
+Syntax is clean. I’m checking the workspace Python environment now so I can run the smoke test with the same interpreter the editor would use.
 
 1. **Supervisor** (`supervisor_agent.py`) — Vector-similarity routing with keyword boosts, follow-up stickiness, and multi-agent delegation. Answers general/help questions directly.
 2. **KB Only** (`kb_agent.py`) — LLM decides to search the knowledge base or answer directly.

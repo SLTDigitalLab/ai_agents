@@ -371,7 +371,7 @@
   .iframe-chat__success-panel h2 {
     margin: 0 0 8px;
     color: #2448b8;
-    font-size: 24px;
+    font-size: 20px;
     line-height: 1.2;
     font-weight: 800;
   }
@@ -379,7 +379,7 @@
   .iframe-chat__success-panel p {
     margin: 0 0 18px;
     color: #2563eb;
-    font-size: 15px;
+    font-size: 14px;
     line-height: 1.5;
   }
   
@@ -396,7 +396,7 @@
   .iframe-chat__reference-box span {
     display: block;
     color: #6b7280;
-    font-size: 13px;
+    font-size: 12px;
     letter-spacing: 0.09em;
     font-weight: 600;
     margin-bottom: 8px;
@@ -405,8 +405,14 @@
   .iframe-chat__reference-box strong {
     display: block;
     color: #2554d8;
-    font-size: 30px;
-    line-height: 1;
+    font-size: 14px;
+    line-height: 1.4;
+    font-weight: 600;
+  }
+
+  .iframe-chat__reference-value {
+    font-size: 22px;
+    line-height: 1.1;
     font-weight: 800;
   }
   
@@ -474,11 +480,11 @@
     }
   
     .iframe-chat__success-panel h2 {
-      font-size: 22px;
+      font-size: 18px;
     }
   
     .iframe-chat__success-panel p {
-      font-size: 14px;
+      font-size: 13px;
     }
   
     .iframe-chat__reference-box {
@@ -486,7 +492,11 @@
     }
   
     .iframe-chat__reference-box strong {
-      font-size: 28px;
+      font-size: 13px;
+    }
+
+    .iframe-chat__reference-value {
+      font-size: 20px;
     }
   }
   
@@ -505,6 +515,180 @@
     }
   
     .iframe-chat__success-panel h2 {
-      font-size: 20px;
+      font-size: 17px;
+    }
+
+    .iframe-chat__reference-value {
+      font-size: 18px;
     }
   }
+/* LifeStore-only product slideshow rendered by IframeChatPage.jsx */
+.iframe-chat__product-slideshow {
+  margin-top: 14px;
+  width: min(100%, 680px);
+}
+
+.iframe-chat__product-slideshow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.iframe-chat__product-eyebrow {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.iframe-chat__product-slideshow-header h3 {
+  margin: 2px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.iframe-chat__product-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.iframe-chat__product-nav button {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.iframe-chat__product-nav button:last-child {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #ffffff;
+}
+
+.iframe-chat__product-card {
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
+}
+
+.iframe-chat__product-image-wrap {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.iframe-chat__product-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.iframe-chat__product-image-placeholder {
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.iframe-chat__product-details {
+  padding: 16px;
+}
+
+.iframe-chat__product-details h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: #111827;
+}
+
+.iframe-chat__product-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.iframe-chat__product-badges span {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.iframe-chat__product-meta {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 10px;
+  margin: 12px 0 0;
+  font-size: 12px;
+}
+
+.iframe-chat__product-meta dt {
+  font-weight: 800;
+  color: #64748b;
+}
+
+.iframe-chat__product-meta dd {
+  margin: 0;
+  color: #334155;
+}
+
+.iframe-chat__product-points {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #475569;
+}
+
+.iframe-chat__product-link {
+  display: inline-flex;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: #0f766e;
+  color: #ffffff;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 9px 14px;
+}
+
+.iframe-chat__product-dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.iframe-chat__product-dot {
+  width: 7px;
+  height: 7px;
+  border: 0;
+  border-radius: 999px;
+  background: #cbd5e1;
+  cursor: pointer;
+}
+
+.iframe-chat__product-dot--active {
+  width: 24px;
+  background: #0f766e;
+}
