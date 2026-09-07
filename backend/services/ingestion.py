@@ -203,17 +203,23 @@ class IngestionService:
         """Extract visual elements from multiple formats (PDF, DOCX, PPTX, XLSX)."""
         visual_docs = []
         file_ext = file_path.suffix.lower()
-        
+
         # Process visual content for all supported formats
         if file_ext in (".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls"):
             try:
                 from services.visual_extractor import process_document_visuals
-                
+
                 records, doc_chunks = process_document_visuals(file_path=str(file_path), doc_id=doc_id)
-                
+
+                # Ensure visual chunks have proper metadata for Qdrant
+                for chunk in doc_chunks:
+                    if not chunk.metadata.get("doc_id"):
+                        chunk.metadata["doc_id"] = doc_id
+                    chunk.metadata["type"] = "visual_description"
+
                 # Add extracted visual documents to the list
                 visual_docs.extend(doc_chunks)
-                
+
                 log.info(f"✅ Extracted {len(doc_chunks)} visual elements from {file_path.name}")
             except Exception as e:
                 log.warning(f"Visual extraction skipped/failed for {file_path.name}: {e}")
@@ -232,7 +238,7 @@ class IngestionService:
                             page_number=page_num,
                             max_crops=6
                         )
-                        
+
                         # Attach preview URL metadata to extracted documents
                         for prev in previews:
                             visual_docs.append(
@@ -1453,23 +1459,49 @@ class IngestionService:
             self._process_onedrive_sync, folder_id, access_token, agent_name, force
         )
 
-    async def ingest_document_async(self, file_path: Path, agent_name: str, doc_id: str):
+    async def ingest_document_async(self, file_path: Path, agent_name: str, doc_id: str, force: bool = False):
         """
         Async wrapper entry point for background tasks.
         Offloads CPU/IO-heavy parsing and vector upserting to a worker thread.
         """
         return await asyncio.to_thread(
-            self.ingest_document, file_path, agent_name, doc_id
+            self.ingest_document, file_path, agent_name, doc_id, force
         )
 
-    def ingest_document(self, file_path: Path, agent_name: str, doc_id: str):
+    def ingest_document(self, file_path: Path, agent_name: str, doc_id: str, force: bool = False):
         """
         Synchronous worker method executed by FastAPI BackgroundTasks.
         Parses text, runs PyMuPDF/GPT-4o visual extraction, and upserts to Qdrant.
+
+        If force=True, deletes old vectors for this doc_id before re-ingesting.
         """
-        log.info(f"🚀 Starting background ingestion for {file_path.name} (Doc ID: {doc_id})")
+        log.info(f"🚀 Starting background ingestion for {file_path.name} (Doc ID: {doc_id}, Force: {force})")
 
         try:
+            # Ensure target Qdrant collection exists
+            collection_name = agent_collection_name(agent_name)
+            self._ensure_collection_exists(collection_name)
+
+            # If force, delete existing vectors for this doc_id
+            if force:
+                try:
+                    self.client.delete(
+                        collection_name=collection_name,
+                        points_selector=models.FilterSelector(
+                            filter=models.Filter(
+                                must=[
+                                    models.FieldCondition(
+                                        key="metadata.doc_id",
+                                        match=models.MatchValue(value=doc_id),
+                                    )
+                                ]
+                            )
+                        ),
+                    )
+                    log.info(f"Deleted old vectors for {file_path.name} (doc_id={doc_id})")
+                except Exception as e:
+                    log.warning(f"Could not delete old vectors for {file_path.name}: {e}")
+
             # 1. Run text chunking and PyMuPDF + GPT-4o visual extraction
             chunks = self._load_and_chunk_file(file_path=file_path, doc_id=doc_id)
 
@@ -1482,11 +1514,7 @@ class IngestionService:
                 docs=chunks, doc_id=doc_id, file_name=file_path.name
             )
 
-            # 3. Ensure target Qdrant collection exists
-            collection_name = agent_collection_name(agent_name)
-            self._ensure_collection_exists(collection_name)
-
-            # 4. Initialize Qdrant Vector Store with Hybrid Search
+            # 3. Initialize Qdrant Vector Store with Hybrid Search
             vector_store = QdrantVectorStore(
                 client=self.client,
                 collection_name=collection_name,
@@ -1497,25 +1525,33 @@ class IngestionService:
                 sparse_vector_name="sparse",
             )
 
-            # 5. Upsert combined text + visual chunks to Qdrant in sub-batches
+            # 4. Upsert combined text + visual chunks to Qdrant in sub-batches
             batch_size = 15
             total_docs = len(final_docs)
+            upserted_count = 0
 
             log.info(f"Uploading {total_docs} documents in batches of {batch_size}...")
 
             for i in range(0, total_docs, batch_size):
                 sub_batch = final_docs[i : i + batch_size]
-                vector_store.add_documents(sub_batch)
-                log.info(f"  -> Upserted batch {i // batch_size + 1}/{(total_docs + batch_size - 1) // batch_size}")
+                try:
+                    vector_store.add_documents(sub_batch)
+                    upserted_count += len(sub_batch)
+                    batch_num = (i // batch_size) + 1
+                    total_batches = (total_docs + batch_size - 1) // batch_size
+                    log.info(f"  -> Upserted batch {batch_num}/{total_batches} ({upserted_count}/{total_docs} total)")
+                except Exception as batch_error:
+                    log.error(f"Failed to upsert batch {(i // batch_size) + 1}: {batch_error}")
+                    raise batch_error
 
             log.info(
-                f"✅ Successfully ingested {total_docs} total chunks "
+                f"✅ Successfully ingested {upserted_count} total chunks "
                 f"(text + visual) into collection '{collection_name}'"
             )
 
             return {
                 "status": "success",
-                "chunks_ingested": total_docs,
+                "chunks_ingested": upserted_count,
                 "collection": collection_name,
             }
 
@@ -1646,7 +1682,7 @@ class IngestionService:
                         f.write(file_resp.content)
 
                     # Chunk using semantic logic
-                    chunks = self._load_and_chunk_file(dest_path)
+                    chunks = self._load_and_chunk_file(dest_path, doc_id=onedrive_id)
                     if not chunks:
                         # Empty output usually means a scanned/image-only PDF
                         # with no text layer. Surface it so admins can re-run
@@ -1690,7 +1726,13 @@ class IngestionService:
                             evidence_items.extend(image_evidence_items)
 
                         if evidence_items:
-                            doc.metadata["evidence"] = evidence_items
+                            doc.metadata["evidence_count"] = len(evidence_items)
+                            doc.metadata["has_evidence"] = True
+                            for idx, ev in enumerate(evidence_items):
+                                if ev.get("type") == "table":
+                                    doc.metadata[f"table_evidence_{idx}"] = ev.get("title", "")
+                                elif ev.get("type") == "image":
+                                    doc.metadata[f"image_evidence_{idx}"] = ev.get("url", "")
 
                     # Now that we have valid replacement chunks, remove the
                     # stale vectors and write the new ones.
@@ -1724,16 +1766,19 @@ async def upload_document(
     agent_name: str,
     background_tasks: BackgroundTasks,
     file: UploadFile,
+    force: bool = False,
 ):
     """
-    Endpoint to receive document uploads and queue ingestion 
+    Endpoint to receive document uploads and queue ingestion
     (Text + PyMuPDF/GPT-4o Visual Extraction) in the background.
+
+    If force=true, existing vectors for this document are deleted before re-ingesting.
     """
     # 1. Generate unique file storage location
     file_id = hashlib.md5(file.filename.encode()).hexdigest()[:8]
     temp_dir = Path(tempfile.gettempdir()) / "workmate_uploads"
     temp_dir.mkdir(parents=True, exist_ok=True)
-    
+
     saved_file_path = temp_dir / f"{file_id}_{file.filename}"
 
     # 2. Save the uploaded file payload to local disk
@@ -1741,19 +1786,21 @@ async def upload_document(
         shutil.copyfileobj(file.file, buffer)
 
     # 3. Schedule the ingestion process in the background
-    
+
     background_tasks.add_task(
-        ingestion_service.ingest_document, 
-        file_path=saved_file_path, 
+        ingestion_service.ingest_document,
+        file_path=saved_file_path,
         agent_name=agent_name,
-        doc_id=file_id
+        doc_id=file_id,
+        force=force
     )
 
     return {
         "status": "queued",
         "message": f"File '{file.filename}' uploaded successfully. Ingestion running in background.",
         "doc_id": file_id,
-        "agent_name": agent_name
+        "agent_name": agent_name,
+        "force": force
     }
 
 if __name__ == "__main__":
