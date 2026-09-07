@@ -29,6 +29,8 @@ const LifestoreForm = ({ onSuccess } = {}) => {
     const [productId, setProductId] = useState('');
     const [productSuggestions, setProductSuggestions] = useState([]);
     const [showProductSuggestions, setShowProductSuggestions] = useState(false);
+    const [isCustomRequest, setIsCustomRequest] = useState(false);
+    const [customProduct, setCustomProduct] = useState('');
     const productSearchTimeout = useRef(null);
 
     const handleChange = (e) => {
@@ -79,6 +81,20 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         setSearchError('');
     };
 
+    const handleSwitchToCustomRequest = () => {
+        setIsCustomRequest(true);
+        setProductQuery('');
+        setProductId('');
+        setProductSuggestions([]);
+        setShowProductSuggestions(false);
+        setSearchError('');
+    };
+
+    const handleSwitchToCatalogSearch = () => {
+        setIsCustomRequest(false);
+        setCustomProduct('');
+    };
+
     const handleCancel = () => {
         setFormData({ fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
         setProductQuery('');
@@ -86,6 +102,8 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         setProductSuggestions([]);
         setShowProductSuggestions(false);
         setSearchError('');
+        setIsCustomRequest(false);
+        setCustomProduct('');
         setError('');
         setSubmitNotice('');
         setSubmittedData(null);
@@ -96,12 +114,18 @@ const LifestoreForm = ({ onSuccess } = {}) => {
         if (typeof detail === 'string' && detail.trim()) {
             return detail;
         }
+
         if (Array.isArray(detail) && detail.length > 0) {
-            return detail.map((item) => item?.msg).filter(Boolean).join(', ');
+            return detail
+                .map((item) => item?.msg)
+                .filter(Boolean)
+                .join(', ');
         }
+
         if (typeof responseBody?.message === 'string' && responseBody.message.trim()) {
             return responseBody.message;
         }
+
         return `Order submission failed (HTTP ${responseStatus}). Please try again.`;
     };
 
@@ -121,7 +145,12 @@ const LifestoreForm = ({ onSuccess } = {}) => {
             return;
         }
 
-        if (!productId) {
+        if (isCustomRequest) {
+            if (!customProduct.trim()) {
+                setError("Please describe the product you're looking for.");
+                return;
+            }
+        } else if (!productId) {
             setError('Please select a product from the search suggestions.');
             return;
         }
@@ -133,8 +162,9 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     ...formData,
-                    product: productQuery || undefined,
-                    product_id: productId || undefined,
+                    product: isCustomRequest ? customProduct.trim() : (productQuery || undefined),
+                    product_id: isCustomRequest ? undefined : (productId || undefined),
+                    is_custom_request: isCustomRequest,
                 }),
             });
 
@@ -158,12 +188,14 @@ const LifestoreForm = ({ onSuccess } = {}) => {
 
             setSubmitNotice(responseBody?.message || 'Order placed successfully.');
 
-            const payload = { ...formData, product: productQuery };
+            const payload = { ...formData, product: isCustomRequest ? customProduct.trim() : productQuery };
             setSubmittedData(payload);
             setIsSubmitted(true);
             setFormData({ fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
             setProductQuery('');
             setProductId('');
+            setIsCustomRequest(false);
+            setCustomProduct('');
             onSuccess?.(payload);
         } catch (err) {
             console.error('Order submission failed:', err);
@@ -187,6 +219,7 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                     {submitNotice && (
                         <p className="text-xs text-green-700 mt-2 font-medium">{submitNotice}</p>
                     )}
+
                     {submittedData && (
                         <div className="mt-4 w-full max-w-md rounded-xl border border-green-100 bg-white/80 p-4 text-left shadow-sm">
                             <p className="text-xs font-semibold uppercase tracking-wider text-green-700 mb-3">
@@ -229,41 +262,70 @@ const LifestoreForm = ({ onSuccess } = {}) => {
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="relative">
                         <label className="block text-sm text-gray-600 mb-1">Product</label>
-                        <input
-                            type="text"
-                            name="productSearch"
-                            placeholder="Start typing to search products..."
-                            value={productQuery}
-                            onChange={handleProductInputChange}
-                            onFocus={() => productSuggestions.length > 0 && setShowProductSuggestions(true)}
-                            onBlur={() => setTimeout(() => setShowProductSuggestions(false), 150)}
-                            autoComplete="off"
-                            className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
-                        />
-                        {productId && (
-                            <p className="text-xs text-green-600 mt-1">Selected from catalog ✓</p>
-                        )}
-                        {searchError && (
-                            <p className="text-xs text-red-500 mt-1">{searchError}</p>
-                        )}
-                        {showProductSuggestions && productSuggestions.length > 0 && (
-                            <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
-                                {productSuggestions.map((product) => (
-                                    <li key={product.product_id}>
-                                        <button
-                                            type="button"
-                                            onMouseDown={(e) => e.preventDefault()}
-                                            onClick={() => handleProductSelect(product)}
-                                            className="w-full text-left px-3 py-2 text-sm hover:bg-green-50 flex justify-between gap-2"
-                                        >
-                                            <span className="text-gray-700">{product.name}</span>
-                                            {product.price && (
-                                                <span className="text-gray-400 whitespace-nowrap">{product.price}</span>
-                                            )}
-                                        </button>
-                                    </li>
-                                ))}
-                            </ul>
+
+                        {!isCustomRequest ? (
+                            <>
+                                <input
+                                    type="text"
+                                    name="productSearch"
+                                    placeholder="Start typing to search products..."
+                                    value={productQuery}
+                                    onChange={handleProductInputChange}
+                                    onFocus={() => productSuggestions.length > 0 && setShowProductSuggestions(true)}
+                                    onBlur={() => setTimeout(() => setShowProductSuggestions(false), 150)}
+                                    autoComplete="off"
+                                    className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
+                                />
+                                {productId && (
+                                    <p className="text-xs text-green-600 mt-1">Selected from catalog ✓</p>
+                                )}
+                                {searchError && (
+                                    <p className="text-xs text-red-500 mt-1">{searchError}</p>
+                                )}
+                                {showProductSuggestions && productSuggestions.length > 0 && (
+                                    <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+                                        {productSuggestions.map((product) => (
+                                            <li key={product.product_id}>
+                                                <button
+                                                    type="button"
+                                                    onMouseDown={(e) => e.preventDefault()}
+                                                    onClick={() => handleProductSelect(product)}
+                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-green-50 flex justify-between gap-2"
+                                                >
+                                                    <span className="text-gray-700">{product.name}</span>
+                                                    {product.price && (
+                                                        <span className="text-gray-400 whitespace-nowrap">{product.price}</span>
+                                                    )}
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={handleSwitchToCustomRequest}
+                                    className="text-xs text-green-600 hover:text-green-700 underline mt-1"
+                                >
+                                    Can't find your product? Request it
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <textarea
+                                    placeholder="Describe the product you're looking for..."
+                                    rows={2}
+                                    value={customProduct}
+                                    onChange={(e) => setCustomProduct(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all resize-none"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleSwitchToCatalogSearch}
+                                    className="text-xs text-gray-500 hover:text-gray-700 underline mt-1"
+                                >
+                                    Search the catalog instead
+                                </button>
+                            </>
                         )}
                     </div>
 

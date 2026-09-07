@@ -18,6 +18,7 @@ class OrderSubmission(BaseModel):
 
     product: Optional[str] = None
     product_id: Optional[str] = None
+    is_custom_request: bool = False
     fullName: str = Field(..., min_length=2, max_length=100)
     deliveryAddress: str = Field(..., min_length=5, max_length=200)
     phone: str
@@ -46,14 +47,21 @@ class OrderSubmission(BaseModel):
 
     @model_validator(mode="after")
     def validate_product(self) -> "OrderSubmission":
+        if self.is_custom_request:
+            # Customer explicitly said the product isn't in the catalog.
+            # No product_id is possible here — just require they actually
+            # typed something.
+            if not self.product or not self.product.strip():
+                raise ValueError("Please describe the product you're looking for")
+            self.product = self.product.strip()
+            return self
+
         if self.product_id:
             catalog_product = get_product_by_id(self.product_id)
             if not catalog_product:
                 raise ValueError("Selected product was not found in the catalog")
             self.product = catalog_product["name"]
         elif catalog_available():
-            # No product_id supplied and the catalog is loaded — reject regardless
-            # of whether free text was typed, since a product selection is required.
             raise ValueError("Please select a product from the search suggestions")
         return self
 
