@@ -11,14 +11,16 @@ venv/
 .venv/
 env/
 .env
-.env.production
 env.production/
+.env.production
 
 # Node
 node_modules/
 dist/
 dist-ssr/
 *.local
+frontend/node_modules/
+frontend/dist/
 
 # Logs
 logs
@@ -26,6 +28,41 @@ logs
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Android and iOS artifacts
+*.apk
+*.apks
+*.aab
+*.idsig
+
+# Android build and local files
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
+frontend/android/app/release/
+frontend/android/app/debug/
+frontend/android/local.properties
+
+# Signing keys
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+
+# iOS build and local files
+frontend/ios/Pods/
+frontend/ios/App/Pods/
+frontend/ios/build/
+frontend/ios/App/build/
+frontend/ios/DerivedData/
+frontend/ios/**/*.xcuserdata/
 
 # Editor directories and files
 .idea/
@@ -44,3 +81,16 @@ data/
 CLAUDE.md
 GEMINI.md
 backend/storage
+backend/routers/service-account.json
+service-account.json
+
+# Android misc/generated
+frontend/android/captures/
+frontend/android/**/*.iml
+
+# iOS extra local/user files
+frontend/ios/*.xcuserstate
+frontend/ios/**/*.xcuserdatad/
+frontend/ios/**/*.mode1v3
+frontend/ios/**/*.mode2v3
+frontend/ios/**/*.perspectivev3

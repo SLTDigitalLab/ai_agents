@@ -3,8 +3,9 @@ import json
 import os
 import re
 import time
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urljoin, urlparse, urldefrag
 
 import requests
@@ -34,9 +35,8 @@ START_URLS = [
     if url.strip()
 ]
 
-OUTPUT_FILE = ROOT_DIR / Path(
-    os.getenv("LIFESTORE_GRAPH_OUTPUT_FILE", "data/real/lifestore_all.json")
-)
+OUTPUT_FILE = ROOT_DIR / "backend/data/real/lifestore_all.json"
+
 
 HEADERS = {
     "User-Agent": (
@@ -58,7 +58,7 @@ REMOVE_MISSING_PRODUCTS = (
     os.getenv("REMOVE_MISSING_LIFESTORE_PRODUCTS", "false").lower() == "true"
 )
 
-MAX_LISTING_PAGES = int(os.getenv("LIFESTORE_GRAPH_MAX_LISTING_PAGES", "1000"))
+MAX_LISTING_PAGES = int(os.getenv("LIFESTORE_GRAPH_MAX_LISTING_PAGES", "500"))
 
 # 0 means unlimited.
 PRODUCT_URL_LIMIT = int(os.getenv("LIFESTORE_GRAPH_PRODUCT_URL_LIMIT", "0"))
@@ -440,19 +440,523 @@ def extract_description(lines: list[str]) -> str:
     return clean_text(" ".join(cleaned))
 
 
-def extract_image_url(soup: BeautifulSoup) -> str:
-    og = soup.find("meta", property="og:image")
+# ---------------------------------------------------------------------
+# Product image extraction logic
+# ---------------------------------------------------------------------
+URL_RE = re.compile(r"https?://[^\s,\"'<>]+")
 
-    if og and og.get("content"):
-        return urljoin(BASE_URL, og["content"])
 
-    for img in soup.find_all("img"):
-        src = img.get("src") or img.get("data-src")
+def absolute_url(url: str, current_url: str = BASE_URL) -> str:
+    return normalize_url(urljoin(current_url, url))
 
-        if src:
-            return urljoin(BASE_URL, src)
+
+def extract_urls(value: Any) -> list[str]:
+    """
+    Extract URLs from any accidentally-combined text.
+
+    This is the same guard used in the standalone image scraper to prevent
+    product_url and image_url from being tangled together.
+    """
+    text = str(value or "")
+    urls = []
+
+    direct = normalize_url(text)
+    if direct.startswith(("http://", "https://")):
+        urls.append(direct)
+
+    for match in URL_RE.finditer(text):
+        url = normalize_url(match.group(0)).rstrip(").;]")
+        if url and url not in urls:
+            urls.append(url)
+
+    return urls
+
+
+def is_product_page_url(url: str) -> bool:
+    parsed = urlparse(url.lower())
+    return "lifestore.lk" in parsed.netloc and "/product/" in parsed.path
+
+
+def pick_product_url(*values: Any) -> str:
+    """
+    Pick only the LifeStore product page URL, never an image URL.
+    """
+    for value in values:
+        for url in extract_urls(value):
+            if is_product_page_url(url):
+                return normalize_url(url).rstrip("/")
 
     return ""
+
+
+def extract_srcset_url(srcset: str | None) -> str:
+    if not srcset:
+        return ""
+
+    candidates = []
+
+    for part in srcset.split(","):
+        item = part.strip()
+        if not item:
+            continue
+
+        url_part = item.split()[0].strip()
+        if url_part:
+            candidates.append(url_part)
+
+    return candidates[-1] if candidates else ""
+
+
+def extract_url_from_img_tag(img) -> str:
+    for attr in [
+        "src",
+        "data-src",
+        "data-original",
+        "data-lazy-src",
+        "data-url",
+        "data-image",
+    ]:
+        value = img.get(attr)
+        if value:
+            return value
+
+    for attr in ["srcset", "data-srcset"]:
+        value = extract_srcset_url(img.get(attr))
+        if value:
+            return value
+
+    return ""
+
+
+def looks_like_image_url(url: str) -> bool:
+    low = url.lower()
+    parsed = urlparse(low)
+    path = parsed.path
+
+    if path.endswith((".jpg", ".jpeg", ".png", ".webp", ".gif")):
+        return True
+
+    if "/sites/default/files/" in low and "/styles/" in low:
+        return True
+
+    return False
+
+
+def is_bad_lifestore_image(url: str, context: str = "") -> bool:
+    """
+    Reject global/header/footer/payment/chat assets.
+
+    This is the same bad-image filter used in the standalone image scraper.
+    """
+    value = f"{url} {context}".lower()
+
+    bad_hints = [
+        "970_90",
+        "inline-images/970_90",
+        "eteleshop",
+        "teleshop",
+        "/themes/shop/images/",
+        "union-pay",
+        "visa",
+        "master",
+        "american",
+        "payment",
+        "logo",
+        "sltmobitel",
+        "chat",
+        "footer",
+        "header",
+        "banner",
+        "sprite",
+        "loader",
+        "ajax-loader",
+        "placeholder",
+        "default-image",
+        "no-image",
+    ]
+
+    if any(hint in value for hint in bad_hints):
+        return True
+
+    if value.startswith("data:"):
+        return True
+
+    if urlparse(url).path.lower().endswith(".svg"):
+        return True
+
+    return False
+
+
+def pick_image_url(*values: Any) -> str:
+    """
+    Pick only a valid product image URL, never a product page URL.
+    """
+    for value in values:
+        for url in extract_urls(value):
+            full_url = absolute_url(url)
+            if looks_like_image_url(full_url) and not is_bad_lifestore_image(full_url):
+                return full_url
+
+    return ""
+
+
+def slug_tokens(text: str, min_len: int = 3) -> list[str]:
+    return [
+        token
+        for token in re.split(r"[^a-zA-Z0-9]+", (text or "").lower())
+        if len(token) >= min_len
+    ]
+
+
+@dataclass
+class ImageCandidate:
+    image_url: str
+    score: int
+    reason: str
+    alt: str = ""
+    source_tag: str = ""
+
+
+def score_image_candidate(
+    image_url: str,
+    product_name: str,
+    product_url: str,
+    context: str,
+    base_score: int,
+    reason: str,
+    alt: str = "",
+    source_tag: str = "",
+) -> ImageCandidate | None:
+    full_url = absolute_url(image_url, product_url)
+
+    if not looks_like_image_url(full_url):
+        return None
+
+    if is_bad_lifestore_image(full_url, context):
+        return None
+
+    parsed_image_path = urlparse(full_url).path.lower()
+    image_filename = parsed_image_path.split("/")[-1].lower()
+
+    low_url = full_url.lower()
+    low_context = clean_text(context).lower()
+    low_alt = clean_text(alt).lower()
+    low_product_name = clean_text(product_name).lower()
+
+    candidate_blob = f"{image_filename} {low_alt} {low_context}"
+
+    score = base_score
+
+    if "/styles/product_image_small/" in low_url:
+        score += 120
+
+    if "/styles/product_block_images/" in low_url:
+        score += 85
+
+    if "/styles/product_image_large/" in low_url:
+        score += 75
+
+    if "/styles/" in low_url and "/sites/default/files/" in low_url:
+        score += 60
+
+    if "/sites/default/files/" in low_url:
+        score += 35
+
+    product_tokens = [
+        token
+        for token in re.split(r"[^a-zA-Z0-9]+", low_product_name)
+        if len(token) >= 2 or token.isdigit()
+    ]
+
+    generic_tokens = {
+        "smart",
+        "bluetooth",
+        "speaker",
+        "display",
+        "phone",
+        "telephone",
+        "camera",
+        "color",
+        "colour",
+        "wireless",
+        "wifi",
+        "wi",
+        "fi",
+        "router",
+        "switch",
+        "adapter",
+        "adaptor",
+        "access",
+        "point",
+        "range",
+        "extender",
+        "outdoor",
+        "indoor",
+        "power",
+        "backup",
+        "guard",
+        "the",
+        "and",
+        "with",
+        "for",
+    }
+
+    distinctive_tokens = [
+        token
+        for token in product_tokens
+        if token not in generic_tokens
+    ]
+
+    token_hits = 0
+    distinctive_hits = 0
+
+    for token in product_tokens:
+        if token in image_filename:
+            score += 18
+            token_hits += 1
+
+        if token in low_alt:
+            score += 18
+            token_hits += 1
+
+        if token in low_context:
+            score += 8
+            token_hits += 1
+
+    for token in distinctive_tokens:
+        if token in candidate_blob:
+            score += 35
+            distinctive_hits += 1
+
+    # Exact/near-exact alt match is very strong.
+    if low_alt and low_alt == low_product_name:
+        score += 220
+
+    elif low_alt and low_product_name in low_alt:
+        score += 150
+
+    elif low_alt and low_alt in low_product_name:
+        score += 90
+
+    # Penalize another product's alt text.
+    if low_alt and low_alt != low_product_name:
+        alt_tokens = [
+            token
+            for token in re.split(r"[^a-zA-Z0-9]+", low_alt)
+            if len(token) >= 2 or token.isdigit()
+        ]
+
+        product_token_set = set(product_tokens)
+        alt_token_set = set(alt_tokens)
+
+        overlap = len(product_token_set & alt_token_set)
+        foreign_tokens = [
+            token
+            for token in alt_tokens
+            if token not in product_token_set and token not in generic_tokens
+        ]
+
+        if foreign_tokens and overlap <= 1:
+            score -= 220
+
+        elif foreign_tokens and overlap <= 2:
+            score -= 120
+
+    # Main fix:
+    # If the product has distinctive/model tokens but the candidate image does not
+    # contain enough of them, it is probably a related product image.
+    #
+    # Examples fixed by this:
+    # - Alexa Echo Dot / Show selecting TeDi Alexa image
+    # - SonicGear Neox 7 selecting RDO 30x image
+    # - Cudy 24-Port selecting 8-Port image
+    useful_distinctive_tokens = [
+        token
+        for token in distinctive_tokens
+        if len(token) >= 3 or any(ch.isdigit() for ch in token)
+    ]
+
+    if useful_distinctive_tokens:
+        required_hits = 1
+
+        if len(useful_distinctive_tokens) >= 3:
+            required_hits = 2
+
+        if distinctive_hits < required_hits:
+            score -= 180
+
+    related_hints = [
+        "related products",
+        "similar products",
+        "you may also like",
+        "view product",
+        "add to cart",
+    ]
+
+    if any(hint in low_context for hint in related_hints):
+        score -= 120
+
+    if token_hits == 0:
+        score -= 100
+
+    if token_hits == 0 and "/styles/product_" not in low_url:
+        score -= 80
+
+    return ImageCandidate(
+        image_url=full_url,
+        score=score,
+        reason=reason,
+        alt=alt,
+        source_tag=source_tag,
+    )
+
+
+def collect_image_candidates(
+    soup: BeautifulSoup,
+    product_name: str,
+    product_url: str,
+) -> list[ImageCandidate]:
+    candidates: list[ImageCandidate] = []
+
+    for a in soup.find_all("a", href=True):
+        href = a.get("href", "")
+        context = clean_text(a.get_text(" "))
+
+        img = a.find("img")
+        alt = ""
+        if img:
+            alt = clean_text(img.get("alt") or img.get("title") or "")
+            context = clean_text(f"{context} {alt}")
+
+        candidate = score_image_candidate(
+            href,
+            product_name=product_name,
+            product_url=product_url,
+            context=context,
+            base_score=70,
+            reason="anchor_href_image",
+            alt=alt,
+            source_tag="a[href]",
+        )
+
+        if candidate:
+            candidates.append(candidate)
+
+    for img in soup.find_all("img"):
+        raw_url = extract_url_from_img_tag(img)
+        if not raw_url:
+            continue
+
+        alt = clean_text(img.get("alt") or img.get("title") or "")
+        parent_text = clean_text(img.parent.get_text(" ")) if img.parent else ""
+        context = clean_text(f"{alt} {parent_text}")
+
+        candidate = score_image_candidate(
+            raw_url,
+            product_name=product_name,
+            product_url=product_url,
+            context=context,
+            base_score=60,
+            reason="img_tag",
+            alt=alt,
+            source_tag="img",
+        )
+
+        if candidate:
+            candidates.append(candidate)
+
+    for source in soup.find_all("source"):
+        raw_url = extract_srcset_url(source.get("srcset") or source.get("data-srcset"))
+        if not raw_url:
+            continue
+
+        parent_text = clean_text(source.parent.get_text(" ")) if source.parent else ""
+
+        candidate = score_image_candidate(
+            raw_url,
+            product_name=product_name,
+            product_url=product_url,
+            context=parent_text,
+            base_score=55,
+            reason="source_srcset",
+            source_tag="source",
+        )
+
+        if candidate:
+            candidates.append(candidate)
+
+    for selector in [
+        {"property": "og:image"},
+        {"name": "og:image"},
+        {"property": "twitter:image"},
+        {"name": "twitter:image"},
+    ]:
+        meta = soup.find("meta", selector)
+        if not meta or not meta.get("content"):
+            continue
+
+        candidate = score_image_candidate(
+            meta["content"],
+            product_name=product_name,
+            product_url=product_url,
+            context="metadata image",
+            base_score=5,
+            reason=f"meta_{list(selector.values())[0]}",
+            source_tag="meta",
+        )
+
+        if candidate:
+            candidates.append(candidate)
+
+    best_by_url: dict[str, ImageCandidate] = {}
+
+    for candidate in candidates:
+        existing = best_by_url.get(candidate.image_url)
+
+        if existing is None or candidate.score > existing.score:
+            best_by_url[candidate.image_url] = candidate
+
+    return sorted(best_by_url.values(), key=lambda item: item.score, reverse=True)
+
+
+def extract_best_product_image_from_soup(
+    soup: BeautifulSoup,
+    product_url: str,
+    expected_name: str = "",
+) -> dict[str, Any]:
+    """
+    Integrated version of the standalone image scraper logic.
+
+    The graph builder already has the product page HTML, so this function uses
+    the same scoring/filtering logic without fetching the product page again.
+    """
+    clean_product_url = pick_product_url(product_url) or normalize_url(product_url).rstrip("/")
+    product_name = expected_name or extract_name([], soup)
+
+    candidates = collect_image_candidates(soup, product_name, clean_product_url)
+
+    if not candidates:
+        return {
+            "status": "image_not_found",
+            "product_url": clean_product_url,
+            "name": product_name,
+            "image_url": "",
+            "score": 0,
+            "reason": "",
+            "top_candidates": [],
+        }
+
+    best = candidates[0]
+
+    return {
+        "status": "success",
+        "product_url": clean_product_url,
+        "name": product_name,
+        "image_url": best.image_url,
+        "score": best.score,
+        "reason": best.reason,
+        "top_candidates": [asdict(item) for item in candidates[:5]],
+    }
 
 
 def extract_seller(lines: list[str]) -> str:
@@ -785,7 +1289,12 @@ def scrape_product_page(url: str, product_id: str) -> dict:
     price_value = extract_price(lines, name)
     stock = extract_stock(lines, name)
     description = extract_description(lines)
-    image_url = extract_image_url(soup)
+    image_result = extract_best_product_image_from_soup(
+        soup=soup,
+        product_url=url,
+        expected_name=name,
+    )
+    image_url = image_result.get("image_url", "")
     seller = extract_seller(lines)
 
     product = {
@@ -800,6 +1309,9 @@ def scrape_product_page(url: str, product_id: str) -> dict:
         "stock_status": extract_stock_status(stock),
         "url": url,
         "image_url": image_url,
+        "image_source": "graph_builder_integrated_scraper_logic" if image_url else "image_not_found",
+        "image_score": image_result.get("score"),
+        "image_reason": image_result.get("reason") or image_result.get("status", ""),
         "brand": "",
         "category": category or "Uncategorized",
         "seller": seller,
@@ -890,6 +1402,9 @@ def upsert_product(driver, product: dict):
         p.stock_status = $stock_status,
         p.url = $url,
         p.image_url = $image_url,
+        p.image_source = $image_source,
+        p.image_score = $image_score,
+        p.image_reason = $image_reason,
         p.seller = $seller,
         p.product_type = $product_type,
         p.tags = $tags,
@@ -935,7 +1450,10 @@ def upsert_product(driver, product: dict):
             stock=product["stock"],
             stock_status=product["stock_status"],
             url=product["url"],
-            image_url=product["image_url"],
+            image_url=product.get("image_url", ""),
+            image_source=product.get("image_source", ""),
+            image_score=product.get("image_score"),
+            image_reason=product.get("image_reason", ""),
             seller=product["seller"],
             product_type=product["product_type"],
             tags=product["tags"],
@@ -1042,6 +1560,20 @@ def print_graph_counts(driver):
         for row in result:
             print(f"{row['relationship']}: {row['count']}")
 
+def print_image_source_summary(products: list[dict]) -> None:
+    """
+    Print how product image URLs were selected in the integrated graph builder.
+    """
+    source_counts: dict[str, int] = {}
+
+    for product in products:
+        source = clean_text(product.get("image_source")) or "unknown"
+        source_counts[source] = source_counts.get(source, 0) + 1
+
+    print("\n--- Image source counts ---")
+    for source, count in sorted(source_counts.items(), key=lambda item: item[0]):
+        print(f"{source}: {count}")
+
 
 # ---------------------------------------------------------------------
 # Main
@@ -1081,7 +1613,6 @@ def main():
             try:
                 product_id = make_stable_product_id(product_url)
                 product = scrape_product_page(product_url, product_id)
-
                 print(
                     f"  id={product['product_id']!r}, "
                     f"name={product['name']!r}, "
@@ -1089,7 +1620,9 @@ def main():
                     f"stock={product['stock_status']!r}, "
                     f"brand={product['brand']!r}, "
                     f"category={product['category']!r}, "
-                    f"type={product['product_type']!r}"
+                    f"type={product['product_type']!r}, "
+                    f"image_source={product.get('image_source')!r}, "
+                    f"image={product['image_url']!r}"
                 )
 
                 products.append(product)
@@ -1108,6 +1641,42 @@ def main():
 
         if not products:
             raise RuntimeError("Product URLs were found, but no products were successfully scraped.")
+
+        bad_image_products = [
+            product for product in products
+            if product.get("image_url") and is_bad_lifestore_image(product.get("image_url", ""))
+        ]
+
+        missing_image_products = [
+            product for product in products
+            if not product.get("image_url")
+        ]
+
+        unique_image_urls = sorted(
+            {
+                product.get("image_url")
+                for product in products
+                if product.get("image_url")
+            }
+        )
+
+        print("\n--- Image extraction check ---")
+        print(f"Products scraped: {len(products)}")
+        print(f"Unique image URLs found: {len(unique_image_urls)}")
+        print(f"Products with banner/header image: {len(bad_image_products)}")
+        print(f"Products with missing image: {len(missing_image_products)}")
+
+        if bad_image_products:
+            print("First products still using banner image:")
+            for product in bad_image_products[:10]:
+                print(product.get("name"), "->", product.get("url"))
+
+        if missing_image_products:
+            print("First products with missing image:")
+            for product in missing_image_products[:10]:
+                print(product.get("name"), "->", product.get("url"))
+
+        print_image_source_summary(products)
 
         current_product_ids = [product["product_id"] for product in products]
         mark_or_remove_missing_products(driver, current_product_ids)

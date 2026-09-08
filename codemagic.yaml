@@ -1,0 +1,70 @@
+workflows:
+  ios-staging-testflight:
+    name: iOS Staging TestFlight
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: SLT_APP_STORE_CONNECT
+
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.slt.aiagents
+      vars:
+        XCODE_SCHEME: "App"
+
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          cd frontend
+          npm install
+
+      - name: Build React/Vite web app
+        script: |
+          cd frontend
+          npm run build
+
+      - name: Sync Capacitor iOS
+        script: |
+          cd frontend
+          npx cap sync ios
+
+      - name: Install CocoaPods if Podfile exists
+        script: |
+          cd frontend/ios/App
+          if [ -f "Podfile" ]; then
+            pod install
+          else
+            echo "No Podfile found. Continuing without CocoaPods."
+          fi
+
+      - name: Set up iOS code signing
+        script: |
+          cd frontend/ios/App
+          xcode-project use-profiles
+
+      - name: Set build number
+        script: |
+          cd frontend/ios/App
+          agvtool new-version -all "$BUILD_NUMBER" || true
+
+      - name: Build IPA
+        script: |
+          cd frontend/ios/App
+          if [ -d "App.xcworkspace" ]; then
+            xcode-project build-ipa --workspace "App.xcworkspace" --scheme "$XCODE_SCHEME"
+          else
+            xcode-project build-ipa --project "App.xcodeproj" --scheme "$XCODE_SCHEME"
+          fi
+
+    artifacts:
+      - frontend/ios/App/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_app_store: false
+        submit_to_testflight: true

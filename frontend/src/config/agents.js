@@ -3,7 +3,7 @@ export const AGENTS = {
     workmateai: {
         id: "supervisor",
         title: "Workmate AI",
-        subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
+        subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, Admin, CIA, Network, Legal, or Marketing.",
         color: "from-cyan-900 to-cyan-600",
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
         idlePrompt: "Ask me about policies and procedures of HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
@@ -142,38 +142,5 @@ export const AGENTS = {
         buttonColor: "bg-pink-600 hover:bg-pink-700",
         idlePrompt: "Ask about marketing campaigns, logo guidelines, or branding standards.",
         disclaimer: "If you need any further clarifications, please reach out to the Marketing & Communications department."
-    },
-
-    // 11. Enterprise Business
-    askenterprisebusiness: {
-        id: "enterprise_business",
-        title: "ASK ENTERPRISE BUSINESS",
-        subtitle: "Enterprise and corporate solutions, B2B services, SME and government accounts, and dedicated business connectivity.",
-        color: "from-violet-900 to-violet-600",
-        buttonColor: "bg-violet-600 hover:bg-violet-700",
-        idlePrompt: "Ask about enterprise solutions, corporate connectivity, or B2B services.",
-        disclaimer: "If you need any further clarifications, please reach out to the Enterprise Business team."
-    },
-
-    // 12. Consumer Business
-    askconsumerbusiness: {
-        id: "consumer_business",
-        title: "ASK CONSUMER BUSINESS",
-        subtitle: "Home broadband and fiber packages, consumer mobile plans, PEO TV, and residential customer services.",
-        color: "from-green-900 to-green-600",
-        buttonColor: "bg-green-600 hover:bg-green-700",
-        idlePrompt: "Ask about home broadband, mobile plans, or consumer promotions.",
-        disclaimer: "If you need any further clarifications, please reach out to the Consumer Business team."
-    },
-
-    // 13. Rainbow Pages
-    askrainbowpages: {
-        id: "rainbowpages",
-        title: "Rainbowpages",
-        subtitle: "Search SLTMobitel's Rainbow Pages business directory — company listings, contact details, and service categories.",
-        color: "from-red-900 to-red-600",
-        buttonColor: "bg-red-600 hover:bg-red-700",
-        idlePrompt: "Ask about a business listing, contact, or service category.",
-        disclaimer: "If you need any further clarifications, please reach out to the Rainbow Pages team."
     }
 };

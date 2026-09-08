@@ -1,0 +1,22 @@
+{
+  "appId": "com.slt.aiagents",
+  "appName": "AI Agents",
+  "webDir": "dist",
+  "server": {
+    "url": "https://theaisle.raccoon-ai.io/workmateai",
+    "cleartext": false,
+    "allowNavigation": [
+      "theaisle.raccoon-ai.io",
+      "login.microsoftonline.com",
+      "*.microsoftonline.com",
+      "login.live.com",
+      "*.live.com",
+      "aadcdn.msauth.net",
+      "*.msauth.net",
+      "aadcdn.msftauth.net",
+      "*.msftauth.net",
+      "aadcdn.msftauthimages.net",
+      "*.msftauthimages.net"
+    ]
+  }
+}

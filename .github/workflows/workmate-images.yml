@@ -1,0 +1,73 @@
+name: Build WorkMate staging images
+
+on:
+  push:
+    branches: [voice-test]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: workmate-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set image names
+        shell: bash
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          echo "BACKEND_IMAGE=ghcr.io/${repository}/backend" >> "$GITHUB_ENV"
+          echo "MCP_IMAGE=ghcr.io/${repository}/mcp-lifestore" >> "$GITHUB_ENV"
+          echo "FRONTEND_IMAGE=ghcr.io/${repository}/frontend" >> "$GITHUB_ENV"
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: backend
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            ${{ env.BACKEND_IMAGE }}:voice-test
+          cache-from: type=gha,scope=workmate-python
+          cache-to: type=gha,mode=max,scope=workmate-python
+
+      - name: Build and push LifeStore MCP
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          target: mcp-lifestore
+          push: true
+          tags: |
+            ${{ env.MCP_IMAGE }}:${{ github.sha }}
+            ${{ env.MCP_IMAGE }}:voice-test
+          cache-from: type=gha,scope=workmate-python
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            ${{ env.FRONTEND_IMAGE }}:voice-test
+          cache-from: type=gha,scope=workmate-frontend
+          cache-to: type=gha,mode=max,scope=workmate-frontend

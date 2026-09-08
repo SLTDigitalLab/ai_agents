@@ -14,7 +14,7 @@ from langchain_qdrant import QdrantVectorStore, RetrievalMode
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
-from core.config import settings, agent_collection_name
+from core.config import settings
 from core.llm import get_embedding_model
 from core.llm_slm import get_slm_embedding_model
 from domain.tools.rag_tools import _sparse_embeddings
@@ -32,13 +32,7 @@ class Chunk(BaseModel):
     text: str
     source: str
     link: str
-    # Section heading captured at ingestion (None when no heading was derived).
-    title: Optional[str] = None
     score: Optional[float] = None
-    # Visual/table evidence (cropped PDF previews) attached at ingestion time.
-    # Image URLs are relative to this host (EVIDENCE_URL_PREFIX); the remote
-    # caller rewrites them to absolute URLs against KB_REMOTE_URL.
-    evidence: Optional[List[dict]] = None
 
 
 class RetrieveResponse(BaseModel):
@@ -71,11 +65,7 @@ async def retrieve(
     if agent_id not in _allowlist():
         raise HTTPException(status_code=404, detail="Unknown agent")
 
-    # The Ollama SLM agent always uses its own "askhrslm_docs" collection,
-    # independent of the main embedding provider. All other agents are
-    # namespaced by provider (e.g. "hr_docs" / "hr_docs_gemini").
-    is_slm = agent_id == "askhrslm"
-    collection_name = f"{agent_id}_docs" if is_slm else agent_collection_name(agent_id)
+    collection_name = f"{agent_id}_docs"
     client = QdrantClient(url=settings.QDRANT_URL)
 
     try:
@@ -87,7 +77,7 @@ async def retrieve(
         logger.exception(f"Qdrant probe failed: {type(e).__name__}: {e}")
         raise HTTPException(status_code=502, detail="Vector store unavailable")
 
-    embedding = get_slm_embedding_model() if is_slm else get_embedding_model()
+    embedding = get_slm_embedding_model() if agent_id == "askhrslm" else get_embedding_model()
 
     vector_store = QdrantVectorStore(
         client=client,
@@ -110,9 +100,7 @@ async def retrieve(
             text=doc.page_content,
             source=doc.metadata.get("source", "Unknown Source"),
             link=doc.metadata.get("link", "#"),
-            title=doc.metadata.get("title"),
             score=float(score) if score is not None else None,
-            evidence=doc.metadata.get("evidence") or None,
         )
         for doc, score in results
     ]
