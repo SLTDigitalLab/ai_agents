@@ -70,3 +70,16 @@ def get_agent_builder(agent_id: str):
         )
 
     return AGENT_BUILDERS[agent_id]
+
+async def get_compiled_async_graph(agent_id: str):
+   """Return a compiled async graph for the given agent."""
+   builder = get_agent_builder(agent_id)
+   graph = builder()
+   return graph.compile()
+
+def get_compiled_sync_graph(agent_id: str):
+   """Return a compiled sync graph for the given agent."""
+   builder = get_agent_builder(agent_id)
+   graph = builder()
+   return graph.compile()
+
