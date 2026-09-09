@@ -10,6 +10,8 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 from core.llm import get_guardrail_model
+from core.config import settings
+from core.sentinel import SentinelError
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +92,11 @@ async def classify_intent(message: str) -> GuardrailResult:
         log.info(f"Guardrail: action={result.action} sentiment={result.sentiment} reason={result.reason}")
         return result
     except Exception as exc:
+        if settings.GUARDRAIL_PROVIDER.lower().strip() == "sentinel":
+            # A gateway or schema failure must not silently bypass the classifier.
+            log.warning("Sentinel guardrail unavailable (%s)", type(exc).__name__)
+            raise SentinelError("GUARDRAIL_UNAVAILABLE",
+                                request_id=getattr(exc, "request_id", None)) from None
         # Fail open — never block a user due to classifier errors
         log.warning(f"Guardrail classifier error (failing open): {exc}")
         return GuardrailResult(action="PASS", reason="classifier_error", sentiment="neutral")

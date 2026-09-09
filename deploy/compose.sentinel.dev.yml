@@ -1,0 +1,8 @@
+# Paths resolve relative to the first (-f docker-compose.yml) compose file.
+services:
+  backend:
+    env_file:
+      - ./.env.sentinel
+  mcp_lifestore:
+    env_file:
+      - ./.env.sentinel

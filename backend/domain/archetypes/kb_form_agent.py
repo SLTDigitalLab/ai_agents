@@ -25,7 +25,7 @@ from langchain_core.messages import AIMessage, trim_messages
 from langgraph.graph import START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from core.llm import get_chat_model
+from core.llm import get_tool_chat_model, invoke_agent_model
 from domain.state import AgentState
 from domain.tools.rag_tools import search_knowledge_base
 from domain.tools.lifestore_mcp_tools import LIFESTORE_MCP_TOOLS
@@ -33,7 +33,7 @@ from domain.tools.lifestore_cart_tools import LIFESTORE_CART_TOOLS
 
 
 # ── LLM setup ────────────────────────────────────────────────────────────
-llm = get_chat_model()
+llm = get_tool_chat_model()
 
 
 # ── Tool setup ───────────────────────────────────────────────────────────
@@ -740,7 +740,7 @@ The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledg
     # Prepend the system prompt to the trimmed messages.
     messages = [{"role": "system", "content": system_prompt}] + trimmed
 
-    response = await llm_with_agent_tools.ainvoke(messages)
+    response = await invoke_agent_model(llm_with_agent_tools, messages)
     return {"messages": [response]}
 
 

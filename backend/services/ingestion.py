@@ -8,7 +8,8 @@ from fastapi import APIRouter, UploadFile
 from pydantic import BaseModel
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_core.documents import Document
-from core.llm import get_embedding_model
+from core.llm import get_ingestion_embedding_model
+from core.vector_config import ingestion_collection_name, cloud_embedding_dimensions, sentinel_document_ids
 from langchain_text_splitters import HTMLHeaderTextSplitter, RecursiveCharacterTextSplitter
 from langchain_unstructured import UnstructuredLoader
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
@@ -31,7 +32,7 @@ router = APIRouter()
 class IngestionService:
     def __init__(self):
         # 1. Initialize the Embedding Model from Factory
-        self.embeddings = get_embedding_model()
+        self.embeddings = get_ingestion_embedding_model()
 
         # 2. Sparse embedding model (BM25) for hybrid search.
         # Combines lexical matching with dense semantic search - essential
@@ -63,7 +64,7 @@ class IngestionService:
                 collection_name=collection_name,
                 vectors_config={
                     "dense": models.VectorParams(
-                        size=settings.EMBEDDING_DIMENSIONS,
+                        size=cloud_embedding_dimensions(for_ingestion=True),
                         distance=models.Distance.COSINE,
                     ),
                 },
@@ -116,7 +117,7 @@ class IngestionService:
             doc.metadata["link"] = url
 
         # Define Collection Name
-        collection_name = f"{agent_name}_docs"
+        collection_name = ingestion_collection_name(agent_name)
 
         # Create collection manually first
         await self._ensure_collection_exists(collection_name)
@@ -131,7 +132,7 @@ class IngestionService:
             vector_name="dense",
             sparse_vector_name="sparse",
         )
-        vector_store.add_documents(docs)
+        vector_store.add_documents(docs, ids=sentinel_document_ids(docs))
 
         return {
             "status": "success",
@@ -342,7 +343,7 @@ class IngestionService:
             processed_files = []
 
             # Define Collection Name
-            collection_name = f"{agent_name}_docs"
+            collection_name = ingestion_collection_name(agent_name)
             await self._ensure_collection_exists(collection_name)
             
             # Initialize Vector Store once (hybrid: dense + sparse)
@@ -420,7 +421,7 @@ class IngestionService:
                     # Now that we have valid replacement chunks, remove the
                     # stale vectors and write the new ones.
                     self._delete_file_vectors(collection_name, onedrive_id, file_name)
-                    vector_store.add_documents(chunks)
+                    vector_store.add_documents(chunks, ids=sentinel_document_ids(chunks))
                     total_chunks += len(chunks)
                     processed_files.append(file_name)
                 except Exception as e:

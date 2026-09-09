@@ -25,7 +25,8 @@ except Exception:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-load_dotenv(dotenv_path=PROJECT_ROOT / ".env", override=True)
+load_dotenv(dotenv_path=PROJECT_ROOT / ".env.sentinel")
+load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
 mcp = FastMCP(
     "Ask LifeStore MCP",
@@ -2433,6 +2434,9 @@ def _get_mcp_embedding_model():
     if project_get_embedding_model is not None:
         return project_get_embedding_model()
 
+    if os.getenv("EMBEDDING_PROVIDER", "").strip().lower() == "sentinel":
+        raise RuntimeError("Sentinel MCP retrieval requires the backend core package; direct embedding fallback is disabled")
+
     if OpenAIEmbeddings is None:
         raise RuntimeError(
             "No embedding model is available. Either run MCP inside the backend project "
@@ -2453,6 +2457,10 @@ def _qdrant_search_documents(query: str, limit: int = 8) -> list[dict[str, Any]]
         return []
 
     try:
+        collection_name = LIFESTORE_QDRANT_COLLECTION
+        if project_get_embedding_model is not None:
+            from core.vector_config import cloud_collection_name
+            collection_name = cloud_collection_name(collection_name)
         client_kwargs = {"url": QDRANT_URL}
         if QDRANT_API_KEY:
             client_kwargs["api_key"] = QDRANT_API_KEY
@@ -2460,7 +2468,7 @@ def _qdrant_search_documents(query: str, limit: int = 8) -> list[dict[str, Any]]
         client = QdrantClient(**client_kwargs)
 
         try:
-            if not client.collection_exists(LIFESTORE_QDRANT_COLLECTION):
+            if not client.collection_exists(collection_name):
                 return []
         except Exception:
             # Some remote Qdrant setups may block collection_exists;
@@ -2472,7 +2480,7 @@ def _qdrant_search_documents(query: str, limit: int = 8) -> list[dict[str, Any]]
         if FastEmbedSparse is not None and RetrievalMode is not None:
             vector_store = QdrantVectorStore(
                 client=client,
-                collection_name=LIFESTORE_QDRANT_COLLECTION,
+                collection_name=collection_name,
                 embedding=embeddings,
                 sparse_embedding=FastEmbedSparse(model_name="Qdrant/bm25"),
                 retrieval_mode=RetrievalMode.HYBRID,
@@ -2482,7 +2490,7 @@ def _qdrant_search_documents(query: str, limit: int = 8) -> list[dict[str, Any]]
         else:
             vector_store = QdrantVectorStore(
                 client=client,
-                collection_name=LIFESTORE_QDRANT_COLLECTION,
+                collection_name=collection_name,
                 embedding=embeddings,
                 vector_name=LIFESTORE_QDRANT_DENSE_VECTOR_NAME,
             )
