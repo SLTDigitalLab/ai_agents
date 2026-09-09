@@ -9,6 +9,7 @@ __pycache__/
 *$py.class
 venv/
 .venv/
+.venv-sentinel/
 env/
 .env
 env.production/

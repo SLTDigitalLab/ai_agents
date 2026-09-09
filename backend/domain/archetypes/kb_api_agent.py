@@ -18,7 +18,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from core.config import settings
-from core.llm import get_chat_model
+from core.llm import get_tool_chat_model, invoke_agent_model
 from domain.state import AgentState
 from domain.tools.api_tools import _extract_sid_from_email, get_employee_leave_balance
 from domain.tools.rag_tools import search_knowledge_base
@@ -58,7 +58,7 @@ def _is_other_employee_leave_request(text: str, auth_sid: str) -> bool:
 
 
 # ── LLM setup ────────────────────────────────────────────────────────────
-llm = get_chat_model()
+llm = get_tool_chat_model()
 
 # Bind BOTH tools so the LLM can choose which one to call
 tools = [search_knowledge_base, get_employee_leave_balance]
@@ -160,7 +160,7 @@ The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledg
     # Prepend the system prompt to the trimmed messages
     messages = [{"role": "system", "content": system_prompt}] + trimmed
 
-    response = await llm_with_tools.ainvoke(messages)
+    response = await invoke_agent_model(llm_with_tools, messages)
     return {"messages": [response]}
 
 

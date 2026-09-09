@@ -16,12 +16,13 @@ from qdrant_client import QdrantClient
 
 from core.config import settings
 from core.llm import get_embedding_model
+from core.vector_config import cloud_collection_name
 from domain.tools.rag_tools import _sparse_embeddings
 
 router = APIRouter(prefix="/api/v1/finance", tags=["Finance KB"])
 logger = logging.getLogger(__name__)
 
-COLLECTION_NAME = "finance_docs"
+COLLECTION_NAME = cloud_collection_name("finance_docs")
 
 
 class RetrieveRequest(BaseModel):

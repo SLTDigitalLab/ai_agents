@@ -4,10 +4,12 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from fastapi_mail import ConnectionConfig
 
 # backend/core/config.py → backend/core → backend → project root
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+load_dotenv(ROOT_DIR / ".env.sentinel")
 load_dotenv(ROOT_DIR / ".env")
 
 
@@ -22,12 +24,32 @@ class Settings(BaseSettings):
     LOCATION: str = "us-central1"
 
     # LLM and Embedding Configuration
-    LLM_PROVIDER: str = "gemini" # 'gemini', 'openai'
+    LLM_PROVIDER: str = "gemini" # 'gemini', 'openai', 'sentinel'
     LLM_MODEL: str = "gemini-3-flash-preview"
     LLM_API_KEY: Optional[str] = None
     LLM_BASE_URL: Optional[str] = None
+
+    # Sentinel handles text generation; tool decisions stay on the configured
+    # direct provider until a tool-calling gateway contract is available.
+    SENTINEL_GATEWAY_URL: str = "https://sentinel.raccoon-ai.io"
+    SENTINEL_GATEWAY_API_KEY: Optional[str] = None
+    SENTINEL_GATEWAY_MODEL: str = "company-auto"
+    SENTINEL_GATEWAY_TIMEOUT_MS: int = 130000
+    SENTINEL_GATEWAY_MAX_TOKENS: int = 4096
+    SENTINEL_GUARDRAIL_MODEL: str = "company-small"
+    SENTINEL_EMBEDDING_MODEL: Optional[str] = None
+    SENTINEL_EMBEDDING_DIMENSIONS: Optional[int] = None
+    SENTINEL_EMBEDDING_BATCH_SIZE: int = 64
+    SENTINEL_COLLECTION_PREFIX: str = "sentinel_v1_"
+    SENTINEL_REUSE_EXISTING_VECTORS: bool = False
+    SENTINEL_STAGE_EMBEDDINGS: bool = False
+    VOICE_CHAT_TIMEOUT_SECONDS: float = 30.0
+
+    # Used only in Sentinel hybrid mode. LLM_MODEL/API_KEY/BASE_URL continue
+    # to configure the direct tool planner, independently of the gateway alias.
+    SENTINEL_TOOL_PROVIDER: str = "openai"
     
-    EMBEDDING_PROVIDER: str = "gemini" # 'gemini', 'openai'
+    EMBEDDING_PROVIDER: str = "gemini" # 'gemini', 'openai', 'sentinel'
     EMBEDDING_MODEL: str = "models/gemini-embedding-001"
     EMBEDDING_DIMENSIONS: int = 3072
     EMBEDDING_API_KEY: Optional[str] = None
@@ -117,6 +139,11 @@ class Settings(BaseSettings):
     # server-side reconcile fallback when the webhook can't reach localhost).
     PAYHERE_APP_ID: Optional[str] = None
     PAYHERE_APP_SECRET: Optional[str] = None
+
+    @field_validator("SENTINEL_EMBEDDING_DIMENSIONS", mode="before")
+    @classmethod
+    def empty_embedding_dimensions(cls, value):
+        return None if isinstance(value, str) and not value.strip() else value
 
     class Config:
         env_file = ".env"

@@ -145,6 +145,9 @@ Routing profiles and thresholds for the supervisor live in `backend/domain/confi
 
 ## How to Run Locally
 
+For Sentinel Gateway chat, guardrails and embeddings, see
+[the Workmate Sentinel setup guide](docs/SENTINEL_SETUP.md). SLM remains unchanged.
+
 ### 1. Clone the repository
 
 ```bash

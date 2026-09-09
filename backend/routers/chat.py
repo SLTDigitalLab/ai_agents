@@ -13,10 +13,13 @@ from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
 
 from core.checkpointer import get_postgres_checkpointer, get_async_postgres_checkpointer
+from core.sentinel import SentinelError
+from core.config import settings
 from domain.registry import get_agent_builder
 from domain.guardrails import classify_intent
 from schemas.chat import ChatRequest
 from langchain_core.tracers.context import tracing_v2_enabled
+from langsmith import tracing_context
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
@@ -191,6 +194,8 @@ async def chat(request: ChatRequest):
 
                 async for event in graph.astream_events(state, {"configurable": {"thread_id": request.thread_id}}, version="v2"):
                     if event["event"] == "on_chat_model_stream":
+                        if "sentinel_tool_planner" in event.get("tags", []):
+                            continue
                         metadata = event.get("metadata") or {}
                         node = metadata.get("langgraph_node")
                         checkpoint_ns = metadata.get("langgraph_checkpoint_ns") or ""
@@ -217,7 +222,12 @@ async def chat(request: ChatRequest):
 
             return collected
 
-        full_text = await collect()
+        try:
+            full_text = await collect()
+        except SentinelError as exc:
+            logger.warning("%s", exc)
+            raise HTTPException(status_code=429 if exc.status == 429 else 503,
+                                detail=exc.public_message) from None
         return {"response": full_text}
 
     
@@ -292,7 +302,12 @@ async def chat(request: ChatRequest):
                 tool_output_texts: list[str] = []
 
                 project_name = f"Ask SLT - {request.agent_id.upper()}"
-                with tracing_v2_enabled(project_name=project_name):
+                # Sentinel requests contain internal reference material. Avoid
+                # this route's otherwise-forced remote prompt/response tracing.
+                trace_context = (tracing_context(enabled=False)
+                                 if settings.LLM_PROVIDER.lower().strip() == "sentinel"
+                                 else tracing_v2_enabled(project_name=project_name))
+                with trace_context:
                     # We use astream_events (v2) for fine-grained streaming.
                     #
                     # Nodes whose token stream must be SUPPRESSED — these fan
@@ -332,6 +347,8 @@ async def chat(request: ChatRequest):
                             continue
 
                         if kind == "on_chat_model_stream":
+                            if "sentinel_tool_planner" in event.get("tags", []):
+                                continue
                             metadata = event.get("metadata") or {}
 
                             if not logged_metadata_sample:
@@ -426,6 +443,10 @@ async def chat(request: ChatRequest):
                         logger.warning("Product-card injection skipped: %s", inject_exc)
 
         except Exception as exc:
+            if isinstance(exc, SentinelError):
+                logger.warning("%s", exc)
+                yield f"\n\n[ERROR]: {exc.public_message}"
+                return
             import traceback
             error_details = traceback.format_exc()
             logger.error(f"Streaming error: {exc}\n{error_details}")

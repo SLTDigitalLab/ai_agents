@@ -215,7 +215,7 @@ async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str
     All routing, RAG search, leave balance, and guardrails happen inside the pipeline.
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=settings.VOICE_CHAT_TIMEOUT_SECONDS) as client:
             resp = await client.post(
                 CHAT_API_URL,
                 json={

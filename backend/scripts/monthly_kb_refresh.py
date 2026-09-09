@@ -14,6 +14,7 @@ from qdrant_client import QdrantClient
 # Paths + .env
 # ---------------------------------------------------------------------
 ROOT_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(ROOT_DIR / ".env.sentinel")
 load_dotenv(ROOT_DIR / ".env")
 
 
@@ -280,6 +281,11 @@ def wait_for_ingestion_to_finish(label: str, poll_seconds: int = POLL_SECONDS):
 # Qdrant cleanup
 # ---------------------------------------------------------------------
 def delete_collection_if_exists(collection_name: str):
+    if (os.getenv("EMBEDDING_PROVIDER", "").strip().lower() == "sentinel"
+        or os.getenv("SENTINEL_STAGE_EMBEDDINGS", "").strip().lower() in {"true", "1", "yes"}):
+        # The migration's target collection is isolated. Never let this legacy
+        # delete-before-ingest job remove the rollback index (or an active one).
+        raise RuntimeError("For Sentinel, set CLEAR_QDRANT_BEFORE_INGEST=false and use stable upserts")
     client = get_qdrant_client()
 
     try:

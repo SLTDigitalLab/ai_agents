@@ -1,0 +1,8 @@
+# Place .env.sentinel alongside the production .env on the deployment host.
+services:
+  backend:
+    env_file:
+      - ${WORKMATE_SENTINEL_ENV_FILE:-/root/slt-app/.env.sentinel}
+  mcp-lifestore:
+    env_file:
+      - ${WORKMATE_SENTINEL_ENV_FILE:-/root/slt-app/.env.sentinel}

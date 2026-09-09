@@ -16,6 +16,7 @@ from qdrant_client import QdrantClient
 
 from core.config import settings
 from core.llm import get_embedding_model
+from core.vector_config import cloud_collection_name
 from core.llm_slm import get_slm_embedding_model
 from domain.tools.rag_tools import _sparse_embeddings
 
@@ -65,7 +66,7 @@ async def retrieve(
     if agent_id not in _allowlist():
         raise HTTPException(status_code=404, detail="Unknown agent")
 
-    collection_name = f"{agent_id}_docs"
+    collection_name = cloud_collection_name(f"{agent_id}_docs")
     client = QdrantClient(url=settings.QDRANT_URL)
 
     try:

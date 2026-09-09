@@ -25,6 +25,8 @@ from qdrant_client import QdrantClient
 
 from core.config import settings
 from core.llm import get_embedding_model
+from core.vector_config import cloud_collection_name
+from core.sentinel import SentinelError
 
 log = logging.getLogger(__name__)
 
@@ -86,7 +88,7 @@ def _resolve_collection_name(agent_id: str) -> str:
         )
 
         if explicit_search_collection:
-            return explicit_search_collection
+            return cloud_collection_name(explicit_search_collection)
 
         delete_collection = _get_setting(
             "LIFESTORE_QDRANT_DELETE_COLLECTION",
@@ -94,16 +96,16 @@ def _resolve_collection_name(agent_id: str) -> str:
         )
 
         if delete_collection:
-            return delete_collection
+            return cloud_collection_name(delete_collection)
 
         base_collection = _get_setting("LIFESTORE_QDRANT_COLLECTION", "lifestore")
 
         if base_collection.endswith("_docs"):
-            return base_collection
+            return cloud_collection_name(base_collection)
 
-        return f"{base_collection}_docs"
+        return cloud_collection_name(f"{base_collection}_docs")
 
-    return f"{agent_id}_docs"
+    return cloud_collection_name(f"{agent_id}_docs")
 
 
 def _get_neo4j_driver():
@@ -242,6 +244,8 @@ async def _search_qdrant_knowledge_base(
 
         return "\n\n---\n\n".join(context_parts)
 
+    except SentinelError:
+        raise
     except Exception as exc:
         log.exception(
             "Qdrant hybrid search failed for agent='%s' collection='%s': %s: %s",
