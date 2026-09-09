@@ -22,7 +22,6 @@ import asyncio
 import json
 import logging
 import os
-import random
 
 import httpx
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -73,7 +72,12 @@ For example: "{USER_FIRST_NAME}, your annual leave balance is 14 days."
 Or: "{USER_FIRST_NAME}, to apply for leave you need to..."
 
 RULE 3 — NEVER skip the name. If you are about to respond without starting with
-"{USER_FIRST_NAME}", stop and restart your response with the name first."""
+"{USER_FIRST_NAME}", use the name in your next response. Do not restart spoken audio.
+
+TOOL USE: You may briefly acknowledge a question once before calling ask_workmate_ai.
+Then wait for the tool result. Do not repeat the call while it is pending.
+Speak the returned answer once, then wait for the user to speak again.
+Never call the tool with an empty question."""
 
 
 # Single tool — routes all questions through the full agent pipeline
@@ -97,53 +101,6 @@ WORKMATE_TOOL = {
         "required": ["question"],
     },
 }
-
-# Filler phrases per language — spoken while the agent pipeline runs
-# so the user never hears silence during the search
-FILLERS = {
-    "en": [
-        "Sure, let me check that for you.",
-        "Got it, one moment while I look that up.",
-        "Okay, checking that now.",
-        "Let me find that information for you.",
-        "Sure, just a moment.",
-        "Right, let me look into that.",
-    ],
-    "si": [
-        "හරි, මමඒක බලන්නම්.",
-        "හොඳයි, එක මොහොතක් රැඳෙන්න.",
-        "ඒක දැන් සොයා බලනවා.",
-        "ඒ තොරතුරු ලබා ගන්නම්.",
-    ],
-    "ta": [
-        "சரி, நான் அதை சரிபார்க்கிறேன்.",
-        "ஒரு நிமிடம், நான் தேடுகிறேன்.",
-        "சரி, இப்போது தேடுகிறேன்.",
-        "அந்த தகவலை தருகிறேன்.",
-    ],
-}
-
-
-def _detect_language(text: str) -> str:
-    """
-    Lightweight script detection — checks Unicode ranges.
-    Returns 'si' for Sinhala, 'ta' for Tamil, 'en' for everything else.
-    No external library needed.
-    """
-    for ch in text:
-        cp = ord(ch)
-        if 0x0D80 <= cp <= 0x0DFF:   # Sinhala Unicode block
-            return "si"
-        if 0x0B80 <= cp <= 0x0BFF:   # Tamil Unicode block
-            return "ta"
-    return "en"
-
-
-def _pick_filler(question: str) -> str:
-    """Pick a random filler phrase that matches the language of the question."""
-    lang = _detect_language(question)
-    return random.choice(FILLERS.get(lang, FILLERS["en"]))
-
 
 def _active_provider() -> str:
     provider_override = (
@@ -248,32 +205,6 @@ def _get_vertex_access_token() -> str:
     credentials.refresh(auth_req)
     logger.info(f"Vertex AI token generated for project: {credentials.project_id or 'unknown'} / service account: {credentials.service_account_email}")
     return credentials.token
-
-
-# Helper: keep Gemini WebSocket alive while waiting for a slow operation.
-# Sends a lightweight ping-style message every interval_sec seconds.
-# The done_event is set by the caller when the wait is over.
-async def _gemini_keepalive(gemini_ws, done_event: asyncio.Event, interval_sec: float = 5.0):
-    """
-    Gemini Live closes with 1011 if nothing is sent for ~10 seconds.
-    This coroutine sends an empty realtime_input heartbeat to keep
-    the connection open while the agent pipeline is running.
-    """
-    try:
-        while not done_event.is_set():
-            await asyncio.sleep(interval_sec)
-            if done_event.is_set():
-                break
-            try:
-                # empty media chunk — valid no-op that resets the keepalive timer
-                await gemini_ws.send(json.dumps({
-                    "realtime_input": {"media_chunks": []}
-                }))
-                
-            except Exception:
-                break
-    except asyncio.CancelledError:
-        pass
 
 
 # call the full agent pipeline and return a complete answer
@@ -414,8 +345,44 @@ async def gemini_voice_proxy(websocket: WebSocket):
 
             voice_thread = f"voice_{id(websocket)}"
 
-            current_agent_task = [None]   # current_agent_task[0] holds the Task or None
-            current_agent_lock = asyncio.Lock()
+            agent_tasks = {}
+            seen_call_ids = set()
+            agent_lock = asyncio.Lock()
+            setup_complete = asyncio.Event()
+
+            async def run_agent_and_respond(call):
+                call_id = call["id"]
+                question = (call.get("args") or {}).get("question", "")
+                try:
+                    if not isinstance(question, str) or not question.strip():
+                        result = {"error": "The question is empty. Ask the user to repeat their question."}
+                    else:
+                        # Serialize requests that share chat history. A new tool
+                        # call does not mean the user interrupted an older one.
+                        async with agent_lock:
+                            answer = await _ask_agent(
+                                question=question.strip(),
+                                user_id=session_email,
+                                user_name=session_name,
+                                thread_id=voice_thread,
+                            )
+                        logger.info("Voice tool result: id=%s, %d chars", call_id, len(answer))
+                        result = {"output": answer}
+                    await gemini_ws.send(json.dumps({
+                        "tool_response": {"function_responses": [{
+                            "id": call_id,
+                            "name": call["name"],
+                            "response": result,
+                        }]}
+                    }))
+                except asyncio.CancelledError:
+                    # Cancelled calls must not receive empty or stale results.
+                    logger.info("Voice tool cancelled: id=%s", call_id)
+                    raise
+                except Exception:
+                    logger.exception("Voice tool response failed: id=%s", call_id)
+                finally:
+                    agent_tasks.pop(call_id, None)
 
             async def browser_to_gemini():
                 loop = asyncio.get_running_loop()
@@ -427,6 +394,7 @@ async def gemini_voice_proxy(websocket: WebSocket):
                         raw = await websocket.receive_text()
                         msg = json.loads(raw)
                         if msg.get("type") == "audio":
+                            await setup_complete.wait()
                             if stream_start_time is None:
                                 stream_start_time = loop.time()
                                 audio_seconds_sent = 0.0
@@ -457,7 +425,17 @@ async def gemini_voice_proxy(websocket: WebSocket):
                 try:
                     async for raw_msg in gemini_ws:
                         data = json.loads(raw_msg)
+                        if "setupComplete" in data:
+                            setup_complete.set()
                         server_content = data.get("serverContent", {})
+
+                        if server_content.get("interrupted"):
+                            await websocket.send_text(json.dumps({"type": "stop_audio"}))
+
+                        for call_id in data.get("toolCallCancellation", {}).get("ids", []):
+                            task = agent_tasks.get(call_id)
+                            if task is not None:
+                                task.cancel()
 
                         # forward audio and transcript to browser
                         for part in server_content.get("modelTurn", {}).get("parts", []):
@@ -486,88 +464,22 @@ async def gemini_voice_proxy(websocket: WebSocket):
                         if server_content.get("turnComplete"):
                             await websocket.send_text(json.dumps({"type": "turn_complete"}))
 
-                        # handle tool calls
+                        # Only provider cancellation events cancel pending calls.
+                        # Injecting client_content with turn_complete while waiting
+                        # starts another generation and can repeat the tool call.
                         for call in data.get("toolCall", {}).get("functionCalls", []):
-                            if call.get("name") == "ask_workmate_ai":
-                                question = call.get("args", {}).get("question", "")
-                                logger.info(f"Voice tool call: '{question[:80]}'")
-
-                                # cancel any previous in-progress agent call (user interrupted)
-                                async with current_agent_lock:
-                                    if current_agent_task[0] and not current_agent_task[0].done():
-                                        current_agent_task[0].cancel()
-                                        logger.info("Previous agent call cancelled — user interrupted")
-                                        try:
-                                            await current_agent_task[0]
-                                        except asyncio.CancelledError:
-                                            pass
-                                        # tell browser to stop playing current audio immediately
-                                        try:
-                                            await websocket.send_text(json.dumps({"type": "stop_audio"}))
-                                        except Exception:
-                                            pass
-
-                                # for interruptions while the pipeline runs
-                                filler = _pick_filler(question)
-                                await gemini_ws.send(json.dumps({
-                                    "client_content": {
-                                        "turns": [{"role": "model", "parts": [{"text": filler}]}],
-                                        "turn_complete": True,
-                                    }
-                                }))
-                                logger.info(f"Filler sent ({_detect_language(question)}): '{filler}'")
-
-                                async def run_agent_and_respond(q: str, call_name: str):
-                                    done_event = asyncio.Event()
-                                    keepalive_task = asyncio.create_task(
-                                        _gemini_keepalive(gemini_ws, done_event)
-                                    )
-                                    try:
-                                        answer = await _ask_agent(
-                                            question=q,
-                                            user_id=session_email,
-                                            user_name=session_name,
-                                            thread_id=voice_thread,
-                                        )
-                                        logger.info(f"Agent answer: {len(answer)} chars")
-
-                                        await gemini_ws.send(json.dumps({
-                                            "tool_response": {
-                                                "function_responses": [{
-                                                    "name": call_name,
-                                                    "response": {"output": answer},
-                                                }]
-                                            }
-                                        }))
-                                    except asyncio.CancelledError:
-                                        logger.info(f"Agent task cancelled for question: '{q[:50]}'")
-                                        # send empty tool response so Gemini doesn't hang waiting
-                                        try:
-                                            await gemini_ws.send(json.dumps({
-                                                "tool_response": {
-                                                    "function_responses": [{
-                                                        "name": call_name,
-                                                        "response": {"output": ""},
-                                                    }]
-                                                }
-                                            }))
-                                        except Exception:
-                                            pass
-                                        raise
-                                    finally:
-                                        done_event.set()
-                                        keepalive_task.cancel()
-                                        try:
-                                            await keepalive_task
-                                        except asyncio.CancelledError:
-                                            pass
-
-                                # so new tool calls (interruptions) can arrive and cancel this one
-                                # start agent in background task
-                                async with current_agent_lock:
-                                    current_agent_task[0] = asyncio.create_task(
-                                        run_agent_and_respond(question, "ask_workmate_ai")
-                                    )
+                            if call.get("name") != "ask_workmate_ai":
+                                continue
+                            call_id = call.get("id")
+                            if not call_id:
+                                logger.warning("Ignoring voice tool call without an id")
+                                continue
+                            if call_id in seen_call_ids:
+                                logger.info("Ignoring duplicate voice tool call: id=%s", call_id)
+                                continue
+                            seen_call_ids.add(call_id)
+                            logger.info("Voice tool call: id=%s", call_id)
+                            agent_tasks[call_id] = asyncio.create_task(run_agent_and_respond(call))
 
                 except Exception as e:
                     logger.error(f"gemini_to_browser error: {e}")
@@ -576,7 +488,21 @@ async def gemini_voice_proxy(websocket: WebSocket):
                     except Exception:
                         pass
 
-            await asyncio.gather(browser_to_gemini(), gemini_to_browser())
+            relay_tasks = [
+                asyncio.create_task(browser_to_gemini()),
+                asyncio.create_task(gemini_to_browser()),
+            ]
+            try:
+                # Either peer ending the call ends the whole session.
+                await asyncio.wait(relay_tasks, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                for task in relay_tasks:
+                    task.cancel()
+                await asyncio.gather(*relay_tasks, return_exceptions=True)
+                pending = list(agent_tasks.values())
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
 
     except Exception as e:
         logger.error(f"Gemini voice proxy error: {e}")
