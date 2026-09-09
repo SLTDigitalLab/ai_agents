@@ -107,3 +107,13 @@ async def get_async_postgres_checkpointer(agent_id: str):
         checkpointer = AsyncPostgresSaver(pool)
         await checkpointer.setup()
         yield checkpointer
+
+
+def close_sync_pools():
+    """Close all synchronous database connections pools."""
+    pass
+
+async def aclose_async_pools():
+    """Close all asynchronous database connections pools."""
+    pass
+
