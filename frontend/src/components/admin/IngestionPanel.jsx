@@ -190,7 +190,6 @@ const IngestionPanel = () => {
     };
 
     // ── OneDrive Ingestion Handler ──
-    
     const handleOneDriveIngest = async (e) => {
         e.preventDefault();
         if (!odForm.folder_id.trim() || !odForm.token.trim()) return;
@@ -198,19 +197,10 @@ const IngestionPanel = () => {
         setOdLoading(true);
         setStatus(null);
         try {
-
-            const token = odForm.token.trim();
-
-            
-            const payload = {
-                ...odForm,
-                access_token: token,
-            };
-
             const res = await fetch(`${API_BASE}/ingest-onedrive`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json'},
-                body: JSON.stringify({ ...payload, user_email: userEmail }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...odForm, user_email: userEmail }),
             });
             const data = await res.json();
 
@@ -234,8 +224,6 @@ const IngestionPanel = () => {
             }
         } catch (err) {
             setStatus({ type: 'error', title: 'Ingestion Failed', message: err.message });
-            
-        }finally{
             setOdLoading(false);
         }
     };
