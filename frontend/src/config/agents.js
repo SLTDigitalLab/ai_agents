@@ -177,6 +177,18 @@ export const AGENTS = {
         idlePrompt: "Describe your IT issue, search for instructional guides, or ask for an update on your existing ticket status.",
         disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
 
+    },
+
+    // 13.Helpdesk Agent (n8n workflow integration)
+    helpdesk_dev: {
+        id: "helpdesk_dev",
+        title: "ASK HELPDESK",
+        subtitle: "Your AI-powered Knowledge Assistant for instant solutions, troubleshooting, and automated IT ticket management.",
+        color: "from-purple-900 to-purple-600",
+        buttonColor: "bg-purple-600 hover:bg-purple-700",
+        idlePrompt: "Describe your IT issue, search for instructional guides, or ask for an update on your existing ticket status.",
+        disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
+
     }
 };
 

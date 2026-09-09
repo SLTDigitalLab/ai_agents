@@ -14,6 +14,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from core.checkpointer import get_postgres_checkpointer, get_async_postgres_checkpointer
 from domain.registry import get_agent_builder
 from domain.guardrails import classify_intent
+from domain.archetypes.helpdesk_agent import INTERNAL_LLM_TAG
 from schemas.chat import ChatRequest
 from langchain_core.tracers.context import tracing_v2_enabled
 
@@ -158,7 +159,7 @@ async def chat(request: ChatRequest):
                     # We must also match on ``langgraph_checkpoint_ns`` (a
                     # namespace string like "multi_delegate:<hash>|agent:<hash>")
                     # to suppress nested events too.
-                    SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
+                    SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query", "classify_message"}
                     logged_metadata_sample = False
 
                     # ── DeepSeek-R1 <think> stripper ─────────────
@@ -188,12 +189,21 @@ async def chat(request: ChatRequest):
 
                             node = metadata.get("langgraph_node")
                             checkpoint_ns = metadata.get("langgraph_checkpoint_ns") or ""
+                            # INTERNAL_LLM_TAG catches internal-only LLM calls that
+                            # run INSIDE a node that also produces a legitimate
+                            # user-facing reply later in the same call (e.g.
+                            # helpdesk's draft_ticket() classification passes) —
+                            # node-name suppression alone can't tell those apart
+                            # from the real reply, since both share the same node
+                            # name. See domain.archetypes.helpdesk_agent's
+                            # INTERNAL_LLM_TAG docstring for the bug this fixes.
                             suppressed = (
                                 node in SUPPRESS_STREAM_NODES
                                 or any(
                                     suppressed_node in checkpoint_ns
                                     for suppressed_node in SUPPRESS_STREAM_NODES
                                 )
+                                or INTERNAL_LLM_TAG in (event.get("tags") or [])
                             )
                             if suppressed:
                                 continue

@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     
     # LLM and Embedding Configuration
-    LLM_PROVIDER: str = "gemini" # 'gemini', 'openai'
-    LLM_MODEL: str = "gemini-3-flash-preview"
+    LLM_PROVIDER: str = "openai" # 'gemini', 'openai'
+    LLM_MODEL: str = "gpt-4o-mini"
     LLM_API_KEY: Optional[str] = None
     LLM_BASE_URL: Optional[str] = None
     
