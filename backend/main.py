@@ -16,7 +16,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, voice, lifestore_mcp_chat, lifestore_payments
+from routers.voice_agent import realtime, lifestore_realtime
 from services.ingestion import router as ingestion_router
 from core.config import evidence_storage_dir, settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
@@ -74,8 +75,13 @@ app.include_router(enterprise.router)
 app.include_router(admin_dashboard.router)  
 app.include_router(feedback.router)  
 app.include_router(finance.router)  
-app.include_router(kb_retrieval.router)  
+app.include_router(kb_retrieval.router)
 app.include_router(ingestion_router)
+app.include_router(voice.router)
+app.include_router(realtime.router)
+app.include_router(lifestore_realtime.router)
+app.include_router(lifestore_mcp_chat.router)
+app.include_router(lifestore_payments.router)
 
 @app.get("/")
 def read_root():
