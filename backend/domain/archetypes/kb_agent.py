@@ -1,7 +1,8 @@
 """
 Archetype 1 - Knowledge-Base-only agent graph.
 
-Used by: Ask Finance, Ask Admin, Ask Process.
+Used by standalone knowledge-base agents such as Ask Finance, Ask Admin,
+Ask Process, and Ask SCM.
 
 Flow:
     START ──► agent (LLM) ──► tools_condition ──► tools (RAG) ──► agent ──► END
@@ -78,6 +79,19 @@ AGENT_PROFILES: dict[str, dict[str, str]] = {
             "requests before answering, and you must never decline without searching first."
         ),
         "out_of_scope": "clearly unrelated to MintCRM (for example an internal HR, Finance, or Admin policy question)",
+    },
+    "scm": {
+        "name": "Ask SCM",
+        "identity": (
+            "You are Ask SCM, SLTMobitel's Supply Chain Management knowledge-base "
+            "assistant. You help employees find authoritative SCM information about "
+            "procurement, sourcing, purchasing, tenders, suppliers and vendors, contracts, "
+            "inventory, warehousing, logistics, and related policies and procedures.\n"
+            "Questions in these areas are squarely in scope. You MUST call "
+            "`search_knowledge_base` before answering them and must base your answer only "
+            "on retrieved SCM knowledge."
+        ),
+        "out_of_scope": "clearly unrelated to Supply Chain Management (for example an HR leave or IT support question)",
     },
     "embryo": {
         "name": "Ask Embryo",

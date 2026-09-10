@@ -26,6 +26,7 @@ const AGENT_COLORS = {
   enterprise_business: { bg: 'from-violet-500/10 to-violet-600/5', border: 'border-violet-500/20', text: 'text-violet-300', badge: 'bg-violet-500/20 text-violet-300' },
   consumer_business: { bg: 'from-green-500/10 to-green-600/5', border: 'border-green-500/20', text: 'text-green-300', badge: 'bg-green-500/20 text-green-300' },
   mintcrm: { bg: 'from-lime-500/10 to-lime-600/5', border: 'border-lime-500/20', text: 'text-lime-300', badge: 'bg-lime-500/20 text-lime-300' },
+  scm: { bg: 'from-teal-500/10 to-cyan-600/5', border: 'border-teal-500/20', text: 'text-teal-300', badge: 'bg-teal-500/20 text-teal-200' },
 };
 
 const DEFAULT_COLOR = {
