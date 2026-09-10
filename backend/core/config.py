@@ -111,6 +111,16 @@ class Settings(BaseSettings):
 
     LIFESTORE_QDRANT_COLLECTION: str = "lifestore_docs"
 
+    # PayHere payment gateway (LifeStore checkout). Sandbox by default.
+    PAYHERE_MERCHANT_ID: Optional[str] = None
+    PAYHERE_MERCHANT_SECRET: Optional[str] = None
+    PAYHERE_SANDBOX: bool = True
+    PAYHERE_APP_ID: Optional[str] = None
+    PAYHERE_APP_SECRET: Optional[str] = None
+    PAYHERE_NOTIFY_URL: Optional[str] = None
+    APP_BASE_URL: Optional[str] = None
+    FRONTEND_BASE_URL: Optional[str] = None
+
     class Config:
         env_file = ".env"
         extra = "ignore"

@@ -276,9 +276,9 @@ async def gemini_voice_proxy(websocket: WebSocket):
                 }))
             return
 
-        project_id = settings.PROJECT_ID
+        project_id = settings.VERTEX_PROJECT_ID
         if not project_id:
-            await websocket.send_text(json.dumps({"type": "error", "message": "PROJECT_ID not set in .env"}))
+            await websocket.send_text(json.dumps({"type": "error", "message": "VERTEX_PROJECT_ID not set in .env"}))
             return
 
         region = "us-central1"

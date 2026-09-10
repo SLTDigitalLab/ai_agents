@@ -326,12 +326,12 @@ async def lifestore_voice_proxy(websocket: WebSocket):
             })
             return
 
-        project_id = settings.PROJECT_ID
-        region = settings.LOCATION or "us-central1"
+        project_id = settings.VERTEX_PROJECT_ID
+        region = settings.VERTEX_LOCATION or "us-central1"
         if not project_id:
             await websocket.send_json({
                 "type": "error",
-                "message": "PROJECT_ID not set in .env",
+                "message": "VERTEX_PROJECT_ID not set in .env",
             })
             return
 
