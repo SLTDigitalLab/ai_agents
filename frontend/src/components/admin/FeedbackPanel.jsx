@@ -81,6 +81,11 @@ const AGENT_COLORS = {
         badge: 'bg-lime-500/20 border-lime-500/25 text-lime-200',
         text: 'text-lime-300',
     },
+    scm: {
+        card: 'bg-teal-500/10 border-teal-500/20',
+        badge: 'bg-teal-500/20 border-teal-500/25 text-teal-200',
+        text: 'text-teal-300',
+    },
 };
 
 const DEFAULT_COLOR = {

@@ -44,7 +44,8 @@ const AGENT_TAGS = {
   lifestore: ["Products Info", "Smart Home", "Store Orders", "Inventory"],
   network: ["IP Routing", "WAN/LAN Setup", "NOC Alerts", "Fiber"],
   legal: ["Agreements", "Statutory Checks", "Court Files", "Contracts"],
-  marketing: ["Brand Policy", "Campaigns", "Promotions", "Logo Rules"]
+  marketing: ["Brand Policy", "Campaigns", "Promotions", "Logo Rules"],
+  scm: ["Procurement", "Sourcing", "Vendors", "Inventory", "Logistics"]
 };
 
 // Map agent ID to Category Grouping
@@ -61,7 +62,8 @@ const AGENT_CATEGORIES = {
   lifestore: "Technical Support",
   network: "Technical Support",
   legal: "Finance & Legal",
-  marketing: "General"
+  marketing: "General",
+  scm: "Finance & Legal"
 };
 
 // Animation variants

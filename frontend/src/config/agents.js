@@ -200,7 +200,18 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the MintCRM support team."
     },
 
-    // 16. Embryo (public — knowledge base crawled from the Embryo website)
+    // 16. Supply Chain Management (knowledge base only)
+    askscm: {
+        id: "scm",
+        title: "ASK SCM",
+        subtitle: "Supply chain guidance covering procurement, sourcing, inventory, logistics, vendors, and related procedures.",
+        color: "from-cyan-900 to-teal-600",
+        buttonColor: "bg-teal-600 hover:bg-teal-700",
+        idlePrompt: "Ask about supply chain policies, procurement, vendors, inventory, or logistics.",
+        disclaimer: "If you need any further clarifications, please reach out to the Supply Chain Management team."
+    },
+
+    // 17. Embryo (public — knowledge base crawled from the Embryo website)
     askembryo: {
         public: true,
         id: "embryo",
