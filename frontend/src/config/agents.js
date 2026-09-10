@@ -142,5 +142,16 @@ export const AGENTS = {
         buttonColor: "bg-pink-600 hover:bg-pink-700",
         idlePrompt: "Ask about marketing campaigns, logo guidelines, or branding standards.",
         disclaimer: "If you need any further clarifications, please reach out to the Marketing & Communications department."
+    },
+
+    // 11. Supply Chain Management (knowledge base only)
+    askscm: {
+        id: "scm",
+        title: "ASK SCM",
+        subtitle: "Supply chain guidance covering procurement, sourcing, inventory, logistics, vendors, and related procedures.",
+        color: "from-cyan-900 to-teal-600",
+        buttonColor: "bg-teal-600 hover:bg-teal-700",
+        idlePrompt: "Ask about supply chain policies, procurement, vendors, inventory, or logistics.",
+        disclaimer: "If you need any further clarifications, please reach out to the Supply Chain Management team."
     }
 };

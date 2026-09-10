@@ -21,6 +21,7 @@ const AGENT_COLORS = {
     network: { bg: 'bg-teal-500/10', border: 'border-teal-500/20', text: 'text-teal-400' },
     legal: { bg: 'bg-amber-500/10', border: 'border-amber-500/20', text: 'text-amber-400' },
     marketing: { bg: 'bg-pink-500/10', border: 'border-pink-500/20', text: 'text-pink-400' },
+    scm: { bg: 'bg-teal-500/10', border: 'border-teal-500/20', text: 'text-teal-400' },
 };
 
 const DEFAULT_COLOR = { bg: 'bg-cyan-500/10', border: 'border-cyan-500/20', text: 'text-cyan-400' };

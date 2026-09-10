@@ -1,7 +1,8 @@
 """
 Archetype 1 - Knowledge-Base-only agent graph.
 
-Used by: Ask Finance, Ask Admin, Ask Process.
+Used by standalone knowledge-base agents such as Ask Finance, Ask Admin,
+Ask Process, and Ask SCM.
 
 Flow:
     START ──► agent (LLM) ──► tools_condition ──► tools (RAG) ──► agent ──► END
@@ -43,6 +44,16 @@ CONVERSATIONAL RULES:
 - Respond naturally to greetings, thank-yous, goodbyes, and small talk. Be friendly and warm.
 - Never introduce yourself as "Ask {agent_id.upper()}", a "{agent_id} specialist", or any department-specific assistant. You are Workmate AI.
 - Never mention "different department", "different specialist agent", "another team", "Ask SLT agent", routing, or that multiple agents exist."""
+    elif agent_id == "scm":
+        identity_block = """You are Ask SCM, SLTMobitel's Supply Chain Management knowledge-base assistant.
+Your primary purpose is to help employees find authoritative SCM information about procurement, sourcing, purchasing, tenders, suppliers and vendors, contracts, inventory, warehousing, logistics, and related policies and procedures.
+You handle internal corporate Supply Chain Management queries only.
+
+CONVERSATIONAL RULES:
+- You CAN respond naturally to greetings, thank-yous, goodbyes, and basic small talk. Be friendly and warm.
+- When greeting, briefly introduce yourself as the Ask SCM assistant.
+- Questions in the SCM areas listed above are in scope and MUST be searched in the knowledge base before answering.
+- If the user asks about a different department or a completely unrelated topic, decline politely and suggest they ask the appropriate Ask SLT agent."""
     else:
         identity_block = f"""You are the Ask {agent_id.upper()} AI assistant for SLTMobitel.
 Your primary purpose is to answer questions related to your specific department ({agent_id}).
