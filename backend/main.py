@@ -1,4 +1,10 @@
 import logging
+from dotenv import load_dotenv
+from fastapi.staticfiles import StaticFiles
+
+# --- 0. Load Environment Variables First ---
+# This ensures Langfuse (and other services) pick up the .env credentials immediately
+load_dotenv()
 
 
 
@@ -7,17 +13,87 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s | %(message)s",
 )
 
+from pathlib import Path
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat
 from routers.helpdesk import router as helpdesk_router
 from services.ingestion import router as ingestion_router
+from core.config import settings
+from core.checkpointer import close_sync_pools, aclose_async_pools
+
+from fastapi.openapi.utils import get_openapi
+
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage shared resources for the app's lifetime.
+
+    Checkpointer connection pools are created lazily on first use (per agent)
+    and live for the whole process; we close them cleanly on shutdown.
+    """
+    yield
+    await aclose_async_pools()
+    close_sync_pools()
+
+def custom_openapi():
+    """Configure OpenAPI schema with Azure AD security scheme."""
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+
+    openapi_schema["components"]["securitySchemes"] = {
+        "bearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Azure AD bearer token",
+        }
+    }
+
+    # Overwrite FastAPI's HTTPBearer scheme name so Swagger Authorize
+    # (bearerAuth) actually attaches the Authorization header.
+    http_methods = {"get", "post", "put", "delete", "patch", "options", "head", "trace"}
+    for path in openapi_schema["paths"].values():
+        for method, operation in path.items():
+            if method.lower() in http_methods and isinstance(operation, dict):
+                operation["security"] = [{"bearerAuth": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
 
 app = FastAPI(
     title="Ask SLT API",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    lifespan=lifespan,
+)
+
+app.openapi = custom_openapi
+
+# --- Evidence image storage ---
+# Cropped PDF image/table previews are rendered during ingestion and served
+# as static files so the frontend can display them as "Relevant Evidence".
+evidence_dir = Path(settings.EVIDENCE_STORAGE_DIR)
+if not evidence_dir.is_absolute():
+    evidence_dir = Path(__file__).resolve().parent / evidence_dir
+
+evidence_dir.mkdir(parents=True, exist_ok=True)
+
+app.mount(
+    settings.EVIDENCE_URL_PREFIX,
+    StaticFiles(directory=str(evidence_dir)),
+    name="evidence_images",
 )
 
 # --- 1. Add CORS Middleware ---
@@ -31,7 +107,7 @@ app.add_middleware(
 
 # --- 2. Register Routers ---
 app.include_router(admin.router)
-app.include_router(chat.router)  # Connect the new chat endpoint
+app.include_router(chat.router)  # The Langfuse logic goes inside here!
 app.include_router(orders.router)  # LifeStore order submissions
 app.include_router(enterprise.router)  # Enterprise lead → Bitrix24
 app.include_router(admin_dashboard.router)  # Admin dashboard panel
@@ -40,6 +116,8 @@ app.include_router(finance.router)  # External Finance KB retrieval (voice assis
 app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev local → prod vectors)
 app.include_router(helpdesk_router)  # Helpdesk ticket storage/viewing
 app.include_router(ingestion_router)
+app.include_router(contact.router)  # Contact Us email form
+app.include_router(lifestore_mcp_chat.router)  # Ask LifeStore MCP chat (/api/v1/lifestore/*)
 
 @app.get("/")
 def read_root():

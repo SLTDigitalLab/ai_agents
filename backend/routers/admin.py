@@ -75,9 +75,42 @@ class OneDriveIngestRequest(BaseModel):
     user_email: str | None = None
 
 
+class SharePointIngestRequest(BaseModel):
+    site_url: str
+    folder_path: str
+    token: str
+    agent_name: str
+    force: bool = False   
+
+class KBListRequest(BaseModel):
+    agent_name: str
+    user_email: str | None = None
+
+
+class KBDeleteDocumentRequest(BaseModel):
+    agent_name: str
+    document_id: str | None = None
+    source: str | None = None
+    user_email: str | None = None
+
+
+class KBDeleteAgentRequest(BaseModel):
+    agent_name: str
+    user_email: str | None = None    
+
 class TestLeaveBalanceRequest(BaseModel):
     sid: str
 
+class KBListChunksRequest(BaseModel):
+    agent_name: str
+    document_id: str | None = None
+    source: str | None = None
+    user_email: str | None = None
+
+class KBDeleteChunkRequest(BaseModel):
+    agent_name: str
+    point_id: str
+    user_email: str | None = None
 
 def _normalize_url(url: str) -> str:
     """
@@ -472,6 +505,43 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
     }
 
 
+@router.post("/ingest-sharepoint")
+async def process_sharepoint_ingestion_api(request: SharePointIngestRequest):
+    """
+    Process SharePoint Ingestion API - Ingest PDFs, Word docs, PowerPoint,
+    Excel, images, and EML files from a SharePoint document library folder
+    using Microsoft Graph.
+
+    Runs in the background; poll /ingestion-status for completion.
+    """
+    current = ingestion_status.get_status()
+    if current.get("active"):
+        raise HTTPException(status_code=409, detail="Another ingestion job is already running.")
+
+    ingestion_status.start(agent_name=request.agent_name, source="sharepoint")
+
+    asyncio.create_task(
+        _run_ingestion_task(
+            ingestion_service.process_sharepoint_ingestion(
+                site_url=request.site_url,
+                folder_path=request.folder_path,
+                access_token=request.token,
+                agent_name=request.agent_name,
+                force=request.force,
+            ),
+            label=(
+                f"SharePoint agent='{request.agent_name}' "
+                f"site_url='{request.site_url}' folder_path='{request.folder_path}'"
+            ),
+        )
+    )
+
+    return {
+        "status": "started",
+        "agent_name": request.agent_name,
+        "source": "sharepoint",
+    }
+
 @router.get("/ingestion-status")
 async def get_ingestion_status():
     """
@@ -480,6 +550,98 @@ async def get_ingestion_status():
     """
     return ingestion_status.get_status()
 
+@router.post("/kb-documents")
+async def list_kb_documents(request: KBListRequest):
+    """
+    List documents currently stored in the selected agent KB.
+    """
+    require_agent_access(request.user_email, request.agent_name)
+
+    result = await asyncio.to_thread(
+        ingestion_service.list_kb_documents,
+        request.agent_name,
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("message"))
+
+    return result
+
+
+@router.post("/delete-kb-document")
+async def delete_kb_document(request: KBDeleteDocumentRequest):
+    """
+    Delete one document from selected agent KB.
+    """
+    require_agent_access(request.user_email, request.agent_name)
+
+    result = await asyncio.to_thread(
+        ingestion_service.delete_kb_document,
+        request.agent_name,
+        request.document_id,
+        request.source,
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("message"))
+
+    return result
+
+
+@router.post("/delete-agent-kb")
+async def delete_agent_kb(request: KBDeleteAgentRequest):
+    """
+    Delete full KB collection for selected agent.
+    """
+    require_agent_access(request.user_email, request.agent_name)
+
+    result = await asyncio.to_thread(
+        ingestion_service.delete_agent_kb,
+        request.agent_name,
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("message"))
+
+    return result
+
+@router.post("/kb-document-chunks")
+async def list_kb_document_chunks(request: KBListChunksRequest):
+    """
+    List all chunks for one document in selected agent KB.
+    """
+    require_agent_access(request.user_email, request.agent_name)
+
+    result = await asyncio.to_thread(
+        ingestion_service.list_kb_document_chunks,
+        request.agent_name,
+        request.document_id,
+        request.source,
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("message"))
+
+    return result
+
+
+@router.post("/delete-kb-chunk")
+async def delete_kb_chunk(request: KBDeleteChunkRequest):
+    """
+    Delete one selected chunk from selected agent KB.
+    """
+    require_agent_access(request.user_email, request.agent_name)
+
+    result = await asyncio.to_thread(
+        ingestion_service.delete_kb_chunk,
+        request.agent_name,
+        request.point_id,
+    )
+
+    if result.get("status") == "error":
+        raise HTTPException(status_code=500, detail=result.get("message"))
+
+    return result
 
 @router.post("/test-leave-balance")
 async def test_leave_balance(request: TestLeaveBalanceRequest):

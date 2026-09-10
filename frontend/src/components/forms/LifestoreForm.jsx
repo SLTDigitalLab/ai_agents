@@ -1,35 +1,157 @@
-import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import React, { useRef, useState } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const isLocalHost =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1"].includes(window.location.hostname);
 
-const LifestoreForm = () => {
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (isLocalHost ? `${window.location.protocol}//${window.location.hostname}:8100` : "");
+const PRODUCT_SEARCH_DEBOUNCE_MS = 300;
+
+const LifestoreForm = ({ onSuccess } = {}) => {
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState('');
+    const [submitNotice, setSubmitNotice] = useState('');
+    const [submittedData, setSubmittedData] = useState(null);
+    const [searchError, setSearchError] = useState('');
     const [formData, setFormData] = useState({
-        product: '',
         fullName: '',
         deliveryAddress: '',
         phone: '',
+        email: '',
+        city: '',
+        note: '',
     });
+
+    const [productQuery, setProductQuery] = useState('');
+    const [productId, setProductId] = useState('');
+    const [productSuggestions, setProductSuggestions] = useState([]);
+    const [showProductSuggestions, setShowProductSuggestions] = useState(false);
+    const [isCustomRequest, setIsCustomRequest] = useState(false);
+    const [customProduct, setCustomProduct] = useState('');
+    const productSearchTimeout = useRef(null);
 
     const handleChange = (e) => {
         setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
     };
 
+    const handleProductInputChange = (e) => {
+        const value = e.target.value;
+        setProductQuery(value);
+        setProductId('');
+        setSearchError('');
+
+        if (productSearchTimeout.current) {
+            clearTimeout(productSearchTimeout.current);
+        }
+
+        if (!value.trim()) {
+            setProductSuggestions([]);
+            setShowProductSuggestions(false);
+            return;
+        }
+
+        productSearchTimeout.current = setTimeout(async () => {
+            try {
+                const response = await fetch(
+                    `${API_URL}/api/v1/orders/products/search?q=${encodeURIComponent(value)}`
+                );
+                if (!response.ok) {
+                    throw new Error(`Search failed (HTTP ${response.status})`);
+                }
+                const body = await response.json();
+                setProductSuggestions(body?.results || []);
+                setShowProductSuggestions(true);
+            } catch (err) {
+                console.error('Product search failed:', err);
+                setSearchError('Product search is temporarily unavailable. You can still type, but selecting a catalog match is required to submit.');
+                setProductSuggestions([]);
+                setShowProductSuggestions(false);
+            }
+        }, PRODUCT_SEARCH_DEBOUNCE_MS);
+    };
+
+    const handleProductSelect = (product) => {
+        setProductQuery(product.name);
+        setProductId(product.product_id);
+        setShowProductSuggestions(false);
+        setProductSuggestions([]);
+        setSearchError('');
+    };
+
+    const handleSwitchToCustomRequest = () => {
+        setIsCustomRequest(true);
+        setProductQuery('');
+        setProductId('');
+        setProductSuggestions([]);
+        setShowProductSuggestions(false);
+        setSearchError('');
+    };
+
+    const handleSwitchToCatalogSearch = () => {
+        setIsCustomRequest(false);
+        setCustomProduct('');
+    };
+
     const handleCancel = () => {
-        setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '' });
+        setFormData({ fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
+        setProductQuery('');
+        setProductId('');
+        setProductSuggestions([]);
+        setShowProductSuggestions(false);
+        setSearchError('');
+        setIsCustomRequest(false);
+        setCustomProduct('');
         setError('');
+        setSubmitNotice('');
+        setSubmittedData(null);
+    };
+
+    const buildApiErrorMessage = (responseStatus, responseBody) => {
+        const detail = responseBody?.detail;
+        if (typeof detail === 'string' && detail.trim()) {
+            return detail;
+        }
+
+        if (Array.isArray(detail) && detail.length > 0) {
+            return detail
+                .map((item) => item?.msg)
+                .filter(Boolean)
+                .join(', ');
+        }
+
+        if (typeof responseBody?.message === 'string' && responseBody.message.trim()) {
+            return responseBody.message;
+        }
+
+        return `Order submission failed (HTTP ${responseStatus}). Please try again.`;
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setSubmitNotice('');
 
-        // Client-side required-field validation
-        if (!formData.fullName.trim() || !formData.deliveryAddress.trim() || !formData.phone.trim()) {
+        if (
+            !formData.fullName.trim() ||
+            !formData.deliveryAddress.trim() ||
+            !formData.phone.trim() ||
+            !formData.email.trim() ||
+            !formData.city.trim()
+        ) {
             setError('Please fill in all required fields.');
+            return;
+        }
+
+        if (isCustomRequest) {
+            if (!customProduct.trim()) {
+                setError("Please describe the product you're looking for.");
+                return;
+            }
+        } else if (!productId) {
+            setError('Please select a product from the search suggestions.');
             return;
         }
 
@@ -38,16 +160,43 @@ const LifestoreForm = () => {
             const response = await fetch(`${API_URL}/api/v1/orders/submit`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData),
+                body: JSON.stringify({
+                    ...formData,
+                    product: isCustomRequest ? customProduct.trim() : (productQuery || undefined),
+                    product_id: isCustomRequest ? undefined : (productId || undefined),
+                    is_custom_request: isCustomRequest,
+                }),
             });
 
-            if (!response.ok) {
-                throw new Error(`Server error: ${response.status}`);
+            let responseBody = null;
+            try {
+                responseBody = await response.json();
+            } catch {
+                responseBody = null;
             }
 
-            // Success
+            if (!response.ok) {
+                setError(buildApiErrorMessage(response.status, responseBody));
+                return;
+            }
+
+            const apiStatus = (responseBody?.status || '').toLowerCase();
+            if (apiStatus && apiStatus !== 'success') {
+                setError(responseBody?.message || 'Order could not be completed fully. Please contact support.');
+                return;
+            }
+
+            setSubmitNotice(responseBody?.message || 'Order placed successfully.');
+
+            const payload = { ...formData, product: isCustomRequest ? customProduct.trim() : productQuery };
+            setSubmittedData(payload);
             setIsSubmitted(true);
-            setFormData({ product: '', fullName: '', deliveryAddress: '', phone: '' });
+            setFormData({ fullName: '', deliveryAddress: '', phone: '', email: '', city: '', note: '' });
+            setProductQuery('');
+            setProductId('');
+            setIsCustomRequest(false);
+            setCustomProduct('');
+            onSuccess?.(payload);
         } catch (err) {
             console.error('Order submission failed:', err);
             setError('Failed to submit order. Please try again.');
@@ -56,41 +205,54 @@ const LifestoreForm = () => {
         }
     };
 
-    // ── Success state ───────────────────────────────────────────────────
     if (isSubmitted) {
         return (
-            <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.4, ease: 'easeOut' }}
-                className="w-full my-3"
-            >
+            <div className="w-full my-3">
                 <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-2xl p-6 flex flex-col items-center text-center">
                     <svg className="w-12 h-12 text-green-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
                     </svg>
-                    <h3 className="text-lg font-bold text-green-800">Order Submitted!</h3>
-                    <p className="text-sm text-green-600 mt-1">
+                    <h3 className="text-base font-bold text-green-800">Order Submitted!</h3>
+                    <p className="text-xs text-green-600 mt-1">
                         Thank you. The Lifestore team will contact you shortly.
                     </p>
+                    {submitNotice && (
+                        <p className="text-xs text-green-700 mt-2 font-medium">{submitNotice}</p>
+                    )}
+
+                    {submittedData && (
+                        <div className="mt-4 w-full max-w-md rounded-xl border border-green-100 bg-white/80 p-4 text-left shadow-sm">
+                            <p className="text-xs font-semibold uppercase tracking-wider text-green-700 mb-3">
+                                Submitted details
+                            </p>
+                            <div className="space-y-2 text-xs text-gray-700">
+                                <div className="flex justify-between gap-3">
+                                    <span className="text-gray-500">Email</span>
+                                    <span className="font-medium text-gray-800 text-right">{submittedData.email}</span>
+                                </div>
+                                <div className="flex justify-between gap-3">
+                                    <span className="text-gray-500">City / Area</span>
+                                    <span className="font-medium text-gray-800 text-right">{submittedData.city}</span>
+                                </div>
+                                <div className="flex justify-between gap-3 items-start">
+                                    <span className="text-gray-500">Order note</span>
+                                    <span className="font-medium text-gray-800 text-right whitespace-pre-wrap">
+                                        {submittedData.note || 'N/A'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
-            </motion.div>
+            </div>
         );
     }
 
-    // ── Form state ──────────────────────────────────────────────────────
     return (
-        <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, ease: 'easeOut' }}
-            className="w-full my-3"
-        >
+        <div className="w-full my-3">
             <div className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm">
-                {/* Title */}
                 <h3 className="text-lg font-bold text-gray-800 mb-4">Please fill the form</h3>
 
-                {/* Error banner */}
                 {error && (
                     <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">
                         {error}
@@ -98,20 +260,90 @@ const LifestoreForm = () => {
                 )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Product (optional) */}
-                    <div>
+                    <div className="relative">
                         <label className="block text-sm text-gray-600 mb-1">Product</label>
+
+                        {!isCustomRequest ? (
+                            <>
+                                <input
+                                    type="text"
+                                    name="productSearch"
+                                    placeholder="Start typing to search products..."
+                                    value={productQuery}
+                                    onChange={handleProductInputChange}
+                                    onFocus={() => productSuggestions.length > 0 && setShowProductSuggestions(true)}
+                                    onBlur={() => setTimeout(() => setShowProductSuggestions(false), 150)}
+                                    autoComplete="off"
+                                    className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
+                                />
+                                {productId && (
+                                    <p className="text-xs text-green-600 mt-1">Selected from catalog ✓</p>
+                                )}
+                                {searchError && (
+                                    <p className="text-xs text-red-500 mt-1">{searchError}</p>
+                                )}
+                                {showProductSuggestions && productSuggestions.length > 0 && (
+                                    <ul className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto bg-white border border-gray-200 rounded-md shadow-lg">
+                                        {productSuggestions.map((product) => (
+                                            <li key={product.product_id}>
+                                                <button
+                                                    type="button"
+                                                    onMouseDown={(e) => e.preventDefault()}
+                                                    onClick={() => handleProductSelect(product)}
+                                                    className="w-full text-left px-3 py-2 text-sm hover:bg-green-50 flex justify-between gap-2"
+                                                >
+                                                    <span className="text-gray-700">{product.name}</span>
+                                                    {product.price && (
+                                                        <span className="text-gray-400 whitespace-nowrap">{product.price}</span>
+                                                    )}
+                                                </button>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={handleSwitchToCustomRequest}
+                                    className="text-xs text-green-600 hover:text-green-700 underline mt-1"
+                                >
+                                    Can't find your product? Request it
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <textarea
+                                    placeholder="Describe the product you're looking for..."
+                                    rows={2}
+                                    value={customProduct}
+                                    onChange={(e) => setCustomProduct(e.target.value)}
+                                    className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all resize-none"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={handleSwitchToCatalogSearch}
+                                    className="text-xs text-gray-500 hover:text-gray-700 underline mt-1"
+                                >
+                                    Search the catalog instead
+                                </button>
+                            </>
+                        )}
+                    </div>
+
+                    <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                            Email <span className="text-red-500">*</span>
+                        </label>
                         <input
-                            type="text"
-                            name="product"
-                            placeholder="e.g., router / Archer AX20"
-                            value={formData.product}
+                            type="email"
+                            name="email"
+                            placeholder="e.g., saman@example.com"
+                            value={formData.email}
                             onChange={handleChange}
+                            required
                             className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
                         />
                     </div>
 
-                    {/* Full Name (required) */}
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Full Name <span className="text-red-500">*</span>
@@ -127,7 +359,21 @@ const LifestoreForm = () => {
                         />
                     </div>
 
-                    {/* Delivery Address (required) */}
+                    <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                            City / Area <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                            type="text"
+                            name="city"
+                            placeholder="e.g., Colombo"
+                            value={formData.city}
+                            onChange={handleChange}
+                            required
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all"
+                        />
+                    </div>
+
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Delivery Address <span className="text-red-500">*</span>
@@ -143,7 +389,20 @@ const LifestoreForm = () => {
                         />
                     </div>
 
-                    {/* Phone (required) */}
+                    <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                            Order Note
+                        </label>
+                        <textarea
+                            name="note"
+                            placeholder="Add delivery instructions or extra notes"
+                            rows={3}
+                            value={formData.note}
+                            onChange={handleChange}
+                            className="w-full border border-gray-300 rounded-md p-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-300 focus:border-green-300 transition-all resize-none"
+                        />
+                    </div>
+
                     <div>
                         <label className="block text-sm text-gray-600 mb-1">
                             Phone <span className="text-red-500">*</span>
@@ -159,7 +418,6 @@ const LifestoreForm = () => {
                         />
                     </div>
 
-                    {/* Action buttons */}
                     <div className="flex justify-end gap-4 mt-4">
                         <button
                             type="button"
@@ -178,7 +436,7 @@ const LifestoreForm = () => {
                     </div>
                 </form>
             </div>
-        </motion.div>
+        </div>
     );
 };
 

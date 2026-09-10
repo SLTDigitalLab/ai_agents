@@ -6,7 +6,7 @@ export const AGENTS = {
         subtitle: "Your unified SLTMobitel workplace assistant. Ask anything about HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
         color: "from-cyan-900 to-cyan-600",
         buttonColor: "bg-cyan-600 hover:bg-cyan-700",
-        idlePrompt: "Ask me about HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
+        idlePrompt: "Ask me about policies and procedures of HR, Finance, IT, Admin, CIA, Network, Legal, Marketing, Enterprise Business, or Consumer Business.",
         disclaimer: "Workmate AI provides internal workplace information. Please verify critical details with the relevant department."
     },
 
@@ -164,10 +164,9 @@ export const AGENTS = {
         buttonColor: "bg-green-600 hover:bg-green-700",
         idlePrompt: "Ask about home broadband, mobile plans, or consumer promotions.",
         disclaimer: "If you need any further clarifications, please reach out to the Consumer Business team."
-
     },
 
-    // 13.Helpdesk Agent (n8n workflow integration)
+    // 13. Helpdesk Agent (n8n workflow integration)
     helpdesk: {
         id: "helpdesk",
         title: "HELP DESK",
@@ -176,10 +175,9 @@ export const AGENTS = {
         buttonColor: "bg-purple-600 hover:bg-purple-700",
         idlePrompt: "Describe your IT issue, search for instructional guides, or ask for an update on your existing ticket status.",
         disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
-
     },
 
-    // 13.Helpdesk Agent (n8n workflow integration)
+    // 14. Helpdesk Agent (full LangGraph pipeline — in development)
     helpdesk_dev: {
         id: "helpdesk_dev",
         title: "ASK HELPDESK",
@@ -188,7 +186,63 @@ export const AGENTS = {
         buttonColor: "bg-purple-600 hover:bg-purple-700",
         idlePrompt: "Describe your IT issue, search for instructional guides, or ask for an update on your existing ticket status.",
         disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
+    },
 
+    // 15. Rainbow Pages
+    askrainbowpages: {
+        id: "rainbowpages",
+        title: "Rainbowpages",
+        subtitle: "Search SLTMobitel's Rainbow Pages business directory — company listings, contact details, and service categories.",
+        color: "from-red-900 to-red-600",
+        buttonColor: "bg-red-600 hover:bg-red-700",
+        idlePrompt: "Ask about a business listing, contact, or service category.",
+        disclaimer: "If you need any further clarifications, please reach out to the Rainbow Pages team."
+    },
+
+    // 16. AI Expo (public — knowledge base from aiexpo.lk)
+    aiexpo: {
+        public: true,
+        id: "aiexpo",
+        title: "ASK AI EXPO",
+        subtitle: "Your guide to National AI Expo & Conference — speakers, agenda, partners, schedule, and event highlights.",
+        color: "from-cyan-900 to-cyan-600",
+        buttonColor: "bg-cyan-600 hover:bg-cyan-700",
+        idlePrompt: "Ask about speakers, the agenda, partners, or event dates.",
+        disclaimer: "Event information is sourced from aiexpo.lk and may change. Please verify critical details on the official website."
+    },
+
+    // 17. MintCRM (knowledge base only)
+    askmintcrm: {
+        id: "mintcrm",
+        title: "ASK MINTCRM",
+        subtitle: "Guidance on MintCRM — modules, workflows, user roles, configuration, and troubleshooting.",
+        color: "from-lime-900 to-lime-600",
+        buttonColor: "bg-lime-600 hover:bg-lime-700",
+        idlePrompt: "Ask about MintCRM modules, workflows, or how to complete a task.",
+        disclaimer: "If you need any further clarifications, please reach out to the MintCRM support team."
+    },
+
+    // 18. Supply Chain Management (knowledge base only)
+    askscm: {
+        id: "scm",
+        title: "ASK SCM",
+        subtitle: "Supply chain guidance covering procurement, sourcing, inventory, logistics, vendors, and related procedures.",
+        color: "from-cyan-900 to-teal-600",
+        buttonColor: "bg-teal-600 hover:bg-teal-700",
+        idlePrompt: "Ask about supply chain policies, procurement, vendors, inventory, or logistics.",
+        disclaimer: "If you need any further clarifications, please reach out to the Supply Chain Management team."
+    },
+
+    // 19. Embryo (public — knowledge base crawled from the Embryo website)
+    askembryo: {
+        public: true,
+        id: "embryo",
+        title: "ASK EMBRYO",
+        subtitle: "Explore Embryo's purpose, offerings, initiatives, projects, partnerships, news, and events.",
+        color: "from-cyan-900 to-teal-600",
+        buttonColor: "bg-teal-600 hover:bg-teal-700",
+        idlePrompt: "Ask me anything about Embryo.",
+        disclaimer: "Information is sourced from the Embryo website and may change. Please verify critical details on the official website."
     }
 };
 

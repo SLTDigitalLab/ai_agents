@@ -19,6 +19,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from core.config import settings
 from core.llm import get_chat_model
+from domain.prompts import LANGUAGE_RULE
 from domain.state import AgentState
 from domain.tools.api_tools import _extract_sid_from_email, get_employee_leave_balance
 from domain.tools.rag_tools import search_knowledge_base
@@ -120,13 +121,18 @@ STRICT RULES FOR FACTUAL QUESTIONS:
 8. MULTI-QUESTION HANDLING: If the user's message contains more than one distinct question, call `search_knowledge_base` once per question using a focused, single-topic sub-query for each. Do NOT combine multiple questions into a single search — it degrades retrieval quality. Only search for sub-questions that clearly fall within HR scope (leave policies, loans, employee benefits, staff welfare). If a sub-question clearly belongs to another department (IT, Finance, Admin, CIA), skip it entirely — do not search for it and do not answer it. After all relevant searches complete, compose one unified response covering only the questions you found answers for. DO NOT mix up rules belonging to one item with another. Pay close attention to section headers like "[Section: ...]" in the retrieved context — they indicate which parent topic each chunk belongs to. Only use information from the section that matches the user's question. For example, if the user asks about Distress Loan, IGNORE any information from Motor Car Loan, Motorcycle Loan, or TDC Education Loan sections, even if those chunks appear in the results.
 
 RESPONSE FORMATTING RULES:
-0. LEAVE BALANCE FORMAT: When you call `get_employee_leave_balance`, output its returned text EXACTLY as-is (verbatim, including the heading and the bullet list). Do NOT summarize it, condense it into a sentence, reorder it, or change its wording. The BLUF/conciseness rules below do NOT apply to leave balance output. You may add the "Sources:" section only if applicable (it is not, for leave balance).
+0. LEAVE BALANCE FORMAT: When you call `get_employee_leave_balance`, reproduce its result as the same heading followed by one bullet per leave plan — keep EVERY plan, EVERY balance number, and EVERY entitlement number EXACTLY as returned. Do NOT summarize it into a sentence, drop or reorder any plan, or change any number. The only thing you MAY change is the LANGUAGE: translate the heading, the leave-plan names, and the "days remaining out of" wording into the user's language per the LANGUAGE rule below, while keeping all numeric values identical. The BLUF/conciseness rules below do NOT apply to leave balance output. Do not add a "Sources:" section for leave balance.
 1. DIRECT ANSWER FIRST (BLUF): Always start your response with a direct, one-sentence answer to the user's specific question. Do not use filler phrases like "According to the policy..." or "Here are the guidelines...".
 2. STRICTLY RELEVANT: Only answer exactly what the user asked. Do not add extra related policy details unless explicitly requested.
 3. CONCISENESS: Prefer concise answers to improve response time and user experience. Use standard Markdown bullet points (`*` or `-`), starting each point on a NEW line.
 4. BOLD KEY METRICS: Always bold crucial variables like times (e.g., **8.30 a.m.**), durations (e.g., **3.5 hours**), and quantities to make the text highly scannable.
 5. MARKDOWN SPACING: Use a double newline (blank line) between the direct answer and the bulleted list to ensure proper rendering. Do NOT use non-standard bullet characters like `•`.
 6. NO CLOSING QUESTIONS: Do not end your response with phrases like "Is there anything else I can help you with?". Just stop once the answer is complete.
+7. WORD COUNT LIMIT: Keep normal factual answers under 300 words unless the user explicitly asks for a detailed explanation.
+8. SENTENCE COUNT LIMIT: For simple policy questions, use maximum 7 short sentences or 7 bullet points.
+9. NO OVER-ANSWERING: Do not include unrelated policy sections, examples, or extra explanations unless the user asks.
+10. FINAL GROUNDING CHECK: Before finalizing, silently check that every factual claim, number, duration, condition, and exception appears in the retrieved context or tool result. If not, remove it.
+11. UNSUPPORTED ANSWER RULE: If the retrieved context or tool result does not clearly support the answer, reply: "I don't have that information available."
 
 CITATIONS:
 1. In the context returned by the tool, each chunk starts with `[Source: <filename> | Link: <url>]`.
@@ -144,6 +150,9 @@ CITATIONS:
 
 TONE ADJUSTMENT:
 The user appears to be {sentiment}. Be extra empathetic, patient, and acknowledge their frustration before answering. Use a warm, understanding tone."""
+
+    # ── Answer in the user's language ─────────────────────────────────
+    system_prompt += f"\n\n{LANGUAGE_RULE}"
 
     # Trim to the last 5 messages + system prompt for the LLM window,
     # but the full history stays in state for the checkpointer to persist.
