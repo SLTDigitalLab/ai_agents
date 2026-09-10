@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 import traceback
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+
+from domain.tools.lifestore_mcp_tools import _call_mcp_tool, _get_mcp_tool_map
 
 
 router = APIRouter(prefix="/api/v1/lifestore", tags=["LifeStore MCP"])
@@ -27,9 +26,6 @@ class LifeStoreMCPChatRequest(BaseModel):
     preferred_tool: str | None = "lifestore_hybrid_product_search"
     force_tool_call: bool = True
     limit: int = 5
-
-
-_MCP_MODULE: Any = None
 
 
 def _safe_text(value: Any) -> str:
@@ -410,87 +406,6 @@ def _write_lifestore_answer(
         return deterministic_fallback
 
 
-def _project_root() -> Path:
-    """
-    Expected layout:
-
-    ai_agents_mcp_experiment/
-      backend/
-        routers/
-          lifestore_mcp_chat.py
-      mcp_lifestore/
-        server.py
-    """
-    return Path(__file__).resolve().parents[2]
-
-
-def _mcp_server_path() -> Path:
-    env_path = os.getenv("LIFESTORE_MCP_SERVER_PATH", "").strip()
-
-    if env_path:
-        return Path(env_path).expanduser().resolve()
-
-    return _project_root() / "mcp_lifestore" / "server.py"
-
-
-def _load_mcp_module() -> Any:
-    global _MCP_MODULE
-
-    if _MCP_MODULE is not None:
-        return _MCP_MODULE
-
-    root = _project_root()
-    server_path = _mcp_server_path()
-
-    if not server_path.exists():
-        raise FileNotFoundError(
-            f"MCP server.py not found at: {server_path}. "
-            "Set LIFESTORE_MCP_SERVER_PATH in .env if your path is different."
-        )
-
-    for path in [root, root / "backend"]:
-        path_text = str(path)
-        if path_text not in sys.path:
-            sys.path.insert(0, path_text)
-
-    spec = importlib.util.spec_from_file_location(
-        "_ask_lifestore_mcp_server",
-        server_path,
-    )
-
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Could not load MCP server module from: {server_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    if not hasattr(module, "lifestore_hybrid_product_search"):
-        raise AttributeError(
-            "mcp_lifestore/server.py does not define lifestore_hybrid_product_search"
-        )
-
-    _MCP_MODULE = module
-    return _MCP_MODULE
-
-
-def _call_mcp_tool(module: Any, tool_name: str, **kwargs: Any) -> dict[str, Any]:
-    tool = getattr(module, tool_name, None)
-    if not callable(tool):
-        raise AttributeError(f"mcp_lifestore/server.py does not define {tool_name}")
-
-    result = tool(**kwargs)
-
-    if isinstance(result, dict):
-        return result
-
-    return {
-        "status": "success",
-        "answer": str(result),
-        "products": [],
-        "retrieval": {},
-    }
-
-
 def _dedupe_products(products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen: set[str] = set()
     output: list[dict[str, Any]] = []
@@ -524,78 +439,74 @@ def _extract_products(result: dict[str, Any]) -> list[dict[str, Any]]:
     return [product for product in products if isinstance(product, dict)]
 
 
-def _retrieve_products(module: Any, message: str, plan: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
+async def _retrieve_products(message: str, plan: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
     mode = _safe_text(plan.get("answer_mode"))
     product_query = _safe_text(plan.get("product_query")) or message
     desired_limit = _bounded_int(plan.get("desired_product_count"), 1, 1, 8)
 
+    # _call_mcp_tool never raises on tool failure — it returns {"status": "error", ...}.
+    # The fallback-to-hybrid-search behavior below checks that status explicitly.
+
     if mode in {"single_product", "purchase"}:
-        try:
-            result = _call_mcp_tool(
-                module,
-                "lifestore_precise_product_lookup",
-                product_query=product_query,
-                include_vector_evidence=True,
-            )
+        result = await _call_mcp_tool(
+            "lifestore_precise_product_lookup",
+            product_query=product_query,
+            include_vector_evidence=True,
+        )
+        if result.get("status") != "error":
             return result, _extract_products(result)[:1], "lifestore_precise_product_lookup"
-        except Exception:
-            result = _call_mcp_tool(
-                module,
-                "lifestore_hybrid_product_search",
-                query=product_query,
-                product_query=product_query,
-                search_mode=mode,
-                limit=1,
-                include_vector_evidence=True,
-            )
-            return result, _extract_products(result)[:1], "lifestore_hybrid_product_search"
+
+        result = await _call_mcp_tool(
+            "lifestore_hybrid_product_search",
+            query=product_query,
+            product_query=product_query,
+            search_mode=mode,
+            limit=1,
+            include_vector_evidence=True,
+        )
+        return result, _extract_products(result)[:1], "lifestore_hybrid_product_search"
 
     if mode == "availability":
-        try:
-            result = _call_mcp_tool(
-                module,
-                "lifestore_availability_lookup",
-                product_query=product_query,
-                requested_availability="in_stock",
-            )
+        result = await _call_mcp_tool(
+            "lifestore_availability_lookup",
+            product_query=product_query,
+            requested_availability="in_stock",
+        )
+        if result.get("status") != "error":
             return result, _extract_products(result)[:1], "lifestore_availability_lookup"
-        except Exception:
-            result = _call_mcp_tool(
-                module,
-                "lifestore_hybrid_product_search",
-                query=product_query,
-                product_query=product_query,
-                search_mode="availability",
-                limit=1,
-                include_vector_evidence=True,
-            )
-            return result, _extract_products(result)[:1], "lifestore_hybrid_product_search"
+
+        result = await _call_mcp_tool(
+            "lifestore_hybrid_product_search",
+            query=product_query,
+            product_query=product_query,
+            search_mode="availability",
+            limit=1,
+            include_vector_evidence=True,
+        )
+        return result, _extract_products(result)[:1], "lifestore_hybrid_product_search"
 
     if mode == "comparison":
         comparison_queries = plan.get("comparison_queries") or []
-        try:
-            result = _call_mcp_tool(
-                module,
-                "lifestore_compare_products",
-                query=product_query or message,
-                product_queries=comparison_queries,
-                limit=max(desired_limit, 2),
-                include_vector_evidence=True,
-            )
+        result = await _call_mcp_tool(
+            "lifestore_compare_products",
+            query=product_query or message,
+            product_queries=comparison_queries,
+            limit=max(desired_limit, 2),
+            include_vector_evidence=True,
+        )
+        if result.get("status") != "error":
             return result, _dedupe_products(_extract_products(result))[:desired_limit], "lifestore_compare_products"
-        except Exception:
-            result = _call_mcp_tool(
-                module,
-                "lifestore_hybrid_product_search",
-                query=product_query or message,
-                search_mode="comparison",
-                limit=max(desired_limit, 2),
-                include_vector_evidence=True,
-            )
-            return result, _dedupe_products(_extract_products(result))[:desired_limit], "lifestore_hybrid_product_search"
 
-    result = _call_mcp_tool(
-        module,
+        result = await _call_mcp_tool(
+            "lifestore_hybrid_product_search",
+            query=product_query or message,
+            search_mode="comparison",
+            limit=max(desired_limit, 2),
+            include_vector_evidence=True,
+        )
+        return result, _dedupe_products(_extract_products(result))[:desired_limit], "lifestore_hybrid_product_search"
+
+    result = await _call_mcp_tool(
         "lifestore_hybrid_product_search",
         query=product_query or message,
         search_mode=mode or "general",
@@ -607,50 +518,47 @@ def _retrieve_products(module: Any, message: str, plan: dict[str, Any]) -> tuple
 
 
 @router.get("/mcp-health")
-def lifestore_mcp_health() -> dict[str, Any]:
+async def lifestore_mcp_health() -> dict[str, Any]:
     """
     Browser/backend health check for the LifeStore MCP proxy.
     """
-    server_path = _mcp_server_path()
+    mcp_url = os.getenv("LIFESTORE_MCP_URL", "http://127.0.0.1:8001/mcp")
 
     try:
-        module = _load_mcp_module()
+        tool_map = await _get_mcp_tool_map()
 
         return {
             "status": "ok",
-            "mcp_server_path": str(server_path),
-            "mcp_server_exists": server_path.exists(),
-            "has_lifestore_hybrid_product_search": callable(getattr(module, "lifestore_hybrid_product_search", None)),
-            "has_lifestore_precise_product_lookup": callable(getattr(module, "lifestore_precise_product_lookup", None)),
-            "has_lifestore_availability_lookup": callable(getattr(module, "lifestore_availability_lookup", None)),
-            "has_lifestore_compare_products": callable(getattr(module, "lifestore_compare_products", None)),
+            "mcp_url": mcp_url,
+            "has_lifestore_hybrid_product_search": "lifestore_hybrid_product_search" in tool_map,
+            "has_lifestore_precise_product_lookup": "lifestore_precise_product_lookup" in tool_map,
+            "has_lifestore_availability_lookup": "lifestore_availability_lookup" in tool_map,
+            "has_lifestore_compare_products": "lifestore_compare_products" in tool_map,
         }
 
     except Exception as error:
         return {
             "status": "error",
-            "mcp_server_path": str(server_path),
-            "mcp_server_exists": server_path.exists(),
+            "mcp_url": mcp_url,
             "message": str(error),
             "traceback": traceback.format_exc(),
         }
 
 
 @router.post("/mcp-chat")
-def lifestore_mcp_chat(request: LifeStoreMCPChatRequest) -> dict[str, Any]:
+async def lifestore_mcp_chat(request: LifeStoreMCPChatRequest) -> dict[str, Any]:
     """
     FastAPI proxy used by the React frontend.
 
-    Browser -> FastAPI /api/v1/lifestore/mcp-chat -> MCP tool function.
+    Browser -> FastAPI /api/v1/lifestore/mcp-chat -> MCP tool (over the real MCP protocol).
     """
     try:
-        module = _load_mcp_module()
         message = request.message.strip()
 
         plan = _plan_lifestore_answer(message, request.limit)
         answer_mode = _safe_text(plan.get("answer_mode"))
 
-        result, products, tool_name = _retrieve_products(module, message, plan)
+        result, products, tool_name = await _retrieve_products(message, plan)
 
         fallback_answer = str(
             result.get("answer")
