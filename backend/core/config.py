@@ -9,6 +9,7 @@ from fastapi_mail import ConnectionConfig
 
 # backend/core/config.py → backend/core → backend → project root
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+BACKEND_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT_DIR / ".env.sentinel")
 load_dotenv(ROOT_DIR / ".env")
 
@@ -120,6 +121,12 @@ class Settings(BaseSettings):
 
     LIFESTORE_QDRANT_COLLECTION: str = "lifestore_docs"
 
+    # Evidence previews for PDF/image/table references
+    EVIDENCE_STORAGE_DIR: str = "storage/evidence"
+    EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
+    EVIDENCE_RENDER_ZOOM: float = 1.75
+    EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
+
     # ── Ask LifeStore cart + PayHere checkout ──────────────────────────────
     # Public base URLs used to build PayHere return/cancel/notify links.
     APP_BASE_URL: str = "http://localhost:8000"
@@ -151,6 +158,24 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def evidence_storage_dir() -> Path:
+    """Return the canonical local directory exposed by the evidence endpoint."""
+    configured_dir = Path(settings.EVIDENCE_STORAGE_DIR)
+    return configured_dir if configured_dir.is_absolute() else BACKEND_DIR / configured_dir
+
+
+# Make the Vertex service-account credentials discoverable by the Google SDK.
+# load_dotenv() above already copies GOOGLE_APPLICATION_CREDENTIALS into os.environ
+# if it was set in .env, but we normalize a relative path to an absolute one
+# (resolved against the project root) so it works regardless of the CWD uvicorn
+# is launched from.
+if settings.GOOGLE_APPLICATION_CREDENTIALS:
+    _cred_path = Path(settings.GOOGLE_APPLICATION_CREDENTIALS)
+    if not _cred_path.is_absolute():
+        _cred_path = ROOT_DIR / _cred_path
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(_cred_path)
 
 
 def get_mail_config() -> ConnectionConfig:

@@ -57,3 +57,7 @@ export const loginRequest = {
     // After login start, MSAL knows original app page
     redirectStartPage: workmateRoute,
 };
+
+export const graphConfig = {
+    meEndpoint: "https://graph.microsoft.com/v1.0/me",
+};
