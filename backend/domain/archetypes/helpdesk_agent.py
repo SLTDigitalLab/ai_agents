@@ -60,7 +60,10 @@ it to exactly one of three branches:
                       base → validate_kb_answer decides: present the
                       answer / ask to clarify / give up and create a
                       ticket → self_or_human_handler → check_duplicates
-                    → draft_ticket → confirm_category_handler
+                    → draft_ticket → confirm_category_handler (keep → save;
+                      change → re-validates against the DB category table
+                      and re-presents the draft for one more confirmation
+                      before looping back into itself)
                     → save_ticket
 
   ticket_status_agent → tool-calling loop over get_user_tickets for

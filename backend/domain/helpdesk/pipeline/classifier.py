@@ -41,6 +41,7 @@ async def classify_message(state: AgentState) -> dict:
     mid_flow = research_phase == "awaiting_satisfaction" or ticket_phase in (
         "awaiting_self_or_human",
         "awaiting_category_confirmation",
+        "awaiting_final_confirmation",
         "awaiting_retry_clarification",
         "awaiting_category_clarification",
     )

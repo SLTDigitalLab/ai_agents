@@ -152,9 +152,9 @@ async def self_or_human_handler(state: AgentState) -> dict:
             return {
                 "messages": [AIMessage(content=(
                     "Sorry, I didn't quite catch that. Please reply with:\n"
-                    "1. Yes, this solves my issue\n"
-                    "2. No, please create a support ticket for further help\n"
-                    "3. I'd like to know more information"
+                    "1. ✅ **Yes, this solves my issue**\n"
+                    "2. 🎫 **No, please create a support ticket for further help**\n"
+                    "3. ℹ️ **I'd like to know more information**"
                 ))],
                 "helpdesk_ticket_phase": "awaiting_self_or_human",
                 "helpdesk_retry_count": retry_count + 1,
@@ -201,9 +201,24 @@ async def self_or_human_handler(state: AgentState) -> dict:
         state
     )
     kb_answer = _latest_ai_message(state)
-    choice_prompt_idx = kb_answer.lower().find("would you like to")
-    if choice_prompt_idx != -1:
-        kb_answer = kb_answer[:choice_prompt_idx].strip()
+    # Strip the trailing "1/2/3" choice menu before saving the answer.
+    # Anchored on option 3's literal wording ("I'd like to know more
+    # information") rather than the intro sentence above it ("Would you
+    # like to:" / "Did that help sort things out? Let me know:") — that
+    # intro has already changed wording once (2026-09-10, see
+    # research_prompts.py's kb_search_system_prompt() RELEVANT INFORMATION
+    # FOUND branch) and silently broke a literal-intro-text version of this
+    # same strip, so every "Yes" confirmation after that saved the raw
+    # numbered menu as part of the solved-ticket answer. Option 3's wording
+    # is documented there as required to never change (validate_kb_answer
+    # in kb_search.py also depends on it staying fixed), so anchoring on it
+    # instead survives future intro-line rewording.
+    lower_answer = kb_answer.lower()
+    menu_anchor_idx = lower_answer.find("i'd like to know more information")
+    if menu_anchor_idx != -1:
+        paragraph_break_idx = kb_answer.rfind("\n\n", 0, menu_anchor_idx)
+        if paragraph_break_idx != -1:
+            kb_answer = kb_answer[:paragraph_break_idx].strip()
 
     if original_query and kb_answer:
         try:

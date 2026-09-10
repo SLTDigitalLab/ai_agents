@@ -31,8 +31,9 @@ from domain.helpdesk.tools.helpdesk_tools import (
 # before ever hitting the knowledge base. Runs twice per fresh question
 # (search, then verdict — see the docstring below), and is also the
 # re-entry point for the awaiting_satisfaction / awaiting_self_or_human /
-# awaiting_category_confirmation / awaiting_retry_clarification phases,
-# where it just forwards the turn on without calling the LLM.
+# awaiting_category_confirmation / awaiting_final_confirmation /
+# awaiting_retry_clarification phases, where it just forwards the turn on
+# without calling the LLM.
 async def research_agent(state: AgentState) -> dict:
     """
     Entry point for all research work: a fresh question, or a continuation
@@ -65,6 +66,7 @@ async def research_agent(state: AgentState) -> dict:
     if ticket_phase in (
         "awaiting_self_or_human",
         "awaiting_category_confirmation",
+        "awaiting_final_confirmation",
         "awaiting_category_clarification",
     ):
         print(
@@ -166,7 +168,8 @@ def route_after_research(
       - phase == awaiting_satisfaction + last msg is human
                                                 → satisfaction_handler (user replied)
       - phase in (awaiting_self_or_human,
-                  awaiting_category_confirmation) → forward to kb_search_agent
+                  awaiting_category_confirmation,
+                  awaiting_final_confirmation)   → forward to kb_search_agent
       - tool_calls present                      → execute the tool
       - phase == no_solved_match                → fall through to KB search
       - otherwise                               → END
@@ -187,6 +190,7 @@ def route_after_research(
     if ticket_phase in (
         "awaiting_self_or_human",
         "awaiting_category_confirmation",
+        "awaiting_final_confirmation",
         "awaiting_category_clarification",
     ):
         print(f"[router] ticket_phase={ticket_phase!r} → forwarding to kb_search_agent")
@@ -221,6 +225,7 @@ async def satisfaction_handler(state: AgentState) -> dict:
     print(f"[satisfaction_handler] user_id={user_id!r} response={user_message!r}")
 
     satisfied_signals = {
+        "1",
         "yes",
         "yep",
         "yeah",
@@ -243,6 +248,7 @@ async def satisfaction_handler(state: AgentState) -> dict:
         "alright",
     }
     not_satisfied_signals = {
+        "2",
         "no",
         "nope",
         "not",

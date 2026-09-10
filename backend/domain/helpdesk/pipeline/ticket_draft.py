@@ -9,7 +9,13 @@ the user to confirm, or — if the classifier's self-consistency passes
 disagreed and the disagreement isn't confined to the known-unresolvable
 cluster — asks one clarifying question first (handled on the next turn by
 category_clarification_handler()). confirm_category_handler() processes
-the user's keep/change reply, and save_ticket() writes the final ticket to
+the user's keep/change reply — on CHANGE, the new category is re-validated
+against the DB's all-categories table (list_categories()) and, if valid,
+the full draft (ticket ID, issue, new category/sub-category) is re-presented
+for one more confirmation before anything is saved, so the user always sees
+and explicitly confirms exactly what will be written; this doubles as the
+same node's re-entry point once that re-presented draft gets a reply. Only
+once the user confirms KEEP does save_ticket() write the final ticket to
 Postgres.
 """
 
@@ -232,16 +238,40 @@ async def category_clarification_handler(state: AgentState) -> dict:
     }
 
 
-# [NODE] Fires when ticket_phase == "awaiting_category_confirmation" — the
-# user is replying to draft_ticket's "1. Keep / 2. Change" prompt. Keyword
-# detection decides KEEP/CHANGE/UNCLEAR; any user-suggested category on
-# CHANGE is re-validated against the DB category list.
+# [NODE] Fires when ticket_phase is "awaiting_category_confirmation" (the
+# user is replying to draft_ticket's "1. Keep / 2. Change" prompt) OR
+# "awaiting_final_confirmation" (the user is replying to the UPDATED draft
+# shown after a category change, below). Same handler, same keyword
+# detection either way — the only difference is which phase a "still not
+# resolved" reply loops back to (current_phase, read from state), so a
+# not-found/no-hint/unclear reply re-asks within whichever confirmation
+# round is currently active instead of always resetting to the first one.
+#
+# KEEP always proceeds straight to save_ticket — whether that's confirming
+# the classifier's original pick or confirming a category the user just
+# changed to, the user has, at that point, explicitly confirmed the ticket
+# with its current main/sub-category and ticket ID.
+#
+# CHANGE always re-validates the suggested category against list_categories()
+# (the DB's all-categories table) — the one true source of valid main/sub
+# category pairs. A match does NOT save immediately: it re-presents the full
+# draft (ticket ID, issue, new category/sub-category) via
+# draft_ticket_presentation_system_prompt and moves to
+# "awaiting_final_confirmation", so the user always sees and confirms
+# whatever category will actually be saved — including a category they just
+# changed to — before anything is written to the database. A category not
+# found in the DB table never advances the phase; it re-shows the valid
+# main-category list and asks again (can repeat indefinitely).
 async def confirm_category_handler(state: AgentState) -> dict:
     """Process the category confirmation using keyword detection.
 
-    KEEP  → category already validated by draft_ticket, proceed to save.
-    CHANGE → validate the user's suggested category against the DB; if not found,
-             show the valid main-category names and ask them to try again.
+    KEEP  → user confirmed the category currently on the draft, proceed to save.
+    CHANGE → validate the user's suggested category against the DB (the
+             all-categories table via list_categories()); if found, re-present
+             the full draft with the new category for one more confirmation
+             (awaiting_final_confirmation) instead of saving directly; if not
+             found, show the valid main-category names and ask them to try
+             again.
     UNCLEAR → LLM re-prompts (streams naturally).
     """
     user_message = _latest_user_message(state)
@@ -249,6 +279,11 @@ async def confirm_category_handler(state: AgentState) -> dict:
     words = set(user_lower.split())
     main_category = state.get("helpdesk_draft_main_category", "")
     sub_category = state.get("helpdesk_draft_sub_category", "")
+    # Whichever confirmation round is currently active — first pass
+    # ("awaiting_category_confirmation") or a re-review after a change
+    # ("awaiting_final_confirmation") — a reply that doesn't resolve things
+    # (not found / no hint / unclear) loops back to this same round.
+    current_phase = state.get("helpdesk_ticket_phase", "") or "awaiting_category_confirmation"
 
     keep_signals = {"1", "keep", "yes", "ok", "okay", "sure", "confirm", "good", "fine", "correct"}
     change_signals = {"2", "change", "different", "modify", "update", "no", "another", "other"}
@@ -334,14 +369,34 @@ async def confirm_category_handler(state: AgentState) -> dict:
 
             if matched:
                 main_category, sub_category = matched
-                print(f"[confirm_category_handler] → CHANGE (valid) {main_category!r}/{sub_category!r}")
+                print(
+                    f"[confirm_category_handler] → CHANGE (valid) "
+                    f"{main_category!r}/{sub_category!r} — presenting updated draft "
+                    "for final confirmation before saving"
+                )
+                original_query = state.get("helpdesk_original_query", "") or user_message
+                ticket_id = state.get("helpdesk_draft_ticket_id", "")
+                continuation = _continues_prior_reply(state)
+                response = await llm.ainvoke([
+                    {
+                        "role": "system",
+                        "content": draft_ticket_presentation_system_prompt(
+                            original_query, ticket_id, main_category, sub_category,
+                            continuation=continuation,
+                        ),
+                    },
+                    {"role": "user", "content": user_message},
+                ])
                 return {
-                    "helpdesk_ticket_phase": "saving_ticket",
+                    "messages": [response],
+                    "helpdesk_ticket_phase": "awaiting_final_confirmation",
                     "helpdesk_draft_main_category": main_category,
                     "helpdesk_draft_sub_category": sub_category,
                 }
 
-            # Category not found — show valid list and ask again
+            # Category not found in the all-categories DB table — show the
+            # valid list and ask again, staying in whichever confirmation
+            # round is currently active.
             print(f"[confirm_category_handler] → CHANGE (not found: {suggested_main!r}) — re-asking")
             unique_names = sorted({cn for cn, _ in valid_categories})
             category_list = "\n".join(f"• {cn}" for cn in unique_names)
@@ -351,15 +406,15 @@ async def confirm_category_handler(state: AgentState) -> dict:
                     "content": category_not_found_system_prompt(
                         suggested_main,
                         category_list,
-                        state.get("helpdesk_draft_main_category", ""),
-                        state.get("helpdesk_draft_sub_category", ""),
+                        main_category,
+                        sub_category,
                     ),
                 },
                 {"role": "user", "content": user_message},
             ])
             return {
                 "messages": [AIMessage(content=_message_to_text(response))],
-                "helpdesk_ticket_phase": "awaiting_category_confirmation",
+                "helpdesk_ticket_phase": current_phase,
             }
 
         # User said "change" but gave no category — ask what they want
@@ -375,7 +430,7 @@ async def confirm_category_handler(state: AgentState) -> dict:
         ])
         return {
             "messages": [AIMessage(content=_message_to_text(response))],
-            "helpdesk_ticket_phase": "awaiting_category_confirmation",
+            "helpdesk_ticket_phase": current_phase,
         }
 
     # UNCLEAR — ask again via streaming LLM so the user sees the prompt
@@ -389,7 +444,7 @@ async def confirm_category_handler(state: AgentState) -> dict:
     ])
     return {
         "messages": [AIMessage(content=_message_to_text(response))],
-        "helpdesk_ticket_phase": "awaiting_category_confirmation",
+        "helpdesk_ticket_phase": current_phase,
     }
 
 
@@ -429,12 +484,12 @@ async def save_ticket(state: AgentState) -> dict:
         )
         saved_id = ticket.get("ticket_id", ticket_id)
         msg = (
-            f"Your support ticket has been created successfully!\n\n"
-            f"**Ticket ID:** {saved_id}\n"
-            f"**Status:** Open\n"
-            f"**Category:** {main_category} / {sub_category}\n\n"
-            "Our support team will review your ticket and get back to you. "
-            "You can check your ticket status anytime."
+            "✅ **Your support ticket has been created!**\n\n"
+            f"🎫 **Ticket ID:** {saved_id}\n\n"
+            "Please keep this ID handy — you can use it anytime to check your "
+            "ticket's status or details.\n\n"
+            "Our support team will review it shortly and get back to you. "
+            "Thank you for your patience!"
         )
         print(f"[save_ticket] ticket saved id={saved_id!r}")
     except Exception as exc:

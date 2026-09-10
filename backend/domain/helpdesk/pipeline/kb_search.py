@@ -26,8 +26,9 @@ from domain.helpdesk.tools.helpdesk_tools import kb_llm, kb_search_llm
 # [NODE] Layer 2: searches the Qdrant knowledge base via the
 # search_knowledge_base tool and answers from the results. Reached when
 # no solved ticket matched. Also the re-entry point for the
-# awaiting_self_or_human / awaiting_category_confirmation phases, where it
-# just forwards on without searching again.
+# awaiting_self_or_human / awaiting_category_confirmation /
+# awaiting_final_confirmation phases, where it just forwards on without
+# searching again.
 async def kb_search_agent(state: AgentState) -> dict:
     """
     Entry point for the KB-search-and-beyond layer: a fresh research_agent
@@ -44,6 +45,7 @@ async def kb_search_agent(state: AgentState) -> dict:
     if ticket_phase in (
         "awaiting_self_or_human",
         "awaiting_category_confirmation",
+        "awaiting_final_confirmation",
         "awaiting_category_clarification",
     ):
         print(f"[kb_search_agent] ticket_phase={ticket_phase!r} → dispatching onward")
@@ -146,6 +148,11 @@ def should_continue_kb_search(
     After kb_search_agent runs:
       - phase == awaiting_self_or_human          → self_or_human_handler
       - phase == awaiting_category_confirmation  → confirm_category_handler
+      - phase == awaiting_final_confirmation     → confirm_category_handler
+                                                     (re-entry after the user
+                                                     changed the category —
+                                                     same handler, see its
+                                                     docstring)
       - phase == awaiting_category_clarification → category_clarification_handler
       - phase == awaiting_retry_clarification    → __end__ (the vague-query
                                                      pre-check above already
@@ -161,8 +168,8 @@ def should_continue_kb_search(
     if ticket_phase == "awaiting_self_or_human":
         print("[router] awaiting self-or-human → self_or_human_handler")
         return "self_or_human_handler"
-    if ticket_phase == "awaiting_category_confirmation":
-        print("[router] awaiting category confirmation → confirm_category_handler")
+    if ticket_phase in ("awaiting_category_confirmation", "awaiting_final_confirmation"):
+        print(f"[router] {ticket_phase} → confirm_category_handler")
         return "confirm_category_handler"
     if ticket_phase == "awaiting_category_clarification":
         print("[router] awaiting category clarification → category_clarification_handler")

@@ -483,33 +483,60 @@ async def classify_ticket_category_pipeline(
     passes that agreed with the returned (main_category, sub_category)
     pair — 1.0 means every pass agreed, 1/self_consistency_n means every
     pass disagreed with every other (the plurality winner among all-
-    distinct picks)."""
-    candidates = await search_hybrid_candidates(message, k=k)
+    distinct picks).
+
+    Never raises. This is the most expensive, most external-dependency-
+    heavy step in the whole ticket-creation chain (an embedding+Qdrant
+    search plus up to 2 * self_consistency_n LLM calls) and, unlike every
+    other external call in this file (search_hybrid_candidates() itself,
+    _load_valid_categories()'s list_categories() call, etc.), it used to
+    have no try/except of its own — one failed LLM call (timeout, a
+    provider-side content-filter rejection on unusual-looking text like an
+    account/order number, ...) would raise straight out of draft_ticket()/
+    category_clarification_handler(), past chat.py's outer handler, killing
+    the ticket-creation turn right after kb_search_agent's "not found, let
+    me help you create a ticket" reply had already streamed — a real
+    conversation observed live 2026-09-10 stopping exactly there, with no
+    ticket draft ever following. Falls back to the same "no candidates"
+    keyword-overlap resolution already used below when retrieval itself
+    comes back empty, so a failure here degrades to a low-confidence
+    fallback category (triggering draft_ticket()'s clarification-question
+    path) instead of ending the conversation."""
     valid_categories = _load_valid_categories("classify_ticket_category_pipeline")
 
-    if not candidates:
-        print("[classify_ticket_category_pipeline] no candidates returned from hybrid retrieval")
+    try:
+        candidates = await search_hybrid_candidates(message, k=k)
+
+        if not candidates:
+            print("[classify_ticket_category_pipeline] no candidates returned from hybrid retrieval")
+            main_category, sub_category = _resolve_category("", "", message, valid_categories)
+            return main_category, sub_category, 0.0
+
+        # A single pass has nothing to vote against — stay deterministic
+        # (temperature=0) and report full confidence rather than spending a
+        # sampling-temperature call for no benefit.
+        if self_consistency_n <= 1:
+            main_category, sub_category = await _classify_hierarchical(message, candidates, valid_categories)
+            return main_category, sub_category, 1.0
+
+        sampling_llm = _get_sampling_llm(0.7)
+        runs = await asyncio.gather(
+            *[
+                _classify_hierarchical(message, candidates, valid_categories, llm_client=sampling_llm)
+                for _ in range(self_consistency_n)
+            ]
+        )
+        tally = Counter(runs)
+        (main_category, sub_category), agree_count = tally.most_common(1)[0]
+        confidence = agree_count / self_consistency_n
+        return main_category, sub_category, confidence
+    except Exception as exc:
+        print(
+            f"[classify_ticket_category_pipeline] ERROR during classification "
+            f"({type(exc).__name__}: {exc}) — falling back to keyword-overlap resolution"
+        )
         main_category, sub_category = _resolve_category("", "", message, valid_categories)
         return main_category, sub_category, 0.0
-
-    # A single pass has nothing to vote against — stay deterministic
-    # (temperature=0) and report full confidence rather than spending a
-    # sampling-temperature call for no benefit.
-    if self_consistency_n <= 1:
-        main_category, sub_category = await _classify_hierarchical(message, candidates, valid_categories)
-        return main_category, sub_category, 1.0
-
-    sampling_llm = _get_sampling_llm(0.7)
-    runs = await asyncio.gather(
-        *[
-            _classify_hierarchical(message, candidates, valid_categories, llm_client=sampling_llm)
-            for _ in range(self_consistency_n)
-        ]
-    )
-    tally = Counter(runs)
-    (main_category, sub_category), agree_count = tally.most_common(1)[0]
-    confidence = agree_count / self_consistency_n
-    return main_category, sub_category, confidence
 
 
 @lru_cache(maxsize=4)
