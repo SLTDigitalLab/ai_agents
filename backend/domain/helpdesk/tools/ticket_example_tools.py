@@ -1,16 +1,8 @@
 """
-Retrieval over REAL historical tickets, as an alternative reference corpus
-to domain.helpdesk.tools.category_kb_tools (which searches 75 hand-written
-KB rows).
-
-Instead of comparing an incoming message to a hand-written category
-description, this compares it to thousands of real past tickets — each
-with its own already-known correct category — ingested by
-domain/helpdesk/scripts/ingest_ticket_examples.py. The idea: real tickets capture
-far more of the actual phrasing variety and statistical category
-distribution than 75 curated summaries can, without training any model —
-it's the same hybrid Qdrant search pattern as category_kb_tools.py, just
-pointed at a different, larger, real-example corpus.
+Retrieval over REAL historical tickets — an alternative reference corpus
+to category_kb_tools.py's 75 hand-written KB rows. Same hybrid Qdrant
+search pattern, pointed at real past tickets ingested by
+domain/helpdesk/scripts/ingest_ticket_examples.py.
 """
 
 import logging

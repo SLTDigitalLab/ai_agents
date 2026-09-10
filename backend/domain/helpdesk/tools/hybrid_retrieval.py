@@ -1,25 +1,13 @@
 """
-Hybrid Retrieval + Candidate Reranker stage for helpdesk category
-classification — merges domain.helpdesk.tools.category_kb_tools (75
-hand-written category rows, guaranteed one row per category — a coverage
-floor even for rarely-seen categories) with
-domain.helpdesk.tools.ticket_example_tools (~13k real past tickets —
-better phrasing match, but only for patterns already seen before).
+Hybrid Retrieval + Candidate Reranker for helpdesk category
+classification — merges category_kb_tools (75 hand-written rows, a
+coverage floor even for rare categories) with ticket_example_tools
+(~13k real past tickets — better phrasing match, but only for patterns
+seen before), so each source covers the other's blind spot.
 
-Rationale: the two sources have complementary blind spots. The KB can't
-match unusual real-world phrasing precisely; the real-ticket corpus has no
-fallback when an incoming message doesn't resemble anything seen before.
-Querying both and merging closes each source's gap with the other, rather
-than picking one and inheriting its specific weakness.
-
-Each source's own vector-search score (already a hybrid dense+BM25 fusion
-score from its own Qdrant collection — see search_category_candidates /
-search_ticket_examples) is combined with a keyword-overlap score against
-the merged candidate's full text (name + description + symptoms/example
-text), so ranking isn't purely a similarity artifact from one embedding
-call. A category retrieved by BOTH sources gets a small reinforcement
-bonus, since independent agreement from two different corpora is a
-stronger signal than either alone.
+Final rank = each source's own vector score + a keyword-overlap score
+against the merged candidate's full text, plus a small bonus when both
+sources agree on the same category.
 """
 
 import asyncio
@@ -61,22 +49,9 @@ def _keyword_overlap_score(query_words: set[str], candidate_text: str) -> float:
 async def search_hybrid_candidates(
     query: str, k: int = 5, k_kb: int = 5, k_examples: int = 5
 ) -> list[dict]:
-    """Query both the category KB and the real-ticket-examples corpus
-    concurrently, merge candidates that name the same (main_category,
-    sub_category), rerank the merged pool by a blended vector+keyword+
-    multi-source-agreement score, and return the top-k.
-
-    Each returned dict carries: main_category, sub_category, description,
-    customer_expressions, symptoms, similar_categories, do_not_use_when
-    (from the KB side, when present), example_text (a representative real
-    ticket, from the examples side, when present), source ("kb",
-    "example", or "kb+example"), and _score (the final blended rerank
-    score, 0-1ish, comparable across candidates regardless of source).
-
-    Never raises — an empty list from either or both underlying searches
-    just means a smaller (or empty) merged pool, same fallback contract as
-    the two functions this wraps.
-    """
+    """Query both corpora concurrently, merge candidates naming the same
+    category/subcategory, rerank by blended score, and return the top-k.
+    Never raises — an empty result from either search just shrinks the pool."""
     kb_candidates, example_candidates = await asyncio.gather(
         search_category_candidates(query, k=k_kb),
         search_ticket_examples(query, k=k_examples),

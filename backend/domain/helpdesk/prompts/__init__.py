@@ -1,27 +1,11 @@
 """
-System prompts for the helpdesk agent graph (backend/domain/helpdesk/pipeline/).
-
-Split by pipeline stage — see each module for its own prompts:
-  shared.py             -> _CONTINUATION_NOTE, shared by every stage below
-  classifier_prompts.py -> classify_message (STEP 1 — classifier.py)
-  greeting_prompts.py   -> greeting_agent (greeting.py)
-  research_prompts.py   -> solved-ticket research, KB search, self-or-human,
-                            duplicate check (research.py / kb_search.py /
-                            self_or_human.py / duplicates.py)
-  category_prompts.py   -> ticket drafting + category classification
-                            (ticket_draft.py / category_classification.py)
-  ticket_status_agent_prompts.py -> "what's my ticket status" (ticket_status_agent.py)
-
-Static prompts are plain string constants. Prompts that need to embed
-per-request data (query text, ticket id, category list, etc.) are exposed
-as small functions returning the formatted string. This __init__ re-exports
-everything so callers can keep writing
+System prompts for the helpdesk agent graph, split by pipeline stage (see
+each module). Re-exported here so callers can write
 `from domain.helpdesk.prompts import X` regardless of which file X lives in.
 
-IMPORTANT — OUTPUT CONTRACTS: several of these prompts are parsed by
-plain-Python string/regex matching downstream in domain/helpdesk/pipeline/ —
-see the docstring at the top of research_prompts.py and category_prompts.py
-for exactly which literal phrases must stay intact.
+Some of these prompts are parsed downstream by plain-Python string
+matching — see research_prompts.py and category_prompts.py for which
+phrases must stay intact.
 """
 
 from domain.helpdesk.prompts.shared import _CONTINUATION_NOTE

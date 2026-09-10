@@ -15,15 +15,11 @@ from domain.helpdesk.prompts import duplicate_found_system_prompt
 from services.helpdesk_tickets import list_helpdesk_tickets
 
 
-# [NODE] First step of ticket creation: compares the issue text against the
-# user's existing open tickets (Jaccard word-overlap, no LLM) so we don't
-# create a second ticket for the same problem.
+# Compares the issue text against the user's existing open tickets
+# (Jaccard word-overlap, no LLM) to avoid creating a duplicate.
 async def check_duplicates(state: AgentState) -> dict:
-    """Check for duplicate open tickets using Jaccard similarity (no LLM call).
-
-    When a duplicate is found, an LLM generates a friendly streaming notification
-    so the user sees the result immediately rather than a silent Python message.
-    """
+    """Check for duplicate open tickets. If one is found, an LLM writes a
+    friendly notification for the user."""
     user_id = state.get("user_id", "anonymous")
     original_query = state.get("helpdesk_original_query", "") or _latest_user_message(
         state

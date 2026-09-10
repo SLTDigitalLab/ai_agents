@@ -1,11 +1,9 @@
 """
-Prompt for domain/helpdesk/pipeline/classifier.py's classify_message [NODE]
-— the graph's entry point. Output contract: exactly one lowercase label
-(greeting / research / ticket_related / unclear), parsed by
-classifier.py's _normalize_message_type().
+Prompt for classifier.py's classify_message node — the graph's entry
+point. Output: one lowercase label (greeting / research / ticket_related /
+unclear), parsed by _normalize_message_type().
 """
 
-# this prompt is used to classify incoming user messages into one of four categories: greeting, research, ticket_related, or unclear. It provides detailed definitions and examples for each category, as well as rules for handling mixed-intent messages and disambiguation between research and ticket-related intents. The prompt also includes instructions for handling messages in multiple languages and security considerations. The output format is strictly defined to ensure consistent classification results.
 CLASSIFIER_SYSTEM_PROMPT = """
 You are the Message Classifier for the SLT Mobitel AI Help Desk.
 

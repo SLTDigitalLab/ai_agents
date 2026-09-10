@@ -21,11 +21,8 @@ llm = get_chat_model()
 _SRI_LANKA_TZ = ZoneInfo("Asia/Colombo")
 
 
-# [HELPER] helpdesk_tickets.createdAt/updatedAt are TIMESTAMPTZ columns —
-# psycopg hands them back as UTC-aware datetimes. Left as-is, the LLM just
-# echoes the raw UTC value (and sometimes labels it "UTC" itself), which
-# reads wrong to a Sri Lanka-based user/support team. Convert before it
-# ever reaches the model instead of hoping the LLM does time-zone math.
+# DB timestamps come back as UTC — convert to Sri Lanka time before the
+# LLM sees them, instead of relying on it to do time-zone math.
 def _format_sri_lanka_time(value) -> str:
     """Render a UTC timestamp (datetime or ISO string) in Sri Lanka time."""
     if value is None:
@@ -169,21 +166,11 @@ ticket_llm = llm.bind_tools(TICKET_TOOLS)
 kb_llm = llm.bind_tools(KB_TOOLS)
 category_llm = llm.bind_tools(CATEGORY_TOOLS)
 
-# kb_search_agent's search turn MUST call search_knowledge_base — auto tool
-# choice (kb_llm above) lets the model skip the tool entirely, which is
-# exactly what happens in practice: by the time kb_search_agent runs, the
-# message history already contains an unrelated search_solved_tickets_tool
-# call/result from research_agent, and the model mistakes that for "the
-# search already happened" and answers straight from its own knowledge (or
-# straight to the not-found script) instead of ever querying Qdrant. Forcing
-# tool_choice on the search turn removes that ambiguity; the follow-up turn
-# that reads the real tool result still uses the auto-choice kb_llm above.
+# Forced tool_choice: without it, the model sees research_agent's earlier
+# search_solved_tickets_tool result in history and skips the real KB search.
 kb_search_llm = llm.bind_tools(KB_TOOLS, tool_choice="search_knowledge_base")
 
-# research_agent's two turns each get their OWN binding, each exposing only
-# ONE tool. This isn't just prompt discipline — the model has no other tool
-# schema available at either stage, so it physically cannot call the wrong
-# one, and (for the verdict turn) cannot emit a streamable plain-text reply
-# containing an internal-only routing decision instead of calling the tool.
+# research_agent's two turns each get their own single-tool binding, so the
+# model physically can't call the wrong tool or reply in plain text instead.
 solved_ticket_search_llm = llm.bind_tools([search_solved_tickets_tool])
 solved_ticket_verdict_llm = llm.bind_tools([present_solved_answer])

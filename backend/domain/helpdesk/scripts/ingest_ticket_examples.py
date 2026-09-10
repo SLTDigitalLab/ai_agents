@@ -7,12 +7,10 @@ embeds each TRAINING-split ticket from Incidents_Feb.xlsx individually, so
 classify_ticket_category_examples() can retrieve the most similar REAL past
 tickets (and their already-known correct category) for an incoming message.
 
-Uses the IDENTICAL train/test split logic (same TEST_FRACTION/
-MIN_TEST_ROWS/random_state) as domain/helpdesk/scripts/prepare_finetune_data.py
-— only the TRAIN portion is embedded here, so the same held-out test rows
-used to evaluate every other method are never leaked into this retrieval
+Only the TRAIN portion of the same train/test split (see _split() below) is
+embedded here, so held-out test rows are never leaked into this retrieval
 corpus (which would otherwise let the search find a ticket matching
-itself and inflate the eval number falsely).
+itself and inflate any eval number falsely).
 
 Usage (from /app inside the backend container):
     python domain/helpdesk/scripts/ingest_ticket_examples.py
@@ -38,8 +36,7 @@ MIN_TEST_ROWS = 10
 
 
 def _split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Identical split logic to domain/helpdesk/scripts/prepare_finetune_data.py
-    so this embeds the same train rows and excludes the same held-out test rows."""
+    """Split by main_category so held-out test rows are excluded from ingestion."""
     train_parts = []
     test_parts = []
     for _category, group in df.groupby("main_category"):
@@ -92,10 +89,7 @@ def main() -> None:
         "--test-output",
         default=None,
         help="If set, also write the held-out test split to this .xlsx path "
-        "(message/true_category/true_sub_category columns, compatible with "
-        "run_accuracy_eval.py and build_clear_eval_set.py) — the intermediate "
-        "test-split files from earlier runs no longer exist, so this "
-        "regenerates one consistent with whatever's actually ingested.",
+        "(message/true_category/true_sub_category columns).",
     )
     args = parser.parse_args()
 

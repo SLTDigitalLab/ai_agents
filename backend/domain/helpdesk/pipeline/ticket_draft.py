@@ -3,19 +3,12 @@ Second and final steps of ticket creation (after duplicates.check_duplicates
 finds nothing): classify the issue into a category, present the draft for
 confirmation, then persist it.
 
-draft_ticket() picks a category via category_classification.
-classify_ticket_category_pipeline() and either presents a draft ticket for
-the user to confirm, or — if the classifier's self-consistency passes
-disagreed and the disagreement isn't confined to the known-unresolvable
-cluster — asks one clarifying question first (handled on the next turn by
-category_clarification_handler()). confirm_category_handler() processes
-the user's keep/change reply — on CHANGE, the new category is re-validated
-against the DB's all-categories table (list_categories()) and, if valid,
-the full draft (ticket ID, issue, new category/sub-category) is re-presented
-for one more confirmation before anything is saved, so the user always sees
-and explicitly confirms exactly what will be written; this doubles as the
-same node's re-entry point once that re-presented draft gets a reply. Only
-once the user confirms KEEP does save_ticket() write the final ticket to
+draft_ticket() picks a category and presents a draft, or asks one
+clarifying question first if the classifier wasn't confident
+(category_clarification_handler() handles the reply). confirm_category_handler()
+processes keep/change — on change, the new category is re-validated against
+the DB and the updated draft is shown again for one more confirmation
+before anything is saved. Only KEEP leads to save_ticket() writing to
 Postgres.
 """
 
@@ -48,56 +41,16 @@ from domain.helpdesk.prompts import (
 from services.helpdesk_tickets import create_helpdesk_ticket, list_categories, next_ticket_id
 
 
-# [NODE] Second step of ticket creation (after check_duplicates finds
-# nothing): picks a category via classify_ticket_category_pipeline() and
-# either presents a draft ticket for the user to confirm, or — if the
-# classifier's self-consistency passes disagreed and the disagreement
-# isn't confined to the known-unresolvable cluster — asks one clarifying
-# question first (see the Confidence Check stage; handled on the next
-# turn by category_clarification_handler()). Ends with ticket_phase =
-# "awaiting_category_confirmation" or "awaiting_category_clarification".
+# Second step of ticket creation: classifies the issue via
+# classify_ticket_category_pipeline() and presents a draft, or — if the
+# classifier wasn't confident and the disagreement isn't in the known
+# ambiguous cluster — asks one clarifying question first (see
+# category_clarification_handler for the reply).
 async def draft_ticket(state: AgentState) -> dict:
-    """Message Analyzer gate, then classify the user's issue via
-    classify_ticket_category_pipeline() (Hybrid Retrieval [KB + real-
-    ticket-examples merged/reranked] -> Hierarchical LLM Classifier ->
-    self-consistency Confidence Check), then either present the ticket
-    draft, or ask one clarifying question first — either because the
-    message itself was too thin to classify at all, or because
-    classification ran but came back low-confidence and worth asking
-    about.
-
-    Message Analyzer (added 2026-08-09): runs BEFORE classification, not
-    just earlier in the conversation like validate_kb_answer's similar
-    vague-query check (kb_search.py — which only fires when the KB search
-    ALSO already failed, a narrower, reused mechanism, not a dedicated gate
-    here). This one is unconditional: any message under
-    _VAGUE_QUERY_MIN_WORDS words that reaches draft_ticket skips
-    classify_ticket_category_pipeline() entirely — saving its 6-LLM-call
-    cost on input that was never going to classify well anyway — and asks
-    for detail via the SAME clarification phase/handler the Confidence
-    Check branch below uses (category_clarification_handler), so a ticket
-    can only ever be clarified once total, whichever reason triggered it.
-
-    Swapped in 2026-08-09, replacing classify_ticket_category_vector() —
-    measured +8.0 points real-traffic accuracy (34.5% -> 42.5% on
-    domain/helpdesk/data/representative_eval_200.xlsx). self_consistency_n=3 here
-    (not the cheaper n=1 first tried) specifically so confidence is a real
-    signal for the Confidence Check branch below — n=1 always reports
-    confidence=1.0 (nothing to vote against), which would make that branch
-    dead code. n=3 measured 44.5% accuracy (+2.0 over n=1) for 3x more LLM
-    calls (6x total vs. classify_ticket_category_vector()'s single call):
-    paying for the extra self-consistency passes is only worth it because
-    the Confidence Check now actually uses them. See
-    helpdesk-category-accuracy-gap project memory for the full comparison.
-    classify_ticket_category_vector() and classify_ticket_category_
-    examples() remain available, unswapped, for eval comparison and as a
-    quick rollback if needed.
-
-    classify_ticket_category() (the older full-category-list prompt flow)
-    and list_categories_tool remain unchanged and are still used by
-    run_accuracy_eval.py --method prompt for comparison; this node just no
-    longer calls them live.
-    """
+    """Message Analyzer gate, then classify via
+    classify_ticket_category_pipeline() and present the draft (or ask one
+    clarifying question first, either because the message was too thin to
+    classify or classification came back low-confidence)."""
     original_query = state.get("helpdesk_original_query", "") or _latest_user_message(
         state
     )
@@ -106,10 +59,8 @@ async def draft_ticket(state: AgentState) -> dict:
     continuation = _continues_prior_reply(state)
     already_clarified = state.get("helpdesk_category_clarify_count", 0) > 0
 
-    # ── Message Analyzer ─────────────────────────────────────────────────
-    # Unconditional gate, runs before classify_ticket_category_pipeline is
-    # ever called — see the docstring above for how this differs from
-    # validate_kb_answer's similar-looking but narrower, conditional check.
+    # Message Analyzer: unconditional gate before classification runs at
+    # all, so an under-5-word message skips the (expensive) classifier.
     if _is_query_too_vague(original_query) and not already_clarified:
         print(
             f"[draft_ticket] ticket_id={ticket_id!r} message too thin "
@@ -188,18 +139,13 @@ async def draft_ticket(state: AgentState) -> dict:
     }
 
 
-# [NODE] Re-entry point when draft_ticket asked a confidence-check
-# clarifying question (ticket_phase == "awaiting_category_clarification")
-# and the user has just replied. Merges the reply into the original issue
-# description and re-classifies EXACTLY ONCE MORE — helpdesk_category_
-# clarify_count is already 1 by the time we get here, so draft_ticket's
-# own low-confidence branch won't fire again even if the second pass is
-# still uncertain; this always ends in a ticket draft, never a second
-# clarifying question, keeping the loop capped at one re-ask.
+# Re-entry point once the user replies to draft_ticket's clarifying
+# question. Combines the reply with the original query and re-classifies
+# once — helpdesk_category_clarify_count is already 1 here, so this always
+# ends in a draft, never a second clarifying question.
 async def category_clarification_handler(state: AgentState) -> dict:
-    """Combine the original issue description with the user's clarifying
-    answer, re-run classify_ticket_category_pipeline() once, and present
-    the ticket draft — same output shape as draft_ticket()'s normal path."""
+    """Combine the original issue with the user's clarifying answer,
+    re-run classification once, and present the ticket draft."""
     prior_query = state.get("helpdesk_original_query", "") or ""
     clarification_reply = _latest_user_message(state)
     combined_query = (
@@ -238,40 +184,22 @@ async def category_clarification_handler(state: AgentState) -> dict:
     }
 
 
-# [NODE] Fires when ticket_phase is "awaiting_category_confirmation" (the
-# user is replying to draft_ticket's "1. Keep / 2. Change" prompt) OR
-# "awaiting_final_confirmation" (the user is replying to the UPDATED draft
-# shown after a category change, below). Same handler, same keyword
-# detection either way — the only difference is which phase a "still not
-# resolved" reply loops back to (current_phase, read from state), so a
-# not-found/no-hint/unclear reply re-asks within whichever confirmation
-# round is currently active instead of always resetting to the first one.
+# Fires on both "awaiting_category_confirmation" (reply to the first
+# draft) and "awaiting_final_confirmation" (reply to the re-presented
+# draft after a category change) — same handler; current_phase tracks
+# which round is active so a still-unresolved reply loops back to it.
 #
-# KEEP always proceeds straight to save_ticket — whether that's confirming
-# the classifier's original pick or confirming a category the user just
-# changed to, the user has, at that point, explicitly confirmed the ticket
-# with its current main/sub-category and ticket ID.
-#
-# CHANGE always re-validates the suggested category against list_categories()
-# (the DB's all-categories table) — the one true source of valid main/sub
-# category pairs. A match does NOT save immediately: it re-presents the full
-# draft (ticket ID, issue, new category/sub-category) via
-# draft_ticket_presentation_system_prompt and moves to
-# "awaiting_final_confirmation", so the user always sees and confirms
-# whatever category will actually be saved — including a category they just
-# changed to — before anything is written to the database. A category not
-# found in the DB table never advances the phase; it re-shows the valid
-# main-category list and asks again (can repeat indefinitely).
+# KEEP -> save_ticket. CHANGE -> re-validate against list_categories()
+# (the DB's all-categories table); a match re-presents the full draft for
+# one more confirmation instead of saving immediately; no match re-shows
+# the valid category list and asks again.
 async def confirm_category_handler(state: AgentState) -> dict:
     """Process the category confirmation using keyword detection.
 
     KEEP  → user confirmed the category currently on the draft, proceed to save.
-    CHANGE → validate the user's suggested category against the DB (the
-             all-categories table via list_categories()); if found, re-present
-             the full draft with the new category for one more confirmation
-             (awaiting_final_confirmation) instead of saving directly; if not
-             found, show the valid main-category names and ask them to try
-             again.
+    CHANGE → validate the user's suggested category against the DB; if found,
+             re-present the full draft for one more confirmation instead of
+             saving directly; if not found, show the valid category names.
     UNCLEAR → LLM re-prompts (streams naturally).
     """
     user_message = _latest_user_message(state)
@@ -279,10 +207,6 @@ async def confirm_category_handler(state: AgentState) -> dict:
     words = set(user_lower.split())
     main_category = state.get("helpdesk_draft_main_category", "")
     sub_category = state.get("helpdesk_draft_sub_category", "")
-    # Whichever confirmation round is currently active — first pass
-    # ("awaiting_category_confirmation") or a re-review after a change
-    # ("awaiting_final_confirmation") — a reply that doesn't resolve things
-    # (not found / no hint / unclear) loops back to this same round.
     current_phase = state.get("helpdesk_ticket_phase", "") or "awaiting_category_confirmation"
 
     keep_signals = {"1", "keep", "yes", "ok", "okay", "sure", "confirm", "good", "fine", "correct"}
@@ -311,7 +235,6 @@ async def confirm_category_handler(state: AgentState) -> dict:
         elif hint:
             suggested_main = hint.strip().title()
 
-        # ── Load all valid categories from DB ────────────────────────────
         try:
             all_categories = list_categories()
         except Exception as exc:
@@ -325,11 +248,8 @@ async def confirm_category_handler(state: AgentState) -> dict:
         ]
 
         if suggested_main and valid_categories:
-            # 1. Exact match on BOTH main category and subcategory, when the
-            #    user specified both (e.g. "Network/WiFi Issues"). Must be
-            #    checked as a pair before any main-category-only match, or a
-            #    main-category hit would grab whichever subcategory sorts
-            #    first under that name and silently ignore suggested_sub.
+            # Match order matters: category+subcategory pair first, or a
+            # main-category-only hit could grab the wrong subcategory.
             matched: tuple[str, str] | None = None
             if suggested_sub:
                 matched = next(
@@ -340,16 +260,12 @@ async def confirm_category_handler(state: AgentState) -> dict:
                           or sc.lower() in suggested_sub.lower())),
                     None,
                 )
-
-            # 2. Exact match on main category name only (no subcategory hint,
-            #    or none of that category's subcategories matched it).
             if not matched:
                 matched = next(
                     ((cn, sc) for cn, sc in valid_categories
                      if cn.lower() == suggested_main.lower()),
                     None,
                 )
-            # 3. Partial match on main category name
             if not matched:
                 matched = next(
                     ((cn, sc) for cn, sc in valid_categories
@@ -357,8 +273,6 @@ async def confirm_category_handler(state: AgentState) -> dict:
                      or cn.lower() in suggested_main.lower()),
                     None,
                 )
-            # 4. Match on subcategory alone when user specified one but no
-            #    main-category match was found above.
             if not matched and suggested_sub:
                 matched = next(
                     ((cn, sc) for cn, sc in valid_categories
@@ -394,9 +308,6 @@ async def confirm_category_handler(state: AgentState) -> dict:
                     "helpdesk_draft_sub_category": sub_category,
                 }
 
-            # Category not found in the all-categories DB table — show the
-            # valid list and ask again, staying in whichever confirmation
-            # round is currently active.
             print(f"[confirm_category_handler] → CHANGE (not found: {suggested_main!r}) — re-asking")
             unique_names = sorted({cn for cn, _ in valid_categories})
             category_list = "\n".join(f"• {cn}" for cn in unique_names)
@@ -417,7 +328,7 @@ async def confirm_category_handler(state: AgentState) -> dict:
                 "helpdesk_ticket_phase": current_phase,
             }
 
-        # User said "change" but gave no category — ask what they want
+        # "change" with no category named — ask what they want
         print("[confirm_category_handler] → CHANGE (no hint) — requesting category")
         unique_names = sorted({cn for cn, _ in valid_categories}) if valid_categories else []
         category_list = "\n".join(f"• {cn}" for cn in unique_names)
@@ -433,7 +344,6 @@ async def confirm_category_handler(state: AgentState) -> dict:
             "helpdesk_ticket_phase": current_phase,
         }
 
-    # UNCLEAR — ask again via streaming LLM so the user sees the prompt
     print("[confirm_category_handler] → UNCLEAR")
     response = await llm.ainvoke([
         {
@@ -448,8 +358,6 @@ async def confirm_category_handler(state: AgentState) -> dict:
     }
 
 
-# [ROUTER] Category confirmed/changed successfully → save the ticket;
-# still unclear or not found → end and wait for the user to try again.
 def route_after_category_confirmation(
     state: AgentState,
 ) -> Literal["save_ticket", "__end__"]:
@@ -462,9 +370,8 @@ def route_after_category_confirmation(
     return "__end__"
 
 
-# [NODE] Terminal step of ticket creation: writes the ticket to Postgres,
-# replies with the confirmation, and clears every helpdesk_* phase field
-# back to empty so the next message starts a fully fresh turn.
+# Terminal step: writes the ticket to Postgres and clears the phase fields
+# so the next message starts a fresh turn.
 async def save_ticket(state: AgentState) -> dict:
     """Persist the ticket to the database and return a confirmation message."""
     user_id = state.get("user_id", "anonymous")

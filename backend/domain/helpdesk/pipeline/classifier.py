@@ -1,10 +1,7 @@
 """
-STEP 1 — CLASSIFIER NODE, STEP 2 — ROUTER FUNCTION.
-
-Graph entry point: classify_message labels the message as one of
-"greeting" / "research" / "ticket_related", and route_by_message_type sends
-it to exactly one of the three top-level branches. See
-domain/helpdesk/pipeline/graph.py's module docstring for the overall flow.
+Graph entry point: classify_message labels the message as "greeting" /
+"research" / "ticket_related", and route_by_message_type sends it to one
+of the three top-level branches.
 """
 
 from typing import Literal
@@ -20,20 +17,11 @@ from domain.helpdesk.pipeline.helpers import (
 from domain.helpdesk.prompts import CLASSIFIER_SYSTEM_PROMPT
 
 
-# [NODE] Graph entry point (wired to START). Sets state["message_type"] to
-# one of "greeting" / "research" / "ticket_related", which route_by_message_type
-# reads next. Makes one LLM call on a fresh turn; makes NO LLM call while a
-# multi-turn phase is active (see the mid_flow branch below).
+# Graph entry point. Skips the LLM call while a mid-flow phase is active
+# (a short reply like "keep it" could get mislabeled) — only a bare
+# greeting breaks out of the flow and resets state.
 async def classify_message(state: AgentState) -> dict:
-    """Classify the user message and store the result in state.
-
-    If a mid-flow phase is active, skip the LLM classifier entirely — it has
-    no visibility into the pending question, so a short flow reply (e.g.
-    "keep it") could get mislabeled as a greeting. Use a deterministic
-    bare-greeting check instead: only a message that IS just a greeting
-    (e.g. "Good Morning") breaks out of the active phase and resets state so
-    the user gets a proper welcome response; anything else keeps the flow.
-    """
+    """Classify the user message and store the result in state."""
     user_message = _latest_user_message(state)
 
     research_phase = state.get("helpdesk_research_phase", "")
@@ -86,8 +74,9 @@ async def classify_message(state: AgentState) -> dict:
     return {"message_type": message_type}
 
 
-# [ROUTER] Reads state["message_type"] (set by classify_message) and sends
-# the turn to exactly one of the 3 top-level branches below.
+# Reads state["message_type"] and sends the turn to one of 3 branches.
+# Everything downstream (KB search, satisfaction check, ticket creation)
+# happens inside research_agent's branch, not as direct edges from here.
 def route_by_message_type(
     state: AgentState,
 ) -> Literal[
@@ -95,12 +84,6 @@ def route_by_message_type(
     "research_agent",
     "ticket_status_agent",
 ]:
-    """Top-level classifier routing — exactly three destinations.
-
-    All follow-up steps (solved-ticket check, KB search, satisfaction check,
-    self-or-human choice, category confirmation) happen downstream of
-    research_agent, not as direct branches from here.
-    """
     message_type = state.get("message_type", "research")
     routing_map = {
         "greeting": "greeting_agent",

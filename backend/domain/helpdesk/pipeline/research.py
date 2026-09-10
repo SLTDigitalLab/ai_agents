@@ -1,12 +1,10 @@
 """
-Research workflow layer 1: solved tickets → satisfaction check.
+Research workflow layer 1: solved tickets -> satisfaction check.
 
 research_agent checks previously-solved tickets before ever hitting the
 knowledge base; satisfaction_handler processes the user's reply once a
-solved-ticket answer has been presented. See
-domain/helpdesk/pipeline/graph.py's module docstring for how this fits into
-the overall flow, and kb_search.py for the next layer (KB search) this
-hands off to.
+solved-ticket answer has been presented. See kb_search.py for the next
+layer (KB search) this hands off to.
 """
 
 import re
@@ -27,37 +25,20 @@ from domain.helpdesk.tools.helpdesk_tools import (
 )
 
 
-# [NODE] Layer 1 of the research branch: checks previously-solved tickets
-# before ever hitting the knowledge base. Runs twice per fresh question
-# (search, then verdict — see the docstring below), and is also the
-# re-entry point for the awaiting_satisfaction / awaiting_self_or_human /
-# awaiting_category_confirmation / awaiting_final_confirmation /
-# awaiting_retry_clarification phases, where it just forwards the turn on
-# without calling the LLM.
+# Layer 1 of the research branch: checks previously-solved tickets before
+# hitting the knowledge base. Also the re-entry point for the mid-flow
+# phases below, which it just forwards on without calling the LLM.
+#
+# Turn 1 — searches solved tickets.
+# Turn 2 — reads the search result and calls present_solved_answer with
+# matched=true/false (a tool call, never plain text, so a "no match"
+# verdict can't leak to the user before this function decides what to do).
 async def research_agent(state: AgentState) -> dict:
-    """
-    Entry point for all research work: a fresh question, or a continuation
-    of a multi-turn phase. research_agent only owns the solved-ticket +
-    satisfaction layer — everything else (retry clarification, self-or-human,
-    category confirmation) is forwarded to kb_search_agent untouched, which
-    is the next layer's dispatcher. Phase continuations make no LLM call here.
-
-    Turn 1 — solved_ticket_search_llm (only search_solved_tickets_tool bound)
-             sees the user question → emits a search tool_call → graph
-             routes to research_tools.
-    Turn 2 — ToolNode has appended a ToolMessage with the search results.
-             solved_ticket_verdict_llm (only present_solved_answer bound) is
-             invoked instead — its verdict arrives as that tool call's
-             structured args, never as free text, so a "no match" verdict
-             can never stream to the user as visible text before this
-             function gets to decide what to do with it:
-               a) matched=true  → presents the answer + asks satisfaction → END
-               b) matched=false → routes to kb_search_agent
-    """
+    """Entry point for research: a fresh question, or a continuation of a
+    multi-turn phase."""
     research_phase = state.get("helpdesk_research_phase", "")
     ticket_phase = state.get("helpdesk_ticket_phase", "")
 
-    # Phase continuations: defer to route_after_research, no LLM call here.
     if research_phase == "awaiting_satisfaction":
         print(
             "[research_agent] awaiting satisfaction response → dispatching to satisfaction_handler"
@@ -91,15 +72,12 @@ async def research_agent(state: AgentState) -> dict:
 
     system_prompt = {"role": "system", "content": RESEARCH_SYSTEM_PROMPT}
 
-    # The last message being a ToolMessage means research_tools already ran
-    # search_solved_tickets_tool earlier in this same mini-loop — so this is
-    # Turn 2 (the verdict), not a fresh question.
+    # A ToolMessage as the last message means the search already ran —
+    # this is Turn 2, not a fresh question.
     last_message = messages[-1] if messages else None
     search_already_ran = getattr(last_message, "type", "") == "tool"
 
     if not search_already_ran:
-        # Turn 1 — only the search tool is bound, so the model can't jump
-        # straight to a verdict before it has results to judge.
         response = await solved_ticket_search_llm.ainvoke([system_prompt, *messages])
         print(f"[research_agent] Turn 1 tool_calls={getattr(response, 'tool_calls', None)}")
         return {
@@ -107,9 +85,6 @@ async def research_agent(state: AgentState) -> dict:
             "helpdesk_original_query": user_message,
         }
 
-    # Turn 2 — only present_solved_answer is bound, so its tool-call args are
-    # the ONLY channel available; there is no plain-text path for the model
-    # to use here at all.
     response = await solved_ticket_verdict_llm.ainvoke([system_prompt, *messages])
     tool_calls = getattr(response, "tool_calls", None) or []
     decision = next(
@@ -135,10 +110,8 @@ async def research_agent(state: AgentState) -> dict:
             "helpdesk_original_query": user_message,
         }
 
-    # Safety net: the model ignored the tool-only instruction and replied
-    # with plain text. That text may already have streamed live and can't be
-    # un-sent, but we still must not trust unvalidated freeform text as a
-    # "matched" answer — fail safe by treating it as no-match.
+    # Safety net: model ignored the tool-only instruction and replied with
+    # plain text — don't trust it as a match, fail safe to no-match.
     print(
         "[research_agent] WARNING: verdict turn returned no present_solved_answer "
         f"call — reply={_message_to_text(response)[:100]!r}"
@@ -149,9 +122,6 @@ async def research_agent(state: AgentState) -> dict:
     }
 
 
-# [ROUTER] Decides what happens after research_agent runs: execute its
-# tool call, hand off to the KB layer, wait for the user's satisfaction
-# reply, or end the turn.
 def route_after_research(
     state: AgentState,
 ) -> Literal[
@@ -160,29 +130,15 @@ def route_after_research(
     "satisfaction_handler",
     "__end__",
 ]:
-    """
-    research_agent only owns the solved-ticket + satisfaction layer:
-      - phase == awaiting_satisfaction + last msg is AI
-                                                → END (just asked the question,
-                                                  wait for user reply)
-      - phase == awaiting_satisfaction + last msg is human
-                                                → satisfaction_handler (user replied)
-      - phase in (awaiting_self_or_human,
-                  awaiting_category_confirmation,
-                  awaiting_final_confirmation)   → forward to kb_search_agent
-      - tool_calls present                      → execute the tool
-      - phase == no_solved_match                → fall through to KB search
-      - otherwise                               → END
-    """
+    """After research_agent: execute a tool call, hand off to KB search,
+    wait for a satisfaction reply, or end the turn."""
     research_phase = state.get("helpdesk_research_phase", "")
 
     if research_phase == "awaiting_satisfaction":
         last_msg = state["messages"][-1]
         if getattr(last_msg, "type", "") == "ai":
-            # research_agent just produced the answer — wait for user's reply
             print("[router] solved match found → ending (awaiting user satisfaction)")
             return "__end__"
-        # User has replied to the satisfaction question
         print("[router] user replied to satisfaction check → satisfaction_handler")
         return "satisfaction_handler"
 
@@ -209,16 +165,10 @@ def route_after_research(
     return "__end__"
 
 
-# [NODE] Fires only when research_phase == "awaiting_satisfaction" and the
-# user has just replied to "did that answer your question?". Pure keyword
-# matching — no LLM call for the decision itself, only for the closing reply.
+# Fires when the user replies to "did that answer your question?". Pure
+# keyword matching — no LLM call for the decision, only for the closing reply.
 async def satisfaction_handler(state: AgentState) -> dict:
-    """Handle the user's satisfaction response using keyword matching.
-
-    Avoids an internal LLM classification call (which would stream labels like
-    NOT_SATISFIED to the user). The closing message for the satisfied path still
-    uses an LLM so it streams naturally.
-    """
+    """Handle the user's satisfaction response using keyword matching."""
     user_message = _latest_user_message(state)
     user_id = state.get("user_id", "anonymous")
     user_lower = user_message.lower().strip()
@@ -292,8 +242,6 @@ async def satisfaction_handler(state: AgentState) -> dict:
     }
 
 
-# [ROUTER] Reads satisfaction_handler's verdict: not satisfied → KB search,
-# satisfied → end (satisfaction_handler already sent the closing message).
 def route_after_satisfaction(
     state: AgentState,
 ) -> Literal["kb_search_agent", "__end__"]:

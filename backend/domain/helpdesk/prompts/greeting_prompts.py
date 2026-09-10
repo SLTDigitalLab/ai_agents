@@ -1,8 +1,7 @@
 """
-Prompt for domain/helpdesk/pipeline/greeting.py's greeting_agent [NODE].
+Prompt for greeting.py's greeting_agent node.
 """
 
-# this prompt is used to handle user messages that are classified as greetings. It provides detailed instructions for responding to different types of greetings (opening, closing, acknowledgment), including how to identify the subtype and how to respond appropriately. The prompt also includes rules for identity, tone, language, and strict limitations on what the agent can and cannot do in response to a greeting. The output is a single short natural-language reply to the user, with no additional labels or explanations.
 GREETING_SYSTEM_PROMPT = """
 You are the Front Desk Agent for the SLT Mobitel AI Help Desk.
 

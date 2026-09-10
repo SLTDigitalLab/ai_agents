@@ -3,26 +3,18 @@ CATEGORY PREDICTION PIPELINE — every classify_ticket_category*() variant
 used to turn a user's issue text into a (main_category, sub_category) pair,
 plus the shared validation/formatting helpers they all rely on.
 
-classify_ticket_category_pipeline() is the one actually wired into the live
-graph (called from ticket_draft.draft_ticket() / category_clarification_
-handler()): Hybrid Retrieval (domain/helpdesk/tools/hybrid_retrieval.py) ->
-Hierarchical LLM Classifier (_classify_hierarchical, two stages: main
-category then sub-category) -> self-consistency Confidence Check (vote
-across self_consistency_n independent passes).
+classify_ticket_category_pipeline() is the one wired into the live graph
+(called from ticket_draft.py): Hybrid Retrieval -> Hierarchical LLM
+Classifier -> self-consistency Confidence Check.
 
-Every other classify_ticket_category_*() function here — classify_ticket_
-category() (full-list prompt baseline), classify_ticket_category_vector()
-(single-shot vector retrieval, the classifier live traffic used before
-2026-08-09), classify_ticket_category_finetuned()/_finetuned_vector(), and
-classify_ticket_category_examples() (real-ticket retrieval) — is [EVAL-ONLY]:
-kept for domain/helpdesk/scripts/run_accuracy_eval.py's A/B comparison and as a
-rollback path, not called from the live conversational graph. See
-helpdesk-category-accuracy-gap project memory for the accuracy numbers
-behind the 2026-08-09 swap to the pipeline classifier.
+Every other classify_ticket_category_*() function here is [EVAL-ONLY] —
+kept for run_accuracy_eval.py's A/B comparison and as a rollback path, not
+called from the live graph. See helpdesk-category-accuracy-gap project
+memory for the accuracy numbers behind picking the pipeline classifier.
 
 All classifiers converge on _resolve_category() to snap the LLM's proposed
-category text onto a real row from the authoritative Postgres category
-list — the LLM's own wording is never trusted as-is.
+category text onto a real row from the Postgres category list — the LLM's
+own wording is never trusted as-is.
 """
 
 import asyncio
@@ -49,22 +41,14 @@ from domain.helpdesk.tools.ticket_example_tools import search_ticket_examples
 from domain.helpdesk.tools.hybrid_retrieval import search_hybrid_candidates
 from domain.helpdesk.tools.helpdesk_tools import category_llm, list_categories_tool
 
-# Confidence-Check stage (see ticket_draft.draft_ticket() below): below this
-# self-consistency agreement fraction, ask the user one clarifying
-# question instead of drafting on a guess. Matches the threshold used to
-# measure "low-confidence rate" in domain/helpdesk/scripts/run_pipeline_eval.py
-# (catches "not all 3 self-consistency passes agreed" at n=3: confidence
-# 1/3 or 2/3, not just 1/3).
+# Below this self-consistency agreement fraction, ask the user one
+# clarifying question instead of drafting on a guess.
 _CATEGORY_CONFIDENCE_THRESHOLD = 0.67
 
-# The three categories that describe the same real-world event (an order
-# stuck somewhere after submission) from three different backend systems'
-# point of view — see helpdesk-category-accuracy-gap project memory. A
-# customer can't tell you which backend system currently owns their order,
-# so when a low-confidence disagreement is BETWEEN these three, asking a
-# clarifying question wastes a turn instead of resolving anything —
-# ticket_draft.draft_ticket() skips straight to drafting for this specific
-# case.
+# Three categories describing the same real-world event (an order stuck
+# after submission) from three different backend systems' point of view —
+# a customer can't say which system owns it, so a low-confidence
+# disagreement between these three skips the clarifying question.
 _AMBIGUOUS_CATEGORY_CLUSTER = {
     "SOA",
     "CRM OM - After Submit Issues",
@@ -72,11 +56,9 @@ _AMBIGUOUS_CATEGORY_CLUSTER = {
 }
 
 
-# [HELPER] Regex-extracts "Category: X" / "Sub-category: Y" out of an LLM
-# reply. Used by every classify_ticket_category* variant below.
 def _parse_category_draft(reply: str) -> tuple[str, str]:
-    """Extract the **Category:** / **Sub-category:** values draft_ticket_system_prompt
-    instructs the LLM to emit in its reply."""
+    """Extract the **Category:** / **Sub-category:** values an LLM reply
+    is expected to contain."""
     main_category = ""
     sub_category = ""
     cat_match = re.search(
@@ -96,33 +78,23 @@ def _parse_category_draft(reply: str) -> tuple[str, str]:
     return main_category, sub_category
 
 
-# [HELPER] Snaps an LLM-proposed (main_category, sub_category) pair onto a
-# real row from the authoritative Postgres category list — the LLM's own
-# wording is never trusted as-is. Tries exact match, then same-category
-# partial/keyword match, then global partial/keyword match, in that order.
 def _resolve_category(
     main_category: str,
     sub_category: str,
     original_query: str,
     valid_categories: list[tuple[str, str, str, str]],
 ) -> tuple[str, str]:
-    """Validate an LLM-proposed category/subcategory pair against the
-    authoritative DB list, using exact → partial → keyword-overlap fallback
-    strategies, so callers always end up with a real DB category. Keyword
-    overlap also weighs each category's description and mined keywords, not
-    just its name, since two subcategories can share generic wording but
-    describe different scopes. Returns the LLM's own text unchanged if
+    """Snap an LLM-proposed category/subcategory onto a real DB row —
+    exact match, then same-category partial/keyword match, then global
+    keyword-overlap fallback. Returns the LLM's own text unchanged if
     valid_categories is empty."""
     if not valid_categories:
         return main_category, sub_category
 
     matched: tuple[str, str, str, str] | None = None
 
-    # 1. Exact case-insensitive match on BOTH category_name and subcategory.
-    #    Must be checked as a pair first — matching category_name alone would
-    #    grab whichever subcategory happens to sort first under that name,
-    #    silently swapping out the subcategory the LLM actually chose (and
-    #    that the user already saw in the draft).
+    # Exact match on BOTH fields first — matching category_name alone
+    # would grab whichever subcategory sorts first under that name.
     matched = next(
         (
             (cn, sc, desc, kw)
@@ -133,9 +105,8 @@ def _resolve_category(
         None,
     )
 
-    # 2. category_name matches exactly, but subcategory text doesn't — stay
-    #    within that category_name's own subcategories rather than falling
-    #    through to an unrelated category.
+    # category_name matches exactly but subcategory doesn't — stay within
+    # that category's own subcategories.
     if not matched and main_category:
         same_category = [
             (cn, sc, desc, kw)
@@ -143,7 +114,6 @@ def _resolve_category(
             if cn.lower() == main_category.lower()
         ]
         if same_category:
-            # 2a. Partial/substring match on subcategory text.
             matched = next(
                 (
                     (cn, sc, desc, kw)
@@ -156,11 +126,9 @@ def _resolve_category(
                 ),
                 None,
             )
-            # 2b. No subcategory text match — pick the subcategory with the
-            #     most keyword overlap against the user's issue, scored over
-            #     the subcategory name, its description, and its mined
-            #     keywords, instead of defaulting to whichever row sorts
-            #     first.
+            # No subcategory text match — pick by keyword overlap against
+            # the subcategory's name/description/keywords instead of
+            # defaulting to whichever row sorts first.
             if not matched:
                 query_words = set(
                     re.sub(r"[^\w\s]", "", original_query.lower()).split()
@@ -177,8 +145,7 @@ def _resolve_category(
                         best_score = score
                         matched = (cn, sc, desc, kw)
 
-    # 3. Partial string match on category_name (category_name itself wasn't
-    #    an exact hit — e.g. LLM said "Networking" for DB's "Network").
+    # Partial string match on category_name (e.g. "Networking" vs "Network").
     if not matched:
         matched = next(
             (
@@ -192,8 +159,7 @@ def _resolve_category(
             ),
             None,
         )
-    # 4. Keyword overlap between issue text and category name + subcategory +
-    #    description + mined keywords (last resort).
+    # Last resort: keyword overlap across all categories.
     if not matched:
         query_words = set(re.sub(r"[^\w\s]", "", original_query.lower()).split())
         best_score = -1
@@ -212,17 +178,10 @@ def _resolve_category(
 
 
 # [EVAL-ONLY] Original prompt-based classifier: shows the LLM the full
-# category list via list_categories_tool. ticket_draft.draft_ticket() no
-# longer calls this live — see classify_ticket_category_pipeline() for the
-# current one (classify_ticket_category_vector() below is the previous live
-# classifier, now eval-only too).
+# category list via list_categories_tool.
 async def classify_ticket_category(message: str) -> tuple[str, str]:
-    """Run the same category classification draft_ticket() uses, standalone —
-    for batch accuracy-evaluation scripts. Not part of the conversational
-    graph: makes its own two-turn tool call directly and returns the
-    resolved (main_category, sub_category) without touching graph state or
-    creating a ticket.
-    """
+    """Run the same category classification draft_ticket() used to use,
+    standalone, for batch accuracy-evaluation scripts."""
     system_prompt = {
         "role": "system",
         "content": draft_ticket_system_prompt(message, "EVAL", continuation=False),
@@ -266,12 +225,9 @@ async def classify_ticket_category(message: str) -> tuple[str, str]:
     return _resolve_category(main_category, sub_category, message, valid_categories)
 
 
-# [HELPER] Renders search_category_candidates() vector-search results as
-# numbered text blocks for the LLM prompt in classify_ticket_category_vector().
 def _format_category_candidates(candidates: list[dict]) -> str:
     """Render search_category_candidates() results as numbered blocks for
-    category_vector_system_prompt(). Only fields useful for disambiguation
-    are surfaced — raw vector scores are omitted from the LLM-facing text."""
+    category_vector_system_prompt()."""
     blocks: list[str] = []
     for i, c in enumerate(candidates, start=1):
         lines = [
@@ -292,32 +248,12 @@ def _format_category_candidates(candidates: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-# [EVAL-ONLY as of 2026-08-09] Formerly THE LIVE CLASSIFIER — draft_ticket()
-# called this until it was swapped for classify_ticket_category_pipeline()
-# (measured +8.0 points real-traffic accuracy, see that function's
-# docstring). Kept as-is for run_accuracy_eval.py --method vector A/B
-# comparison and as a fast rollback path.
-# Retrieves top-k similar categories from the category-KB Qdrant collection,
-# asks the LLM to pick the best match from just those candidates, then
-# validates the pick against Postgres via _resolve_category().
+# [EVAL-ONLY] Formerly the live classifier before classify_ticket_category_
+# pipeline() replaced it. Retrieves top-k similar categories from the
+# category-KB Qdrant collection, asks the LLM to pick from just those.
 async def classify_ticket_category_vector(message: str, k: int = 5) -> tuple[str, str]:
     """Vector-retrieval variant of classify_ticket_category(), for accuracy
-    A/B comparison (see domain/helpdesk/scripts/run_accuracy_eval.py --method
-    vector). Standalone from draft_ticket()'s live flow.
-
-    Instead of prompting the LLM with the full category list via
-    list_categories_tool, this retrieves the top-k most similar categories
-    from the category knowledge base Qdrant collection (ingested by
-    domain/helpdesk/scripts/ingest_category_kb.py) and asks the LLM to pick the
-    best match from just those candidates. The final answer is still
-    validated against the authoritative Postgres category list via
-    _resolve_category(), exactly like the prompt-based classifier.
-
-    k defaults to 5 but is caller-configurable (see run_accuracy_eval.py
-    --top-k) — short, keyword-poor ticket messages carry little semantic
-    signal, so a wider candidate net trades away some of the context-size
-    win for better recall of the true category.
-    """
+    A/B comparison (run_accuracy_eval.py --method vector)."""
     candidates = await search_category_candidates(message, k=k)
     valid_categories = _load_valid_categories("classify_ticket_category_vector")
 
@@ -338,12 +274,9 @@ async def classify_ticket_category_vector(message: str, k: int = 5) -> tuple[str
     return _resolve_category(main_category, sub_category, message, valid_categories)
 
 
-# [HELPER] Renders search_hybrid_candidates() results as numbered text
-# blocks, tagging each candidate's source (kb / example / kb+example) so
-# the LLM can weigh a real-ticket-backed candidate differently from a
-# KB-only one. Used by _classify_hierarchical()'s stage-2 (sub-category)
-# prompt; stage 1 (main-category) uses its own coarser summary instead.
 def _format_hybrid_candidates(candidates: list[dict]) -> str:
+    """Render search_hybrid_candidates() results as numbered blocks,
+    tagging each candidate's source (kb / example / kb+example)."""
     blocks: list[str] = []
     for i, c in enumerate(candidates, start=1):
         lines = [
@@ -367,46 +300,24 @@ def _format_hybrid_candidates(candidates: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-# [HELPER] Single pass of the two-step Hierarchical LLM Classifier stage:
-# pick the main category first (from the distinct main categories present
-# in the hybrid-retrieval candidate pool), then pick the sub-category
-# scoped to only that main category's candidates. Two LLM calls instead of
-# classify_ticket_category_vector()'s one — see
-# classify_ticket_category_pipeline() for why (self-consistency needs a
-# clean, resolved (main, sub) pair per pass to vote over) and for the
-# design note on why this still doesn't resolve the SOA / CRM OM - After
-# Submit Issues / Clarity OSS confusion (see helpdesk-category-accuracy-gap
-# memory): that ambiguity is BETWEEN main categories, and stage 1 has to
-# pick one main category, so a hierarchical split doesn't sidestep it —
-# it's still one guess among ~3 confusable options, just made explicitly
-# instead of implicitly.
+# Two-step classifier: pick the main category from the hybrid-retrieval
+# candidates, then pick the sub-category scoped to that main category.
 async def _classify_hierarchical(
     message: str,
     candidates: list[dict],
     valid_categories: list[tuple[str, str, str, str]],
     llm_client=None,
 ) -> tuple[str, str]:
-    """llm_client defaults to the module's shared deterministic `llm`
-    (temperature=0, see helpers.py). classify_ticket_category_pipeline()
-    passes a higher-temperature client instead when self_consistency_n > 1,
-    so the multiple passes can actually disagree with each other.
+    """llm_client defaults to the shared deterministic `llm`;
+    classify_ticket_category_pipeline() passes a higher-temperature client
+    when self_consistency_n > 1 so passes can actually disagree.
 
-    Both ainvoke() calls below pass config={"tags": [INTERNAL_LLM_TAG]} —
-    without it, routers/chat.py's astream_events listener treats these
-    internal, never-user-facing "**Category:** X" replies exactly like any
-    other LLM call in the graph and streams their raw tokens straight to
-    the user. With self_consistency_n>1 running several of these calls
-    CONCURRENTLY (asyncio.gather in classify_ticket_category_pipeline),
-    their tokens interleave into unreadable garbage ahead of the real,
-    final draft reply — observed live 2026-08-11 as e.g. "****Category
-    Category:** CRM SR & TT:**** Issues CRM...". routers/chat.py's
-    SUPPRESS_STREAM_NODES can't fix this by node name alone, since these
-    calls run inside the SAME graph node (ticket_draft.draft_ticket /
-    category_clarification_handler) as the legitimate final streaming
-    reply — only a tag lets chat.py tell them apart within one node."""
+    Both calls pass tags=[INTERNAL_LLM_TAG] so routers/chat.py's stream
+    listener filters these internal "**Category:** X" replies out of the
+    user-facing stream — without it, concurrent self-consistency passes
+    interleave their tokens into garbage ahead of the real reply."""
     client = llm_client or llm
 
-    # Best-scoring candidate per distinct main category, ranked by that score.
     best_by_main: dict[str, dict] = {}
     for c in candidates:
         mc = c["main_category"]
@@ -458,50 +369,21 @@ async def _classify_hierarchical(
     return _resolve_category(chosen_main, chosen_sub, message, valid_categories)
 
 
-# [LIVE — swapped in 2026-08-09] Full "Hybrid Retrieval -> Candidate
-# Reranker -> Top-k -> Hierarchical LLM Classifier -> Confidence Check"
-# pipeline. Called from ticket_draft.draft_ticket() / category_
-# clarification_handler() — see this module's docstring for the accuracy
-# numbers behind the swap from classify_ticket_category_vector().
+# [LIVE] Full pipeline: Hybrid Retrieval -> Hierarchical LLM Classifier ->
+# Confidence Check. Called from ticket_draft.py.
 #
-# Confidence is measured by self-consistency: run the hierarchical
-# classifier self_consistency_n times (temperature > 0 on a dedicated
-# sampling client, see _get_sampling_llm) and take the majority (main, sub)
-# vote; confidence is that majority's vote share. This directly targets the
-# "selection gap" found in Helpdesk_Prediction_Detail_Report.pdf
-# (recall@5 65% vs. final accuracy 34.5% on representative_eval_200.xlsx) —
-# cases where the right candidate was on the table but a single LLM pass
-# picked a different one — by letting multiple independent passes outvote a
-# one-off wrong pick, AND by surfacing (via the returned confidence) which
-# tickets a live caller should route to a clarification turn instead of
-# trusting outright.
+# Confidence is self-consistency: run the hierarchical classifier
+# self_consistency_n times at temperature > 0 and take the majority vote;
+# confidence is that majority's vote share.
 async def classify_ticket_category_pipeline(
     message: str, k: int = 5, self_consistency_n: int = 3
 ) -> tuple[str, str, float]:
-    """Returns (main_category, sub_category, confidence). confidence is
-    the fraction of self_consistency_n independent hierarchical-classifier
-    passes that agreed with the returned (main_category, sub_category)
-    pair — 1.0 means every pass agreed, 1/self_consistency_n means every
-    pass disagreed with every other (the plurality winner among all-
-    distinct picks).
+    """Returns (main_category, sub_category, confidence) — confidence is
+    the fraction of self_consistency_n passes that agreed.
 
-    Never raises. This is the most expensive, most external-dependency-
-    heavy step in the whole ticket-creation chain (an embedding+Qdrant
-    search plus up to 2 * self_consistency_n LLM calls) and, unlike every
-    other external call in this file (search_hybrid_candidates() itself,
-    _load_valid_categories()'s list_categories() call, etc.), it used to
-    have no try/except of its own — one failed LLM call (timeout, a
-    provider-side content-filter rejection on unusual-looking text like an
-    account/order number, ...) would raise straight out of draft_ticket()/
-    category_clarification_handler(), past chat.py's outer handler, killing
-    the ticket-creation turn right after kb_search_agent's "not found, let
-    me help you create a ticket" reply had already streamed — a real
-    conversation observed live 2026-09-10 stopping exactly there, with no
-    ticket draft ever following. Falls back to the same "no candidates"
-    keyword-overlap resolution already used below when retrieval itself
-    comes back empty, so a failure here degrades to a low-confidence
-    fallback category (triggering draft_ticket()'s clarification-question
-    path) instead of ending the conversation."""
+    Never raises: falls back to keyword-overlap resolution (confidence 0.0)
+    on any error, so an LLM/embedding failure mid-classification degrades
+    to a low-confidence fallback instead of killing the ticket-creation turn."""
     valid_categories = _load_valid_categories("classify_ticket_category_pipeline")
 
     try:
@@ -513,8 +395,7 @@ async def classify_ticket_category_pipeline(
             return main_category, sub_category, 0.0
 
         # A single pass has nothing to vote against — stay deterministic
-        # (temperature=0) and report full confidence rather than spending a
-        # sampling-temperature call for no benefit.
+        # and report full confidence.
         if self_consistency_n <= 1:
             main_category, sub_category = await _classify_hierarchical(message, candidates, valid_categories)
             return main_category, sub_category, 1.0
@@ -540,17 +421,10 @@ async def classify_ticket_category_pipeline(
 
 
 @lru_cache(maxsize=4)
-# [HELPER] Cached higher-temperature client for classify_ticket_category_
-# pipeline()'s self-consistency sampling.
 def _get_sampling_llm(temperature: float):
-    """Separate client from the module's shared `llm` (temperature=0, see
-    core/llm.py's get_chat_model()) — every other classifier in this file
-    wants deterministic output, but self-consistency voting needs actual
-    variation across passes to be meaningful. At temperature=0, three
-    passes would return the same pick every time and confidence would
-    always read 1.0, defeating the point. Mirrors get_chat_model()'s
-    provider branching so this still works if LLM_PROVIDER is switched to
-    gemini."""
+    """Higher-temperature client for self-consistency sampling — at
+    temperature=0 every pass would pick the same answer and confidence
+    would always read 1.0."""
     provider = settings.LLM_PROVIDER.lower().strip()
     if provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
@@ -568,13 +442,9 @@ def _get_sampling_llm(temperature: float):
     )
 
 
-# [HELPER] Loads the authoritative (category_name, subcategory, description,
-# keywords) list from Postgres for the vector/finetuned/examples classifiers
-# and _resolve_category() to validate against.
 def _load_valid_categories(log_prefix: str) -> list[tuple[str, str, str, str]]:
-    """Shared DB-truth loader for the vector/hybrid classifiers — same
-    (category_name, subcategory, description, keywords) tuple shape
-    _resolve_category() expects."""
+    """Load the (category_name, subcategory, description, keywords) list
+    from Postgres for the classifiers and _resolve_category() to use."""
     try:
         all_categories = list_categories()
     except Exception as exc:
@@ -594,39 +464,20 @@ def _load_valid_categories(log_prefix: str) -> list[tuple[str, str, str, str]]:
 
 
 @lru_cache(maxsize=8)
-# [HELPER] Cached ChatOpenAI client for a caller-supplied fine-tuned model id,
-# used by the two classify_ticket_category_finetuned* eval variants below.
 def _get_finetuned_llm(model_id: str):
-    """Cached ChatOpenAI client for a fine-tuned model ID. Separate from the
-    module's shared `llm` (bound to settings.LLM_MODEL) since model_id is
-    caller-supplied and varies per fine-tuning run.
-
-    Explicitly resolves the API key the same way core/llm.py's
-    get_chat_model() does (LLM_API_KEY, falling back to OPENAI_API_KEY) —
-    without this, ChatOpenAI falls back to whatever OPENAI_API_KEY
-    environment variable happens to be set, which can belong to a
-    different OpenAI project than the one the fine-tuning job actually
-    ran under (domain/helpdesk/scripts/run_finetune_job.py resolves the key the
-    same explicit way), causing a 403 model_not_found on every call."""
+    """Cached client for a fine-tuned model id. Resolves the API key the
+    same way core/llm.py does (LLM_API_KEY, else OPENAI_API_KEY) — without
+    that it could pick up an OPENAI_API_KEY from a different project than
+    the one the fine-tune actually ran under."""
     api_key = settings.LLM_API_KEY or settings.OPENAI_API_KEY
     return ChatOpenAI(model=model_id, api_key=api_key, temperature=0)
 
 
-# [EVAL-ONLY] Category classifier using a fine-tuned model with no category
-# list/candidates shown — relies entirely on what the model learned during
-# fine-tuning. For run_accuracy_eval.py --method finetuned.
+# [EVAL-ONLY] Fine-tuned model, no category list shown — relies on what
+# the model learned during fine-tuning.
 async def classify_ticket_category_finetuned(message: str, model_id: str) -> tuple[str, str]:
-    """Fine-tuned-model classifier, for accuracy A/B comparison (see
-    run_accuracy_eval.py --method finetuned). Standalone from draft_ticket().
-
-    No category list or retrieved candidates are shown — the model was
-    fine-tuned on real historical tickets (domain/helpdesk/scripts/
-    prepare_finetune_data.py + run_finetune_job.py) and is expected to have
-    learned the category mapping, including the statistical base rate for
-    ambiguous/generic phrasing, directly from training. The final answer is
-    still validated against the authoritative Postgres category list via
-    _resolve_category(), exactly like every other classifier here.
-    """
+    """Fine-tuned-model classifier, for accuracy A/B comparison
+    (run_accuracy_eval.py --method finetuned)."""
     valid_categories = _load_valid_categories("classify_ticket_category_finetuned")
 
     system_prompt = {
@@ -642,20 +493,13 @@ async def classify_ticket_category_finetuned(message: str, model_id: str) -> tup
     return _resolve_category(main_category, sub_category, message, valid_categories)
 
 
-# [EVAL-ONLY] Hybrid of classify_ticket_category_vector() and
-# classify_ticket_category_finetuned(): vector-retrieved candidates, but
-# decided by the fine-tuned model. For run_accuracy_eval.py --method finetuned_vector.
+# [EVAL-ONLY] Vector-retrieved candidates, decided by the fine-tuned model.
 async def classify_ticket_category_finetuned_vector(
     message: str, model_id: str, k: int = 5
 ) -> tuple[str, str]:
     """Hybrid of classify_ticket_category_vector() and
-    classify_ticket_category_finetuned(): same vector-retrieval top-k
-    candidates and same category_vector_system_prompt() framing, but the
-    final decision call is made by the fine-tuned model instead of the
-    shared base `llm` — combining the model's learned base-rate knowledge
-    with per-ticket semantic retrieval. For accuracy A/B comparison (see
-    run_accuracy_eval.py --method finetuned_vector).
-    """
+    classify_ticket_category_finetuned() (run_accuracy_eval.py --method
+    finetuned_vector)."""
     candidates = await search_category_candidates(message, k=k)
     valid_categories = _load_valid_categories("classify_ticket_category_finetuned_vector")
 
@@ -678,13 +522,9 @@ async def classify_ticket_category_finetuned_vector(
     return _resolve_category(main_category, sub_category, message, valid_categories)
 
 
-# [HELPER] Renders search_ticket_examples() results (real historical
-# tickets + their confirmed category) as numbered text blocks for the LLM
-# prompt in classify_ticket_category_examples().
 def _format_ticket_examples(examples: list[dict]) -> str:
     """Render search_ticket_examples() results as numbered blocks for
-    category_examples_system_prompt() — each real ticket's own text plus
-    its already-confirmed category, not a hand-written KB description."""
+    category_examples_system_prompt()."""
     blocks: list[str] = []
     for i, e in enumerate(examples, start=1):
         blocks.append(
@@ -696,16 +536,10 @@ def _format_ticket_examples(examples: list[dict]) -> str:
 
 
 # [EVAL-ONLY] Retrieval-augmented classifier using real historical tickets
-# instead of the hand-written category KB. For run_accuracy_eval.py --method examples.
+# instead of the hand-written category KB.
 async def classify_ticket_category_examples(message: str, k: int = 5) -> tuple[str, str]:
-    """Retrieval-augmented classifier using REAL historical tickets (ingested
-    by domain/helpdesk/scripts/ingest_ticket_examples.py) instead of the 75-row
-    hand-written KB search_category_candidates() uses. Same architecture as
-    classify_ticket_category_vector() (embed → search → show LLM candidates
-    → LLM decides) — no model training involved — just a larger, more
-    representative reference corpus. For accuracy A/B comparison (see
-    run_accuracy_eval.py --method examples).
-    """
+    """Same architecture as classify_ticket_category_vector() but retrieves
+    real past tickets instead (run_accuracy_eval.py --method examples)."""
     examples = await search_ticket_examples(message, k=k)
     valid_categories = _load_valid_categories("classify_ticket_category_examples")
 
