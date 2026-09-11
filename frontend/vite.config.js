@@ -5,6 +5,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   envDir: '..',
   plugins: [react()],
+  optimizeDeps: {
+    include: ['@capacitor/core'],
+  },
   css: {
     postcss: './postcss.config.js',
   },
