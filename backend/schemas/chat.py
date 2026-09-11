@@ -22,6 +22,8 @@ SAFE_THREAD_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.:-]+$")
 class ChatRequest(BaseModel):
     """Incoming payload from the React frontend."""
 
+    stream: bool = True
+
     message: str = Field(
         ...,
         min_length=1,

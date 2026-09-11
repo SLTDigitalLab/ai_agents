@@ -14,12 +14,14 @@ logging.basicConfig(
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+import httpx
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat
 from services.ingestion import router as ingestion_router
 from core.config import settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
+from routers.voice_agent import realtime
 
 
 @asynccontextmanager
@@ -78,6 +80,43 @@ app.include_router(kb_retrieval.router)
 app.include_router(ingestion_router)
 app.include_router(contact.router)  # Contact Us email form
 app.include_router(lifestore_mcp_chat.router)  # Ask LifeStore MCP chat (/api/v1/lifestore/*)
+app.include_router(realtime.router)
+
+
+@app.post("/api/simli/session", tags=["Simli"])
+async def simli_session(response: Response):
+    """Issue a short-lived avatar token; Simli credentials stay on the server."""
+    config = {
+        name: (getattr(settings, name, None) or "").strip()
+        for name in ("SIMLI_API_KEY", "SIMLI_FACE_ID")
+    }
+    missing = [name for name, value in config.items() if not value]
+    if missing:
+        raise HTTPException(503, "Set " + ", ".join(missing) + " in backend/.env.")
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            upstream = await client.post(
+                "https://api.simli.ai/compose/token",
+                headers={"x-simli-api-key": config["SIMLI_API_KEY"]},
+                json={
+                    "faceId": config["SIMLI_FACE_ID"],
+                    "handleSilence": True,
+                    "maxSessionLength": 600,
+                    "maxIdleTime": 600,
+                },
+            )
+        upstream.raise_for_status()
+        token = upstream.json().get("session_token")
+        if not isinstance(token, str) or not token.strip():
+            raise ValueError("Invalid token")
+    except httpx.TimeoutException:
+        raise HTTPException(504, "Simli timed out. Please reconnect.") from None
+    except (httpx.HTTPError, ValueError, AttributeError):
+        raise HTTPException(
+            502, "Unable to start the avatar. Check your Simli key, face ID and available minutes."
+        ) from None
+    response.headers["Cache-Control"] = "no-store"
+    return {"session_token": token}
 
 @app.get("/")
 def read_root():

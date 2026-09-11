@@ -1,0 +1,119 @@
+.workmate-simli .live-label span { width: 7px; height: 7px; border-radius: 50%; background: #74819b; }
+.workmate-simli .avatar-card { position: relative; width: 100%; min-height: clamp(430px, 68vh, 760px); overflow: hidden; border: 1px solid #40527a88; border-radius: 24px; background: #0b1427; box-shadow: 0 32px 75px #00000055, inset 0 1px #ffffff0d; isolation: isolate; contain: layout paint; }
+.workmate-simli .avatar-video { display: block; width: 100%; height: 100%; object-fit: cover; background: #0b1427; transform: translateZ(0); backface-visibility: hidden; }
+.workmate-simli .avatar-placeholder { position: absolute; inset: 0; display: grid; align-content: center; justify-items: center; gap: 19px; overflow: hidden; color: #b3bfd8; text-align: center; background: radial-gradient(circle at 50% 36%, #233e7966, transparent 40%), linear-gradient(135deg, #111b33, #0b1221); transition: opacity .2s ease; }
+.workmate-simli .avatar-glow { position: absolute; width: 45%; aspect-ratio: 1; border-radius: 50%; background: #6c87ed; filter: blur(85px); opacity: .42; }
+.workmate-simli .avatar-silhouette { position: relative; width: 130px; height: 145px; border: 1px solid #a9bcff6b; border-radius: 46% 46% 24% 24%; background: linear-gradient(150deg, #aac0ff9c, #696ccfbb); box-shadow: 0 0 50px #92a9ff55; }
+.workmate-simli .avatar-silhouette span:first-child { position: absolute; top: 21px; left: 38px; width: 52px; height: 52px; border-radius: 50%; background: #d9e4ff; }
+.workmate-simli .avatar-silhouette span:nth-child(2) { position: absolute; bottom: 0; left: 20px; width: 89px; height: 61px; border-radius: 48% 48% 19% 19%; background: #ccd9ff; }
+.workmate-simli .avatar-placeholder p { position: relative; margin: 0; font-size: .92rem; }
+.workmate-simli .live-label { position: absolute; z-index: 2; top: 17px; left: 17px; display: inline-flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid #ffffff1c; border-radius: 999px; color: #dbe4fb; background: #07101dbb; backdrop-filter: blur(12px); font-size: .72rem; font-weight: 600; }
+.workmate-simli .live-label.live span { background: #62dfb5; }
+.workmate-simli .live-label.connecting span { background: #e7bc6e; animation: workmate-avatar-pulse 1.2s infinite; }
+.workmate-simli .simli-avatar { position: absolute; inset: 0; width: 100%; height: 100%; }
+.workmate-simli { width: 100%; max-width: 640px; margin: auto; padding: 20px; color: #dbe4fb; }
+.workmate-simli .avatar-card { height: min(65vh, 640px); min-height: 300px; }
+.workmate-simli .live-label span { width: 7px; height: 7px; border-radius: 50%; background: #74819b; }
+.workmate-simli .live-label.live span { background: #62dfb5; }
+.workmate-simli .avatar-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; font-size: 14px; }
+.workmate-simli button { border: 1px solid #64748b; border-radius: 10px; padding: 9px 14px; background: #1e293b; color: white; }
+.workmate-simli button:focus-visible { outline: 2px solid #22d3ee; outline-offset: 3px; }
+.workmate-simli .avatar-notice { margin-top: 12px; color: #fecaca; font-size: 14px; }
+.workmate-visual-page {
+  height: 100vh;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: #fafafa;
+  color: #111827;
+  overflow: hidden;
+}
+.workmate-visual-page .workmate-simli {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+.workmate-visual-page .avatar-card {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.workmate-visual-page .avatar-video { object-fit: contain; object-position: center; }
+.workmate-visual-page .avatar-notice {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(90%, 560px);
+  margin: 0;
+  padding: 10px 14px;
+  background: #0b1427e6;
+  border-radius: 10px;
+  text-align: center;
+}
+.avatar-conversation-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px max(20px, env(safe-area-inset-bottom));
+}
+.avatar-conversation-controls p { margin: 0; color: #fecaca; text-align: center; font-size: 14px; }
+.avatar-conversation-controls button {
+  min-height: 48px;
+  padding: 12px 32px;
+  border: 1px solid #22d3ee55;
+  border-radius: 999px;
+  background: linear-gradient(to right, #164e63, #0891b2);
+  box-shadow: 0 10px 15px -3px #164e6333;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.avatar-conversation-controls button:hover:not(:disabled) { box-shadow: 0 10px 15px -3px #164e634d; }
+.avatar-conversation-controls button:disabled { opacity: .55; cursor: default; }
+.avatar-conversation-controls button:focus-visible { outline: 2px solid #67e8f9; outline-offset: 4px; }
+
+@keyframes workmate-avatar-pulse { 50% { opacity: .4; } }
+
+/* Match the existing /voice page branding and shared light/dark theme. */
+.avatar-page-header { position: relative; display: flex; align-items: center; justify-content: flex-end; padding: 12px 24px; min-height: 64px; border-bottom: 1px solid #e5e7eb; }
+.avatar-page-header h1 { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.025em; }
+.avatar-page-header img { height: 40px; width: auto; object-fit: contain; }
+.workmate-visual-page .avatar-card, .workmate-visual-page .avatar-video { background: #fafafa; }
+.avatar-page-attribution { display: flex; align-items: center; justify-content: center; gap: 8px; color: #6b7280; margin-top: 12px; }
+.avatar-page-attribution span { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.avatar-page-attribution img { height: 20px; width: auto; border-left: 1px solid #d1d5db; padding-left: 8px; }
+.dark .workmate-visual-page, .dark .workmate-visual-page .avatar-card, .dark .workmate-visual-page .avatar-video { background: #111318; color: #f3f4f6; }
+.dark .avatar-page-header { border-color: #ffffff0f; }
+.dark .avatar-page-attribution { color: #9ca3af; }
+@media (max-width: 640px) {
+  .avatar-page-header { padding: 12px 16px; }
+  .avatar-page-header h1 { font-size: 18px; }
+  .avatar-page-header img { height: 28px; }
+  .avatar-page-attribution { flex-wrap: wrap; gap: 6px; }
+}
+
+.visual-agent-shell { display: flex; height: 100vh; height: 100dvh; background: #fafafa; color: #111827; }
+.visual-agent-shell > .workmate-visual-page { flex: 1; min-width: 0; }
+.visual-agent-shell > .hidden { position: relative; z-index: 10; }
+.visual-agent-shell .avatar-page-header { justify-content: space-between; }
+.visual-agent-shell .avatar-page-header button svg { width: 16px; height: 16px; }
+.visual-conversation-status { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 20px; color: #6b7280; font-size: 12px; font-weight: 500; }
+.visual-status-dot { width: 6px; height: 6px; border-radius: 50%; background: #0891b2; }
+.visual-status-dot.connecting { animation: workmate-avatar-pulse 1.2s infinite; }
+.dark .visual-agent-shell { background: #111318; color: #f3f4f6; }
+.dark .visual-conversation-status { color: #9ca3af; }
+@media (max-width: 400px) {
+  .visual-agent-shell .avatar-page-header { padding-inline: 10px; }
+  .visual-agent-shell .avatar-page-header h1 { font-size: 16px; }
+  .visual-agent-shell .avatar-page-header img { height: 22px; }
+}

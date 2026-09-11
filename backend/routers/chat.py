@@ -634,7 +634,7 @@ async def chat(request: ChatRequest):
                 request.thread_id,
             )
 
-            if evidence_chunk:
+            if evidence_chunk and request.stream:
                 yield evidence_chunk
 
         except Exception as exc:
@@ -653,6 +653,11 @@ async def chat(request: ChatRequest):
             if streamed_any_text:
                 yield "\n\n"
             yield user_message
+
+    # Voice uses the same guarded, checkpointed pipeline, with a complete JSON
+    # answer. Existing callers continue streaming by default.
+    if not request.stream:
+        return {"response": "".join([chunk async for chunk in event_generator()])}
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

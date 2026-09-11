@@ -17,6 +17,8 @@ import embryoLogo from './assets/embryo-removebg.png';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
 import ContactUsPage from './components/ContactUsPage';
 import RainbowPages from './components/RainbowPages';
+import VoiceAgentPage from './pages/VoiceAgentPage';
+const VoiceAvatarPage = React.lazy(() => import('./pages/VoiceAvatarPage'));
 
 // Initialize MSAL outside the components
 const msalInstance = new PublicClientApplication(msalConfig);
@@ -649,6 +651,13 @@ function App() {
 
           <Route path="/rainbowpages" element={<RainbowPages />} />
           <Route path="/contact-us" element={<ContactUsPage />} />
+          <Route path="/voice" element={<VoiceAgentPage />} />
+          <Route path="/workmateai/voice" element={<VoiceAgentPage />} />
+          <Route path="/workmateai/voice/agent" element={
+            <React.Suspense fallback={<div role="status">Loading voice avatar...</div>}>
+              <VoiceAvatarPage />
+            </React.Suspense>
+          } />
 
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>

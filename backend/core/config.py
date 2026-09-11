@@ -14,6 +14,13 @@ load_dotenv(ROOT_DIR / ".env")
 class Settings(BaseSettings):
     GOOGLE_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
+    SIMLI_API_KEY: Optional[str] = None
+    SIMLI_FACE_ID: Optional[str] = None
+
+    # Workmate voice settings retained from voice-test.
+    PROJECT_ID: Optional[str] = None
+    LOCATION: str = "us-central1"
+    VOICE_CHAT_TIMEOUT_SECONDS: float = 30.0
     
     # LLM and Embedding Configuration
     LLM_PROVIDER: str = "gemini" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'
