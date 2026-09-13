@@ -198,25 +198,6 @@ const VoiceAgentPage = () => {
                 setStatusText('Speak to Workmate AI');
                 break;
 
-            case 'filler':
-                    // play filler text via browser TTS so user hears it
-                    // while the agent pipeline runs in the background
-                    if ('speechSynthesis' in window) {
-                        window.speechSynthesis.cancel(); // stop any previous
-                        const utter = new SpeechSynthesisUtterance(msg.text);
-                        // match voice language
-                        const langMap = { en: 'en-US', si: 'si-LK', ta: 'ta-IN' };
-                        utter.lang = langMap[msg.lang] || 'en-US';
-                        utter.rate = 1.05;
-                        utter.pitch = 1.0;
-                        // try to find a voice that matches — fallback to default
-                        const voices = window.speechSynthesis.getVoices();
-                        const match = voices.find(v => v.lang.startsWith(utter.lang.split('-')[0]));
-                        if (match) utter.voice = match;
-                        window.speechSynthesis.speak(utter);
-                    }
-                    break;
-
             case 'response.function_call_arguments.done':
     if (msg.name === 'ask_workmate_ai') {
         try {
@@ -412,7 +393,12 @@ const stopAllAudio = useCallback(() => {
                         break;
                     case 'audio':
                         window.speechSynthesis.cancel();
+                        setIsSpeaking(true);
+                        setStatusText('Workmate AI is responding...');
                         playGeminiAudioChunk(msg.data);
+                        break;
+                    case 'tool_status':
+                        setStatusText(msg.text || 'Checking knowledge base...');
                         break;
                     case 'transcript':
                         if (msg.role === 'user') {
@@ -435,6 +421,8 @@ const stopAllAudio = useCallback(() => {
                                 return [...prev.slice(0, -1), { role: 'assistant', text: last.text }];
                             return prev;
                         });
+                        setIsSpeaking(false);
+                        setStatusText('Speak to Workmate AI');
                         break;
                     case 'listening':
                         setIsListening(true); setStatusText('Listening...'); break;

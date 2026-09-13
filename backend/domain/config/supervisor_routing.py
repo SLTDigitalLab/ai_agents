@@ -7,6 +7,36 @@ agent logic.
 
 from __future__ import annotations
 
+# Kept separate from the canonical English profiles so multilingual text never
+# dilutes the vectors used by the established English router. Each value is a
+# compact routing profile, not a user-facing translation.
+MULTILINGUAL_ROUTING_PROFILES: dict[str, dict[str, str]] = {
+    "si": {
+        "hr": "මානව සම්පත් සේවක නිවාඩු නිවාඩු ශේෂය පැමිණීම වැටුප් කාර්ය මණ්ඩල ණය ලෝන් ආපදා ණය වෛද්‍ය ප්‍රතිලාභ කාර්ය සාධනය දුක්ගැනවිලි EPF ETF",
+        "finance": "මූල්‍ය අයවැය ගෙවීම් ඉන්වොයිස් බදු බැංකු සැසඳුම මුදල් අත්තිකාරම් CAPEX ගිණුම්",
+        "admin": "පරිපාලන කාර්යාල පහසුකම් ගොඩනැගිලි ප්‍රවාහන නවාතැන් ලිපි ලේඛන",
+        "it": "තොරතුරු තාක්ෂණ පරිගණක මුරපද ඊමේල් මෘදුකාංග පද්ධති ප්‍රවේශය තාක්ෂණික සහාය",
+        "cia": "අභ්‍යන්තර විගණන CIA විගණන අවදානම් පාලන අනුකූලතාව වංචා",
+        "network": "ජාල රවුටර සර්වර් සම්බන්ධතාව ෆයිබර් NOC දෝෂ විදුලි සංදේශ ජාලය",
+        "legal": "නීති නීතිමය ගිවිසුම් කොන්ත්‍රාත් නඩු රෙගුලාසි අනුමැතිය",
+        "marketing": "අලෙවිකරණ ප්‍රචාරණ වෙළඳ නාම මාධ්‍ය ව්‍යාපාර වෙළඳපොළ පර්යේෂණ",
+        "enterprise_business": "ව්‍යාපාරික ආයතනික පාරිභෝගික B2B ව්‍යවසාය විසඳුම් සේවා",
+        "consumer_business": "පාරිභෝගික ගෘහස්ථ දුරකථන broadband PeoTV පැකේජ බිල්පත් සම්බන්ධතා",
+    },
+    "ta": {
+        "hr": "மனித வளம் ஊழியர் விடுப்பு விடுப்பு இருப்பு வருகை சம்பளம் பணியாளர் கடன் லோன் இடர் கடன் மருத்துவ நலன் செயல்திறன் குறைதீர் EPF ETF",
+        "finance": "நிதி வரவு செலவு கட்டணம் விலைப்பட்டியல் வரி வங்கி சமரசம் பணம் முன்பணம் CAPEX கணக்குகள்",
+        "admin": "நிர்வாகம் அலுவலக வசதிகள் கட்டிடம் போக்குவரத்து தங்குமிடம் ஆவணங்கள்",
+        "it": "தகவல் தொழில்நுட்பம் கணினி கடவுச்சொல் மின்னஞ்சல் மென்பொருள் அமைப்பு அணுகல் தொழில்நுட்ப உதவி",
+        "cia": "உள் தணிக்கை CIA தணிக்கை ஆபத்து கட்டுப்பாடு இணக்கம் மோசடி",
+        "network": "வலையமைப்பு திசைவி சேவையகம் இணைப்பு ஃபைபர் NOC கோளாறு தொலைத்தொடர்பு",
+        "legal": "சட்டம் சட்டப்பூர்வ ஒப்பந்தம் வழக்கு விதிமுறை அனுமதி",
+        "marketing": "சந்தைப்படுத்தல் விளம்பரம் வர்த்தக முத்திரை ஊடகம் பிரச்சாரம் சந்தை ஆய்வு",
+        "enterprise_business": "நிறுவன வணிகம் பெருநிறுவன வாடிக்கையாளர் B2B நிறுவன தீர்வுகள் சேவைகள்",
+        "consumer_business": "நுகர்வோர் வீட்டு தொலைபேசி broadband PeoTV தொகுப்பு கட்டணம் இணைப்பு",
+    },
+}
+
 SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
     "hr": {
         "display_name": "HR",
@@ -769,6 +799,9 @@ SPECIALIST_ROUTING_PROFILES: dict[str, dict[str, object]] = {
 
 GENERAL_HELP_PATTERNS: tuple[str, ...] = (
     r"^\s*(hi|hello|hey|good morning|good afternoon|good evening)[!. ]*$",
+    r"^\s*(how are you|how's it going|how is it going)[?!. ]*$",
+    r"^\s*(ඔයාට කොහොමද|ඔබට කොහොමද|කොහොමද)[?!. ]*$",
+    r"^\s*(எப்படி இருக்கிறீர்கள்|எப்படி இருக்கீங்க|எப்படி இருக்கிறாய்)[?!. ]*$",
     r"\b(thanks|thank you|bye|goodbye)\b",
     # "what / how can you do / help (me with)" family — covers most capability questions.
     r"\bwhat (can|do) you (do|help|offer|provide|support|handle)\b",
@@ -817,6 +850,10 @@ CLARIFICATION_CHOICE_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 FOLLOW_UP_PATTERNS: tuple[str, ...] = (
+    r"^\s*(එතකොට|ඊළඟට|තව|ඉතින්)\s*[?!.]*\s*$",
+    r"^\s*(அடுத்து|பிறகு|மேலும்|அப்புறம்)\s*[?!.]*\s*$",
+    r"^\s*(and\s+)?then(?:\s+what)?\s*[?!.]*\s*$",
+    r"^\s*(go on|continue)\s*[?!.]*\s*$",
     r"^\s*what about( that| this)?\s*\??$",
     r"^\s*how about( that| this)?\s*\??$",
     r"^\s*can i apply\s*\??$",

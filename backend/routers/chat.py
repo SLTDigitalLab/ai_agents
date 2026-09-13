@@ -142,6 +142,23 @@ def mask_pii(text: str) -> str:
     return masked
 
 
+def _sanitize_response_script(text: str, user_message: str) -> str:
+    """Prevent foreign Indic scripts from leaking into Sinhala/Tamil answers.
+
+    Latin text remains allowed for technical identifiers, filenames, URLs, and
+    the Sources section. This is a final safety net; prompts still instruct the
+    model to produce fluent, script-pure language in the first place.
+    """
+    sinhala_count = len(re.findall(r"[\u0D80-\u0DFF]", user_message or ""))
+    tamil_count = len(re.findall(r"[\u0B80-\u0BFF]", user_message or ""))
+
+    if sinhala_count > tamil_count and sinhala_count:
+        return re.sub(r"[\u0900-\u097F\u0B80-\u0BFF]+", "", text)
+    if tamil_count > sinhala_count and tamil_count:
+        return re.sub(r"[\u0900-\u097F\u0D80-\u0DFF]+", "", text)
+    return text
+
+
 def _is_safe_url(value: str) -> bool:
     """Allow only safe evidence/source URLs."""
     if not value or value == "#":
@@ -224,8 +241,17 @@ def _message_content_to_text(content, strip: bool = True) -> str:
                 text_parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(str(block["text"]))
+
+        # Responses API streaming deltas often arrive as a one-item list whose
+        # text starts or ends with a meaningful space/newline. Joining through
+        # _join_text_parts() would strip that boundary on every event, causing
+        # the browser to render "Youcanapply" and flatten Markdown lists. When
+        # the caller requests raw streaming text, preserve the provider bytes.
+        if not strip:
+            return "".join(text_parts)
+
         merged = _join_text_parts(text_parts)
-        return merged.strip() if strip else merged
+        return merged.strip()
 
     if content is None:
         return ""
@@ -564,7 +590,13 @@ async def chat(
             # We must also match on ``langgraph_checkpoint_ns`` (a
             # namespace string like "multi_delegate:<hash>|agent:<hash>")
             # to suppress nested events too.
-            SUPPRESS_STREAM_NODES = {"multi_delegate", "decompose_query"}
+            # route_request may make an internal structured translation call.
+            # Its JSON is routing metadata, never a user-facing answer.
+            SUPPRESS_STREAM_NODES = {
+                "route_request",
+                "multi_delegate",
+                "decompose_query",
+            }
             logged_metadata_sample = False
 
             # ── DeepSeek-R1 <think> stripper ─────────────
@@ -631,6 +663,9 @@ async def chat(
                             think_done = True
 
                     if text:
+                        text = _sanitize_response_script(text, safe_user_message)
+
+                    if text:
                         streamed_any_text = True
                         streamed_response_text += text
                         yield text
@@ -646,6 +681,7 @@ async def chat(
                     for msg in reversed(messages):
                         if msg.type == "ai":
                             text = _message_content_to_text(msg.content)
+                            text = _sanitize_response_script(text, safe_user_message)
                             if text:
                                 logger.info(
                                     "Non-streaming fallback response used | agent=%s | thread=%s",

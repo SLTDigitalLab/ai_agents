@@ -11,6 +11,22 @@ from core.config import settings
 log = logging.getLogger(__name__)
 
 
+def _openai_chat_transport(model_name: str) -> dict:
+    """Return API transport overrides required by particular OpenAI models.
+
+    gpt-5.6-luna rejects function tools combined with reasoning on the legacy
+    Chat Completions endpoint. The specialist agents bind tools to the shared
+    chat model, so route Luna through the Responses API. Routine KB requests do
+    not need extended reasoning, so disable it to reduce response latency.
+    """
+    if model_name.lower().strip() == "gpt-5.6-luna":
+        return {
+            "use_responses_api": True,
+            "reasoning": {"effort": "none"},
+        }
+    return {}
+
+
 # gemini-embedding-2 ignores the `task_type` field; the task must instead be
 # given as a text-instruction prefix (Vertex docs). These are pure prefixes
 # (content is appended), so chunks containing '{' or '}' are safe — we do NOT
@@ -80,6 +96,7 @@ def get_chat_model():
             api_key=final_api_key,
             base_url=base_url,
             temperature=0,
+            **_openai_chat_transport(model_name),
         )
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI

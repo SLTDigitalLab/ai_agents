@@ -1534,8 +1534,31 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             ? text.trim()
             : maskPII(text.trim());
 
-        const userMessage = { type: 'user', text: maskedText, timestamp: Date.now() };
-        setMessages(prev => [...prev, userMessage]);
+        const userMessage = {
+            id: uuidv4(),
+            type: 'user',
+            text: maskedText,
+            timestamp: Date.now(),
+        };
+        const botMessageId = uuidv4();
+        const usesStreamingChat = agentConfig.id !== 'lifestore';
+        const pendingBotMessage = {
+            id: botMessageId,
+            type: 'bot',
+            text: "",
+            formType: null,
+            evidence: [],
+            timestamp: Date.now(),
+        };
+
+        // Add the exchange atomically. Streaming updates target the bot's
+        // stable id, never whichever message happens to be last after React
+        // batches state updates.
+        setMessages(prev => [
+            ...prev,
+            userMessage,
+            ...(usesStreamingChat ? [pendingBotMessage] : []),
+        ]);
         setIsLoading(true);
         setLastFailedMessage(null);
         anchorPendingRef.current = true; // anchor effect will fire once chat mode is ready
@@ -1543,7 +1566,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
         const controller = new AbortController();
         abortControllerRef.current = controller;
-        let botMessageAdded = false;
+        let botMessageAdded = usesStreamingChat;
 
         try {
             // Ask LifeStore uses a dedicated MCP endpoint that returns a single JSON
@@ -1600,9 +1623,6 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             let accumulatedText = "";
             let evidenceItems = [];
 
-            setMessages(prev => [...prev, { type: 'bot', text: "", formType: null, evidence: [], timestamp: Date.now() }]);
-            botMessageAdded = true;
-
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -1629,11 +1649,12 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
                 setMessages(prev => {
                     const newMessages = [...prev];
-                    const lastIdx = newMessages.length - 1;
-                    newMessages[lastIdx] = {
-                        ...newMessages[lastIdx],
+                    const botIdx = newMessages.findIndex(msg => msg.id === botMessageId);
+                    if (botIdx === -1) return prev;
+                    newMessages[botIdx] = {
+                        ...newMessages[botIdx],
                         text: cleanText,
-                        formType: currentFormType || newMessages[lastIdx].formType
+                        formType: currentFormType || newMessages[botIdx].formType
                     };
                     return newMessages;
                 });
@@ -1648,8 +1669,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     // Mark the partial bot message as errored so retry shows.
                     setMessages(prev => {
                         const newMessages = [...prev];
-                        const lastIdx = newMessages.length - 1;
-                        newMessages[lastIdx] = { ...newMessages[lastIdx], error: true };
+                        const botIdx = newMessages.findIndex(msg => msg.id === botMessageId);
+                        if (botIdx === -1) return prev;
+                        newMessages[botIdx] = { ...newMessages[botIdx], error: true };
                         return newMessages;
                     });
                 } else {
@@ -1947,7 +1969,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
                                     return (
                                         <motion.div
-                                            key={index}
+                                            key={msg.id || index}
                                             ref={setRefs}
                                             initial={{ opacity: 0, y: 10 }}
                                             animate={{ opacity: 1, y: 0 }}

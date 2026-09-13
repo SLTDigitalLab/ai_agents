@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from dotenv import load_dotenv
 from fastapi.staticfiles import StaticFiles
 
@@ -21,6 +22,7 @@ from routers.voice_agent import realtime
 from services.ingestion import router as ingestion_router
 from core.config import settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
+from domain.archetypes.supervisor_agent import warm_routing_cache
 
 from fastapi.openapi.utils import get_openapi
 
@@ -33,6 +35,16 @@ async def lifespan(app: FastAPI):
     Checkpointer connection pools are created lazily on first use (per agent)
     and live for the whole process; we close them cleanly on shutdown.
     """
+    try:
+        await warm_routing_cache()
+        logging.getLogger(__name__).info("Warmed supervisor routing profile vectors")
+    except Exception:
+        # A temporary embedding-provider failure must not prevent the API from
+        # starting; the normal lazy path can retry on the first chat request.
+        logging.getLogger(__name__).exception(
+            "Could not warm supervisor routing vectors; using lazy initialization"
+        )
+
     yield
     await aclose_async_pools()
     close_sync_pools()

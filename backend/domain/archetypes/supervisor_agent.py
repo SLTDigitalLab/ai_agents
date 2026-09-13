@@ -20,7 +20,7 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, trim_messages
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from core.llm import get_chat_model, get_routing_embedding_model
 from domain.prompts import LANGUAGE_RULE
@@ -35,6 +35,7 @@ from domain.config.supervisor_routing import (
     KEYWORD_MATCH_BOOST,
     LOW_CONFIDENCE_THRESHOLD,
     MIN_ROUTE_MARGIN,
+    MULTILINGUAL_ROUTING_PROFILES,
     MULTI_DELEGATE_MAX_AGENTS,
     MULTI_DELEGATE_MAX_GAP,
     MULTI_DELEGATE_SECONDARY_THRESHOLD,
@@ -95,7 +96,10 @@ def _extract_text(content: Any) -> str:
                 text_parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(str(block["text"]))
-        joined = " ".join(part.strip() for part in text_parts if part).strip()
+        # Responses API blocks preserve exact Unicode boundaries. Inserting a
+        # space between blocks can split Sinhala/Tamil grapheme clusters and
+        # corrupt words, so concatenate provider text verbatim.
+        joined = "".join(part for part in text_parts if part).strip()
         return _collapse_doubled_text(joined)
 
     return str(content).strip()
@@ -109,8 +113,21 @@ def _latest_user_query(state: AgentState) -> str:
     return ""
 
 
-def _profile_text(agent_id: str) -> str:
+def _detect_query_language(query: str) -> str:
+    """Detect supported scripts locally; Latin and mixed text default to English."""
+    sinhala = len(re.findall(r"[\u0D80-\u0DFF]", query))
+    tamil = len(re.findall(r"[\u0B80-\u0BFF]", query))
+    if sinhala > tamil and sinhala > 0:
+        return "si"
+    if tamil > sinhala and tamil > 0:
+        return "ta"
+    return "en"
+
+
+def _profile_text(agent_id: str, language: str = "en") -> str:
     """Build the routing profile text used for embeddings."""
+    if language in MULTILINGUAL_ROUTING_PROFILES:
+        return MULTILINGUAL_ROUTING_PROFILES[language][agent_id]
     profile = SPECIALIST_ROUTING_PROFILES[agent_id]
     description = profile["description"]
     keywords = ", ".join(profile["keywords"])
@@ -124,13 +141,24 @@ def _profile_text(agent_id: str) -> str:
 
 
 @lru_cache(maxsize=1)
-def _specialist_profile_vectors() -> dict[str, list[float]]:
-    """Embed all specialist routing profiles once and cache them."""
+def _all_specialist_profile_vectors() -> dict[str, dict[str, list[float]]]:
+    """Embed isolated English, Sinhala, and Tamil routing profiles in one batch."""
     embedding_model = get_routing_embedding_model()
     agent_ids = list(SPECIALIST_ROUTING_PROFILES.keys())
-    profile_texts = [_profile_text(agent_id) for agent_id in agent_ids]
+    languages = ("en", "si", "ta")
+    keys = [(language, agent_id) for language in languages for agent_id in agent_ids]
+    profile_texts = [_profile_text(agent_id, language) for language, agent_id in keys]
     vectors = embedding_model.embed_documents(profile_texts)
-    return dict(zip(agent_ids, vectors))
+    grouped = {language: {} for language in languages}
+    for (language, agent_id), vector in zip(keys, vectors):
+        grouped[language][agent_id] = vector
+    return grouped
+
+
+def _specialist_profile_vectors(language: str = "en") -> dict[str, list[float]]:
+    return _all_specialist_profile_vectors().get(
+        language, _all_specialist_profile_vectors()["en"]
+    )
 
 
 def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
@@ -147,6 +175,16 @@ def _is_general_help_question(query: str) -> bool:
     """Detect supervisor-native platform/help/navigation queries."""
     query = query.strip().lower()
     return any(re.search(pattern, query) for pattern in GENERAL_HELP_PATTERNS)
+
+
+def _is_language_capability_question(query: str) -> bool:
+    """Recognize language-selection questions before specialist routing."""
+    normalized = query.strip().lower()
+    return bool(
+        re.search(r"\b(can you|do you) speak (?:in )?(sinhala|sinhalese|tamil)\b", normalized)
+        or ("සිංහල" in normalized and any(term in normalized for term in ("කතා", "පුළුවන්", "හැකි")))
+        or ("தமிழ்" in normalized and any(term in normalized for term in ("பேச", "முடியுமா", "தெரியுமா")))
+    )
 
 def _is_bare_greeting(query: str) -> bool:
     """Detect greeting-only turns that should ignore prior thread context."""
@@ -340,34 +378,154 @@ def _matched_keywords(query: str, agent_id: str) -> list[str]:
     return matches
 
 
-async def _score_specialists(
+def _matched_native_keywords(query: str, agent_id: str, language: str) -> list[str]:
+    """Return native profile terms present in a Sinhala or Tamil query."""
+    profile = MULTILINGUAL_ROUTING_PROFILES.get(language, {}).get(agent_id, "")
+    terms = sorted(set(profile.split()), key=len, reverse=True)
+    return [term for term in terms if len(term) >= 2 and term.lower() in query.lower()]
+
+
+def _native_keyword_route(query: str, language: str) -> tuple[str, list[str]] | None:
+    """Resolve an unambiguous native-language topic without an embedding call."""
+    if language not in MULTILINGUAL_ROUTING_PROFILES:
+        return None
+    hits = {
+        agent_id: _matched_native_keywords(query, agent_id, language)
+        for agent_id in SPECIALIST_BUILDERS
+    }
+    hits = {agent_id: terms for agent_id, terms in hits.items() if terms}
+    if len(hits) == 1:
+        agent_id, terms = next(iter(hits.items()))
+        return agent_id, terms
+    return None
+
+
+class _RoutingTranslation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    english: str = Field(description="A faithful English translation of the query only.")
+    workplace_related: bool = Field(
+        description="Whether the query concerns SLTMobitel workplace topics or employee support."
+    )
+    suggested_specialist: str | None = Field(
+        description="The single best specialist id, or null when none applies.",
+    )
+
+
+_routing_translator = None
+
+
+def _get_routing_translator():
+    global _routing_translator
+    if _routing_translator is None:
+        _routing_translator = get_chat_model().with_structured_output(_RoutingTranslation)
+    return _routing_translator
+
+
+async def _translate_query_for_routing(query: str) -> tuple[str, bool, str | None] | None:
+    """Translate only for routing; the original user message remains untouched."""
+    try:
+        result: _RoutingTranslation = await _get_routing_translator().ainvoke(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "Translate the user's Sinhala or Tamil query faithfully into concise English. "
+                        "Also indicate whether it concerns SLTMobitel workplace topics, employee "
+                        "support, HR, finance, administration, IT, audit, networks, legal, marketing, "
+                        "or enterprise/consumer business. Select the single best specialist id from: "
+                        "hr, finance, admin, it, cia, network, legal, marketing, enterprise_business, "
+                        "consumer_business. Use null if none applies. Do not answer or add information."
+                    ),
+                },
+                {"role": "user", "content": query},
+            ]
+        )
+        translated = result.english.strip()
+        suggested = (
+            result.suggested_specialist
+            if result.suggested_specialist in SPECIALIST_BUILDERS
+            else None
+        )
+        return (translated, result.workplace_related, suggested) if translated else None
+    except Exception:
+        logger.exception("Supervisor routing translation failed")
+        return None
+
+
+async def _score_specialists_once(
     query: str,
     last_specialist_agent: str | None,
+    language: str,
 ) -> list[tuple[str, float]]:
-    """Embed the query and score it against specialist routing profiles."""
     embedding_model = get_routing_embedding_model()
     query_vector = await asyncio.to_thread(embedding_model.embed_query, query)
-    profile_vectors = _specialist_profile_vectors()
+    profile_vectors = _specialist_profile_vectors(language)
 
     scored: list[tuple[str, float]] = []
     boost_log: dict[str, list[str]] = {}
     for agent_id, vector in profile_vectors.items():
         score = _cosine_similarity(query_vector, vector)
-
-        keyword_hits = _matched_keywords(query, agent_id)
+        keyword_hits = (
+            _matched_keywords(query, agent_id)
+            if language == "en"
+            else _matched_native_keywords(query, agent_id, language)
+        )
         if keyword_hits:
             score += KEYWORD_MATCH_BOOST
             boost_log[agent_id] = keyword_hits
-
         if last_specialist_agent == agent_id and _is_short_follow_up(query):
             score += FOLLOW_UP_STICKINESS_BOOST
         scored.append((agent_id, score))
 
     if boost_log:
-        logger.info("Supervisor keyword boost | hits=%s", boost_log)
-
+        logger.info("Supervisor keyword boost | language=%s hits=%s", language, boost_log)
     scored.sort(key=lambda item: item[1], reverse=True)
     return scored
+
+
+async def _score_specialists(
+    query: str,
+    last_specialist_agent: str | None,
+) -> list[tuple[str, float]]:
+    """Score native profiles or translate unresolved multilingual queries."""
+    language = _detect_query_language(query)
+    if language == "en":
+        return await _score_specialists_once(query, last_specialist_agent, "en")
+
+    translated_result = await _translate_query_for_routing(query)
+    if translated_result:
+        translated, workplace_related, suggested_specialist = translated_result
+        logger.info(
+            "Supervisor routing translation | language=%s workplace=%s suggested=%s original=%r english=%r",
+            language,
+            workplace_related,
+            suggested_specialist,
+            query[:160],
+            translated[:160],
+        )
+        scored = await _score_specialists_once(
+            translated, last_specialist_agent, "en"
+        )
+        # The translator has already interpreted the native-language intent.
+        # Use its constrained department choice as the same modest signal as an
+        # exact keyword match; semantic similarity still remains the base score.
+        if suggested_specialist:
+            scored = [
+                (
+                    agent_id,
+                    score + KEYWORD_MATCH_BOOST
+                    if agent_id == suggested_specialist
+                    else score,
+                )
+                for agent_id, score in scored
+            ]
+            scored.sort(key=lambda item: item[1], reverse=True)
+        return scored
+
+    # Translation failure is non-fatal; native vectors are safer than dropping
+    # the request, while normal thresholding still prevents arbitrary routing.
+    return await _score_specialists_once(query, last_specialist_agent, language)
 
 
 async def route_request(state: AgentState) -> dict:
@@ -408,7 +566,27 @@ async def route_request(state: AgentState) -> dict:
                 "original_query": "",
             }
 
-    if _is_general_help_question(query):
+    # Very short continuations have little standalone semantic signal. Reuse
+    # the previously successful specialist instead of embedding words such as
+    # "then" and incorrectly classifying them as out of scope.
+    if last_specialist_agent in SPECIALIST_BUILDERS and _is_short_follow_up(query):
+        logger.info(
+            "Supervisor route | action=delegate | reason=follow_up_stickiness | target=%s | query=%r",
+            last_specialist_agent,
+            query[:200],
+        )
+        return {
+            "routing_action": "delegate",
+            "routed_agent_id": last_specialist_agent,
+            "routing_reason": f"follow_up_stickiness:{last_specialist_agent}",
+            "routing_scores": {},
+            "delegation_query": query,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
+    if _is_general_help_question(query) or _is_language_capability_question(query):
         logger.info(
             "Supervisor route | action=direct | reason=general_help_rule | query=%r",
             query[:200],
@@ -416,6 +594,28 @@ async def route_request(state: AgentState) -> dict:
         return {
             "routing_action": "direct",
             "routing_reason": "general_help_rule",
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
+        }
+
+    query_language = _detect_query_language(query)
+    native_route = _native_keyword_route(query, query_language)
+    if native_route is not None:
+        native_agent, native_hits = native_route
+        logger.info(
+            "Supervisor route | action=delegate | reason=native_keyword | language=%s target=%s hits=%s query=%r",
+            query_language,
+            native_agent,
+            native_hits,
+            query[:200],
+        )
+        return {
+            "routing_action": "delegate",
+            "routed_agent_id": native_agent,
+            "routing_reason": f"native_keyword:{query_language}:{native_agent}",
+            "routing_scores": {},
+            "delegation_query": query,
             "pending_clarification": False,
             "clarification_options": [],
             "original_query": "",
@@ -833,6 +1033,11 @@ def _compiled_specialist(agent_id: str):
     return SPECIALIST_BUILDERS[agent_id]().compile()
 
 
+async def warm_routing_cache() -> None:
+    """Precompute static specialist vectors before the first chat request."""
+    await asyncio.to_thread(_specialist_profile_vectors)
+
+
 async def _invoke_specialist_for_fan_out(
     agent_id: str,
     base_state: AgentState,
@@ -866,6 +1071,8 @@ async def _invoke_specialist_for_fan_out(
 class _SubQueryAssignment(BaseModel):
     """One sub-question paired with the specialist responsible for it."""
 
+    model_config = ConfigDict(extra="forbid")
+
     specialist_id: str = Field(
         description="The specialist id this sub-question belongs to. MUST be one of the ids provided in the prompt."
     )
@@ -875,6 +1082,8 @@ class _SubQueryAssignment(BaseModel):
 
 
 class _Decomposition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     sub_queries: list[_SubQueryAssignment] = Field(
         description="One entry per relevant specialist. Omit a specialist entirely if nothing in the user query relates to its scope."
     )

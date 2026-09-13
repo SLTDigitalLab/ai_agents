@@ -12,6 +12,7 @@ Flow:
 """
 
 import re
+from uuid import uuid4
 
 from langchain_core.messages import AIMessage, trim_messages
 from langgraph.graph import END, START, StateGraph
@@ -31,8 +32,28 @@ _OTHER_EMPLOYEE_LEAVE_REFUSAL = (
 # A leave request is "for someone else" only if it mentions leave AND an
 # employee ID that is not the caller's own.
 _LEAVE_KEYWORDS = ("leave balance", "leave bal", "annual leave", "casual leave",
-                   "sick leave", "leaves", "my leave", "leave")
-_EMP_ID_RE = re.compile(r"\b\d{4,8}\b")
+                   "sick leave", "leaves", "my leave", "leave", "නිවාඩු", "விடுப்பு")
+# Digit-only boundaries work even when an ID directly touches Sinhala/Tamil
+# letters; Unicode ``\b`` treats those letters and digits as the same word.
+_EMP_ID_RE = re.compile(r"(?<!\d)\d{4,8}(?!\d)")
+
+_PERSONAL_LEAVE_PATTERNS = (
+    # English personal balance / usage-history wording.
+    r"\b(my|i|have i)\b.*\b(leave|leaves)\b",
+    r"\b(leave|leaves)\b.*\b(balance|remaining|left|have i|taken|used)\b",
+    # Sinhala: personal markers plus leave/balance/taken wording.
+    r"(මගේ|මම|මට).*(නිවාඩු)",
+    r"(නිවාඩු).*(ශේෂ|ඉතිරි|අරගෙන|ගත්ත|ලබාගෙන|භාවිත)",
+    # Tamil: personal markers plus leave/balance/taken wording.
+    r"(என்|எனது|நான்|எனக்கு).*(விடுப்பு)",
+    r"(விடுப்பு).*(இருப்பு|மீத|எடுத்த|பயன்படுத்த)",
+)
+
+
+def _is_personal_leave_data_request(text: str) -> bool:
+    """Identify requests for the caller's live leave data in supported languages."""
+    normalized = " ".join(text.lower().split())
+    return any(re.search(pattern, normalized) for pattern in _PERSONAL_LEAVE_PATTERNS)
 
 
 def _latest_human_text(messages: list) -> str:
@@ -82,6 +103,31 @@ async def call_model(state: AgentState) -> dict:
     latest_human = _latest_human_text(state.get("messages", []))
     if auth_sid != "unknown" and _is_other_employee_leave_request(latest_human, auth_sid):
         return {"messages": [AIMessage(content=_OTHER_EMPLOYEE_LEAVE_REFUSAL)]}
+
+    # Tool choice must not depend on the LLM understanding an English-only tool
+    # description. When the latest turn clearly asks for the authenticated
+    # employee's own live leave data, deterministically call the ERP tool. After
+    # ToolNode runs, the latest message is a tool result, so this branch naturally
+    # falls through to the LLM for language-matched formatting without looping.
+    latest_message = state.get("messages", [])[-1] if state.get("messages") else None
+    if (
+        getattr(latest_message, "type", None) == "human"
+        and _is_personal_leave_data_request(latest_human)
+    ):
+        return {
+            "messages": [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "get_employee_leave_balance",
+                            "args": {},
+                            "id": f"leave_balance_{uuid4().hex}",
+                        }
+                    ],
+                )
+            ]
+        }
 
     if via_supervisor:
         identity_block = """You are Workmate AI, SLTMobitel's unified internal assistant. The user does not know about any sub-agents or routing — they are talking to a single assistant called Workmate AI. For this turn, answer using HR knowledge. At SLTMobitel, HR covers Leave Policies, Employee Benefits, and all Staff Loans (Distress, Motorcycle, Car, Education).

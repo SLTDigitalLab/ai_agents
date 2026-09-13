@@ -177,6 +177,58 @@ def _rule_based_guardrail(message: str) -> GuardrailResult | None:
     return None
 
 
+def _benign_workplace_fast_path(message: str) -> GuardrailResult | None:
+    """Pass clearly routine workplace questions without an LLM round trip.
+
+    This deliberately favors precision over coverage. Any security, harmful,
+    secret-related, emotionally charged, or otherwise ambiguous wording falls
+    through to the model classifier.
+    """
+    text = _normalize_message(message)
+    if not text or len(text) > 500:
+        return None
+
+    ambiguous_or_risky_patterns = [
+        r"\b(hack|bypass|exploit|attack|inject|steal|phish|malware|ransomware|keylogger)\w*\b",
+        r"\b(password|credential|secret|token|api key|system prompt|developer message)\b",
+        r"\b(kill|poison|hurt|injure|harm|weapon|bomb|explosive|toxic)\w*\b",
+        r"\b(ignore|override|disable|evade)\b.*\b(instruction|guardrail|safety|rule|policy)\w*\b",
+        r"\b(angry|furious|frustrated|annoyed|upset|confused|hate)\b",
+    ]
+    if _contains_any(text, ambiguous_or_risky_patterns):
+        return None
+
+    # Common conversational turns are safe and do not need nuanced analysis.
+    if re.fullmatch(
+        r"(hi|hello|hey|good morning|good afternoon|good evening|how are you|how's it going|how is it going|thanks|thank you|ok|okay|ඔයාට කොහොමද|ඔබට කොහොමද|කොහොමද|எப்படி இருக்கிறீர்கள்|எப்படி இருக்கீங்க|எப்படி இருக்கிறாய்)[?!. ]*",
+        text,
+    ):
+        sentiment = "positive" if "thank" in text else "neutral"
+        return GuardrailResult(
+            action="PASS",
+            reason="benign_conversation_fast_path",
+            sentiment=sentiment,
+        )
+
+    workplace_topics = [
+        r"\b(hr|human resources|employee|staff)\b",
+        r"\b(leave|attendance|loan|benefit|claim|allowance|salary|payroll|payslip)\w*\b",
+        r"\b(performance|grievance|appraisal|promotion|training|transfer|retirement)\w*\b",
+        r"\b(policy|procedure|application|eligibility|entitlement|approval)\w*\b",
+        r"\b(finance|budget|invoice|payment|reimbursement|petty cash|treasury)\b",
+        r"\b(admin|procurement|tender|contract|legal|marketing)\w*\b",
+        r"\b(network|broadband|peotv|enterprise|consumer|package|service)\w*\b",
+    ]
+    if _contains_any(text, workplace_topics):
+        return GuardrailResult(
+            action="PASS",
+            reason="benign_workplace_fast_path",
+            sentiment="neutral",
+        )
+
+    return None
+
+
 
 # ── Singleton classifier LLM ────────────────────────────────────────────
 _guardrail_llm = None
@@ -207,6 +259,16 @@ async def classify_intent(message: str) -> GuardrailResult:
             f"sentiment={rule_result.sentiment} reason={rule_result.reason}"
         )
         return rule_result
+
+    benign_result = _benign_workplace_fast_path(message)
+    if benign_result is not None:
+        log.info(
+            "Guardrail fast-path: action=%s sentiment=%s reason=%s",
+            benign_result.action,
+            benign_result.sentiment,
+            benign_result.reason,
+        )
+        return benign_result
 
     # Model-based guardrail disabled: rely on the deterministic pre-check only.
     if not settings.GUARDRAIL_MODEL_ENABLED:

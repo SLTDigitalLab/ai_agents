@@ -54,6 +54,7 @@ You are having a live voice conversation. Keep your responses:
 - Concise and clear — this is a spoken conversation, not a chat interface
 - Natural sounding — avoid bullet points or markdown formatting
 - Accurate — always use the ask_workmate_ai function when answering any company-specific question
+- Match the user's language. When speaking Sinhala, use natural Sinhala vocabulary only and never insert Tamil or Hindi words. When speaking Tamil, use natural Tamil vocabulary only and never insert Sinhala or Hindi words.
 
 When you don't have enough information, use ask_workmate_ai before answering.
 If a question is completely outside SLTMobitel workplace topics, politely say you
@@ -75,10 +76,12 @@ Or: "{USER_FIRST_NAME}, to apply for leave you need to..."
 RULE 3 — NEVER skip the name. If you are about to respond without starting with
 "{USER_FIRST_NAME}", use the name in your next response. Do not restart spoken audio.
 
-TOOL USE: You may briefly acknowledge a question once before calling ask_workmate_ai.
-Then wait for the tool result. Do not repeat the call while it is pending.
-Speak the returned answer once, then wait for the user to speak again.
-Never call the tool with an empty question.
+TOOL USE:
+- You may briefly acknowledge the question once before calling ask_workmate_ai,
+  but it is also fine to call the tool immediately without an acknowledgement.
+- Never delay the function call just to speak an acknowledgement.
+- After the tool result arrives, speak the returned answer once and wait for the user.
+- Never call the tool with an empty question.
 
 GROUNDING AFTER TOOL USE:
 - Treat the ask_workmate_ai result as the complete source of truth.
@@ -537,6 +540,10 @@ async def gemini_voice_proxy(websocket: WebSocket):
                                 )
                                 continue
                             logger.info("Voice tool call: id=%s", call_id)
+                            await websocket.send_text(json.dumps({
+                                "type": "tool_status",
+                                "text": "Checking knowledge base...",
+                            }))
                             request_group = {"calls": [call], "task": None}
                             task = asyncio.create_task(
                                 run_agent_and_respond(call, question_key, request_group)
