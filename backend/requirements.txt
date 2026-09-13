@@ -26,6 +26,8 @@ unstructured[pdf,docx,pptx,xlsx]==0.21.2
 fastembed>=0.5.1
 fastapi-mail==1.6.2
 httpx==0.28.1
+google-auth>=2.0,<3
+websockets>=15,<16
 pytesseract==0.3.13
 neo4j==6.0.3
 langchain-ollama==1.0.1

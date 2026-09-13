@@ -14,6 +14,13 @@ load_dotenv(ROOT_DIR / ".env")
 class Settings(BaseSettings):
     GOOGLE_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
+
+    # Live Workmate voice agent. VOICE_PROVIDER may explicitly select OpenAI;
+    # otherwise the realtime router prefers valid Gemini credentials.
+    VOICE_PROVIDER: Optional[str] = None
+    PROJECT_ID: Optional[str] = None
+    LOCATION: str = "us-central1"
+    VOICE_CHAT_TIMEOUT_SECONDS: float = 30.0
     
     # LLM and Embedding Configuration
     LLM_PROVIDER: str = "gemini" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'
