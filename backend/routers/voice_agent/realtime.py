@@ -208,7 +208,13 @@ def _get_vertex_access_token() -> str:
 
 
 # call the full agent pipeline and return a complete answer
-async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str) -> str:
+async def _ask_agent(
+    question: str,
+    user_id: str,
+    user_name: str,
+    thread_id: str,
+    auth_token: str,
+) -> str:
     """
     Sends the user's question to /api/v1/chat with stream=False.
     Returns the complete answer text.
@@ -218,6 +224,7 @@ async def _ask_agent(question: str, user_id: str, user_name: str, thread_id: str
         async with httpx.AsyncClient(timeout=settings.VOICE_CHAT_TIMEOUT_SECONDS) as client:
             resp = await client.post(
                 CHAT_API_URL,
+                headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
                 json={
                     "message":   question,
                     "agent_id":  "supervisor",
@@ -308,12 +315,14 @@ async def gemini_voice_proxy(websocket: WebSocket):
             # receive user identity from browser
             session_email: str = ""
             session_name: str = ""
+            session_auth_token: str = ""
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
                 msg = json.loads(raw)
                 if msg.get("type") == "user_identity":
                     session_email = msg.get("user_id", "")
                     session_name  = msg.get("user_name", "")
+                    session_auth_token = msg.get("auth_token", "")
                     logger.info(f"Voice user identity received: {session_email[:6]}...")
             except asyncio.TimeoutError:
                 logger.warning("No identity message within 10s — continuing as anonymous")
@@ -365,6 +374,7 @@ async def gemini_voice_proxy(websocket: WebSocket):
                                 user_id=session_email,
                                 user_name=session_name,
                                 thread_id=voice_thread,
+                                auth_token=session_auth_token,
                             )
                         logger.info("Voice tool result: id=%s, %d chars", call_id, len(answer))
                         result = {"output": answer}

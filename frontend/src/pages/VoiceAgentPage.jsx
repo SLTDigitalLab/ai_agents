@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import sltLogo    from '../assets/slt-mobitel-logo.png';
 import embryoLogo from '../assets/embryo-removebg.png';
 import { useTheme } from '../contexts/ThemeContext';
+import { getApiIdToken } from '../apiAuth';
 
 import { PHASE, API_URL, WS_URL, SYSTEM_PROMPT } from '../components/voice_agent/constants';
 import { float32ToPcm16Base64, pcm16Base64ToFloat32 } from '../components/voice_agent/AudioHelpers';
@@ -76,6 +77,7 @@ const VoiceAgentPage = () => {
     const micStreamRef       = useRef(null);
     const nextPlayTimeRef    = useRef(0);
     const activeAudioSourcesRef = useRef([]);
+    const apiIdTokenRef      = useRef(null);
 
 
 
@@ -222,7 +224,10 @@ const VoiceAgentPage = () => {
             setStatusText('Checking knowledge base...');
             const res = await fetch(`${API_URL}/api/v1/chat`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${apiIdTokenRef.current}`,
+                },
                 body: JSON.stringify({
                     message: args.question,
                     agent_id: 'supervisor',
@@ -308,6 +313,9 @@ const stopAllAudio = useCallback(() => {
         setErrorMessage('');
 
         try {
+            const apiIdToken = await getApiIdToken(instance, accounts[0]);
+            if (!apiIdToken) throw new Error('Your sign-in session is unavailable. Please sign in again.');
+            apiIdTokenRef.current = apiIdToken;
 
             const providerRes   = await fetch(`${API_URL}/api/v1/realtime/provider`);
             const providerData  = await providerRes.json();
@@ -396,6 +404,7 @@ const stopAllAudio = useCallback(() => {
                             type: 'user_identity',
                             user_id: user.username || '',
                             user_name: user.name || '',
+                            auth_token: apiIdTokenRef.current,
                         }));
                         setStatusText('Speak to Workmate AI');
                         setPhase(PHASE.CONNECTED);
