@@ -22,6 +22,7 @@ def load_proxy():
                      _get_vertex_access_token=lambda: 'test-token',
                      VOICE_SYSTEM_PROMPT='Hello {USER_FIRST_NAME}', WORKMATE_TOOL={},
                      GEMINI_LIVE_MODEL='test', MAX_AUDIO_LEAD_SECONDS=0.5,
+                     _normalize_tool_question=lambda value: ' '.join(value.strip().casefold().split()).rstrip('.?!'),
                      _estimate_chunk_seconds=lambda data: 0.01)
     exec(compile(ast.Module(body=[fn], type_ignores=[]), str(path), 'exec'), namespace)
     return namespace
@@ -90,7 +91,12 @@ class VoiceProxyTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.sleep(0.001)
 
     def results(self):
-        return [m['tool_response']['function_responses'][0] for m in self.gemini.sent if 'tool_response' in m]
+        return [
+            response
+            for message in self.gemini.sent
+            if 'tool_response' in message
+            for response in message['tool_response']['function_responses']
+        ]
 
     async def test_slow_lookup_duplicate_and_correlated_complete_answer(self):
         gate = asyncio.Event()
@@ -134,6 +140,22 @@ class VoiceProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([r['id'] for r in self.results()], ['first', 'second'])
         self.assertTrue(all(r['response']['output'] == 'Complete answer' for r in self.results()))
         self.assertFalse(any(m.get('type') == 'stop_audio' for m in self.browser.sent))
+
+    async def test_same_question_with_new_call_id_is_coalesced(self):
+        gate = asyncio.Event()
+        async def slow(**kwargs):
+            await gate.wait()
+            return 'Your leave balance is 14 days.'
+        self.agent.side_effect = slow
+        await self.gemini.incoming.put(call('first', 'What is my leave balance?'))
+        await self.until(lambda: self.agent.await_count == 1)
+        await self.gemini.incoming.put(call('second', '  what is my leave balance  '))
+        await asyncio.sleep(0.01)
+        self.assertEqual(self.agent.await_count, 1)
+        gate.set()
+        await self.until(lambda: len(self.results()) == 2)
+        self.assertEqual([result['id'] for result in self.results()], ['first', 'second'])
+        self.assertEqual(self.agent.await_count, 1)
 
     async def test_explicit_cancellation_stops_audio_without_empty_response(self):
         cancelled = asyncio.Event()

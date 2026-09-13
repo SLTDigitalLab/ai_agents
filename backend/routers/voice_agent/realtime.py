@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 
 import httpx
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -258,6 +259,12 @@ def _estimate_chunk_seconds(b64_data: str) -> float:
     return samples / AUDIO_SAMPLE_RATE_HZ
 
 
+def _normalize_tool_question(question: str) -> str:
+    """Build a stable key for coalescing repeated in-flight voice lookups."""
+    normalized = re.sub(r"\s+", " ", question.strip().casefold())
+    return normalized.rstrip(".?!")
+
+
 # Gemini Live WebSocket proxy
 @router.websocket("/ws/voice")
 async def gemini_voice_proxy(websocket: WebSocket):
@@ -355,11 +362,12 @@ async def gemini_voice_proxy(websocket: WebSocket):
             voice_thread = f"voice_{id(websocket)}"
 
             agent_tasks = {}
+            inflight_questions = {}
             seen_call_ids = set()
             agent_lock = asyncio.Lock()
             setup_complete = asyncio.Event()
 
-            async def run_agent_and_respond(call):
+            async def run_agent_and_respond(call, question_key, request_group):
                 call_id = call["id"]
                 question = (call.get("args") or {}).get("question", "")
                 try:
@@ -378,12 +386,18 @@ async def gemini_voice_proxy(websocket: WebSocket):
                             )
                         logger.info("Voice tool result: id=%s, %d chars", call_id, len(answer))
                         result = {"output": answer}
+
+                    # Gemini can emit the same question again under a new call
+                    # ID while the first lookup is pending. Complete every call
+                    # together so the provider sees one resolved tool batch,
+                    # while Workmate itself executes only once.
+                    function_responses = [{
+                        "id": grouped_call["id"],
+                        "name": grouped_call["name"],
+                        "response": result,
+                    } for grouped_call in request_group["calls"]]
                     await gemini_ws.send(json.dumps({
-                        "tool_response": {"function_responses": [{
-                            "id": call_id,
-                            "name": call["name"],
-                            "response": result,
-                        }]}
+                        "tool_response": {"function_responses": function_responses}
                     }))
                 except asyncio.CancelledError:
                     # Cancelled calls must not receive empty or stale results.
@@ -392,7 +406,10 @@ async def gemini_voice_proxy(websocket: WebSocket):
                 except Exception:
                     logger.exception("Voice tool response failed: id=%s", call_id)
                 finally:
-                    agent_tasks.pop(call_id, None)
+                    for grouped_call in request_group["calls"]:
+                        agent_tasks.pop(grouped_call["id"], None)
+                    if inflight_questions.get(question_key) is request_group:
+                        inflight_questions.pop(question_key, None)
 
             async def browser_to_gemini():
                 loop = asyncio.get_running_loop()
@@ -488,8 +505,30 @@ async def gemini_voice_proxy(websocket: WebSocket):
                                 logger.info("Ignoring duplicate voice tool call: id=%s", call_id)
                                 continue
                             seen_call_ids.add(call_id)
+                            question = (call.get("args") or {}).get("question", "")
+                            question_key = (
+                                _normalize_tool_question(question)
+                                if isinstance(question, str) and question.strip()
+                                else f"empty:{call_id}"
+                            )
+                            existing_group = inflight_questions.get(question_key)
+                            if existing_group is not None:
+                                existing_group["calls"].append(call)
+                                agent_tasks[call_id] = existing_group["task"]
+                                logger.info(
+                                    "Coalescing duplicate voice tool call: id=%s primary=%s",
+                                    call_id,
+                                    existing_group["calls"][0]["id"],
+                                )
+                                continue
                             logger.info("Voice tool call: id=%s", call_id)
-                            agent_tasks[call_id] = asyncio.create_task(run_agent_and_respond(call))
+                            request_group = {"calls": [call], "task": None}
+                            task = asyncio.create_task(
+                                run_agent_and_respond(call, question_key, request_group)
+                            )
+                            request_group["task"] = task
+                            inflight_questions[question_key] = request_group
+                            agent_tasks[call_id] = task
 
                 except Exception as e:
                     logger.error(f"gemini_to_browser error: {e}")
