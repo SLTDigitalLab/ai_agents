@@ -12,6 +12,7 @@ before anything is saved. Only KEEP leads to save_ticket() writing to
 Postgres.
 """
 
+import asyncio
 import re
 from typing import Literal
 
@@ -24,6 +25,7 @@ from domain.helpdesk.pipeline.helpers import (
     _latest_user_message,
     _continues_prior_reply,
     _is_query_too_vague,
+    _ai_reply_or_fallback,
 )
 from domain.helpdesk.pipeline.category_classification import (
     classify_ticket_category_pipeline,
@@ -55,7 +57,9 @@ async def draft_ticket(state: AgentState) -> dict:
         state
     )
     messages = state.get("messages", [])
-    ticket_id = state.get("helpdesk_draft_ticket_id") or next_ticket_id()
+    # Off the event loop — next_ticket_id() is a synchronous, unpooled
+    # psycopg call (see check_duplicates() in duplicates.py for why).
+    ticket_id = state.get("helpdesk_draft_ticket_id") or await asyncio.to_thread(next_ticket_id)
     continuation = _continues_prior_reply(state)
     already_clarified = state.get("helpdesk_category_clarify_count", 0) > 0
 
@@ -76,6 +80,10 @@ async def draft_ticket(state: AgentState) -> dict:
                 },
                 *messages,
             ]
+        )
+        response = _ai_reply_or_fallback(
+            response,
+            "Could you tell me a bit more about the issue — what's happening and when it started?",
         )
         return {
             "messages": [response],
@@ -155,7 +163,7 @@ async def category_clarification_handler(state: AgentState) -> dict:
     )
 
     messages = state.get("messages", [])
-    ticket_id = state.get("helpdesk_draft_ticket_id") or next_ticket_id()
+    ticket_id = state.get("helpdesk_draft_ticket_id") or await asyncio.to_thread(next_ticket_id)
     continuation = _continues_prior_reply(state)
 
     main_category, sub_category, confidence = await classify_ticket_category_pipeline(
@@ -236,7 +244,8 @@ async def confirm_category_handler(state: AgentState) -> dict:
             suggested_main = hint.strip().title()
 
         try:
-            all_categories = list_categories()
+            # Off the event loop — see check_duplicates() in duplicates.py.
+            all_categories = await asyncio.to_thread(list_categories)
         except Exception as exc:
             print(f"[confirm_category_handler] list_categories() error: {exc}")
             all_categories = []
@@ -381,7 +390,9 @@ async def save_ticket(state: AgentState) -> dict:
     sub_category = state.get("helpdesk_draft_sub_category", "General")
 
     try:
-        ticket = create_helpdesk_ticket(
+        # Off the event loop — see check_duplicates() in duplicates.py.
+        ticket = await asyncio.to_thread(
+            create_helpdesk_ticket,
             user_id=user_id,
             message=original_query,
             ticket_id=ticket_id,

@@ -65,9 +65,11 @@ AGENT_BUILDERS: dict[str, callable] = {
     # Archetype 4 – KB powered by internal SLM (Ollama)
     "askhrslm": build_kb_slm_workflow,
 
-    # Archetype 5 – Helpdesk → n8n Forwarding workflow
-    "helpdesk": build_helpdesk_n8n_workflow,
-    "helpdesk_dev": build_helpdesk_workflow,
+    # Archetype 5 – Helpdesk
+    # "helpdesk" (localhost/helpdesk) now runs the full LangGraph pipeline,
+    # while "helpdesk_dev" (localhost/helpdesk_dev) forwards to the n8n workflow.
+    "helpdesk": build_helpdesk_workflow,
+    "helpdesk_dev": build_helpdesk_n8n_workflow,
 }
 
 

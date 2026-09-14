@@ -4,6 +4,7 @@ tickets before ever drafting a new one (see ticket_draft.py for the next
 step).
 """
 
+import asyncio
 import re
 from typing import Literal
 
@@ -27,7 +28,12 @@ async def check_duplicates(state: AgentState) -> dict:
     continuation = _continues_prior_reply(state)
 
     try:
-        open_tickets = list_helpdesk_tickets(user_id=user_id, status="open")
+        # Off the event loop: list_helpdesk_tickets() is a synchronous,
+        # unpooled psycopg call — run inline it would block every other
+        # in-flight request on this worker for the duration of the query.
+        open_tickets = await asyncio.to_thread(
+            list_helpdesk_tickets, user_id=user_id, status="open"
+        )
     except Exception:
         open_tickets = []
 

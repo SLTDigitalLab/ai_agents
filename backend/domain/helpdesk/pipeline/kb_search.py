@@ -162,6 +162,11 @@ async def validate_kb_answer(state: AgentState) -> dict:
             break
 
     ai_lower = ai_answer.lower()
+    # The LLM renders contractions with a typographic apostrophe (’, U+2019)
+    # even though the phrase lists below use a straight one — normalize so
+    # "wasn't"/"can't"/"couldn't" still match the model's actual wording
+    # instead of silently missing every "not found" answer.
+    ai_lower = ai_lower.replace("’", "'").replace("‘", "'")
 
     # NOTE: kb_search_system_prompt's "not found" branch must start with
     # "wasn't able to find specific information about that" — these

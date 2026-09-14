@@ -166,10 +166,10 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Consumer Business team."
     },
 
-    // 13. Helpdesk Agent (n8n workflow integration)
+    // 13. Helpdesk Agent (full LangGraph pipeline)
     helpdesk: {
         id: "helpdesk",
-        title: "HELP DESK",
+        title: "ASK HELPDESK",
         subtitle: "Your AI-powered Knowledge Assistant for instant solutions, troubleshooting, and automated IT ticket management.",
         color: "from-purple-900 to-purple-600",
         buttonColor: "bg-purple-600 hover:bg-purple-700",
@@ -177,10 +177,10 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
     },
 
-    // 14. Helpdesk Agent (full LangGraph pipeline — in development)
+    // 14. Helpdesk Agent (n8n workflow integration)
     helpdesk_dev: {
         id: "helpdesk_dev",
-        title: "ASK HELPDESK",
+        title: "HELPDESK",
         subtitle: "Your AI-powered Knowledge Assistant for instant solutions, troubleshooting, and automated IT ticket management.",
         color: "from-purple-900 to-purple-600",
         buttonColor: "bg-purple-600 hover:bg-purple-700",

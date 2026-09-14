@@ -3,6 +3,7 @@ Self-or-human handler: fires when the user replies to KB search's
 "1. This solves it / 2. Create a ticket / 3. I'd like to know more" question.
 """
 
+import asyncio
 import re
 from typing import Literal
 
@@ -186,7 +187,12 @@ async def self_or_human_handler(state: AgentState) -> dict:
 
     if original_query and kb_answer:
         try:
-            create_solved_ticket(requirements=original_query, answer=kb_answer)
+            # Off the event loop — see duplicates.py's check_duplicates()
+            # for why a synchronous psycopg call here would stall the
+            # whole process, not just this request.
+            await asyncio.to_thread(
+                create_solved_ticket, requirements=original_query, answer=kb_answer
+            )
             print(
                 f"[self_or_human_handler] saved solved ticket: "
                 f"query={original_query[:60]!r}"

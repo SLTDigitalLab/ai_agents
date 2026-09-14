@@ -56,16 +56,19 @@ for "billing was charged twice," even if both mention "internet."
   in Sinhala, Tamil, or transliterated/mixed text.
 
   Then ALWAYS end your reply with this closing question, on its own line,
-  keeping the numbering exactly as "1" and "2" (the wording of your own
-  explanation above may vary each time, but satisfaction_handler
-  (research.py) matches the user's NEXT reply by keyword — including a
-  bare "1"/"2" — so these two option lines must stay, verbatim, every time):
+  keeping the numbering exactly as "1", "2", and "3", and the wording of
+  each option's action text EXACTLY as shown (only the leading emoji/bold
+  is decorative) — same 3-option contract as kb_search_system_prompt's
+  "RELEVANT INFORMATION FOUND" branch below, so satisfaction_handler
+  (research.py) and self_or_human_handler (self_or_human.py) can match a
+  user's "1"/"2"/"3" reply the same way at either checkpoint:
 
   "I hope this clears things up!
 
   Did this resolve your issue? Let me know:
-  1. ✅ **Yes, this solved my issue!**
-  2. 🙋 **No, I still need help**"
+  1. ✅ **Yes, this solves my issue**
+  2. 🎫 **No, please create a support ticket for further help**
+  3. ℹ️ **I'd like to know more information**"
 
 - NO MATCH — nothing returned, or nothing covers the user's actual issue:
   call present_solved_answer(matched=false, answer="").

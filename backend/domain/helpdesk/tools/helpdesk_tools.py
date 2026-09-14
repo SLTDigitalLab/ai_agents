@@ -15,6 +15,7 @@ from services.helpdesk_tickets import (
     list_categories,
 )
 from domain.tools.rag_tools import search_knowledge_base
+from domain.helpdesk.tools.incident_status_tools import check_incident_status
 
 llm = get_chat_model()
 
@@ -51,10 +52,12 @@ def get_user_tickets(
     status: str | None = None,
 ) -> str:
     """
-    Fetch all helpdesk tickets for a given user from the database.
-    Optionally filter by status (e.g. 'open', 'closed', 'pending').
-    Returns a formatted summary of the user's tickets.
-    Call this whenever the user asks about their tickets, issues, or requests.
+    Fetch all helpdesk tickets for a given user from the local database.
+
+    NOT used by ticket_status_agent — that now calls check_incident_status
+    against SLT's real incident CRM instead (see incident_status_tools.py).
+    Kept here as the local-DB implementation in case it's needed again;
+    not currently wired into any tool set below.
     """
     try:
         tickets = list_helpdesk_tickets(user_id=user_id, status=status)
@@ -157,7 +160,7 @@ def list_categories_tool(category_name: str | None = None) -> str:
 
 # ── Tool sets & LLM bindings ─────────────────────────────────────────────
 
-TICKET_TOOLS = [get_user_tickets]
+TICKET_TOOLS = [check_incident_status]
 SOLVED_TICKET_TOOLS = [search_solved_tickets_tool]
 KB_TOOLS = [search_knowledge_base]
 CATEGORY_TOOLS = [list_categories_tool]

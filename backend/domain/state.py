@@ -72,6 +72,13 @@ class AgentState(TypedDict):
     # draft_ticket() and reused across its Turn 1 -> Turn 2 tool-call cycle.
     helpdesk_draft_continuation: NotRequired[bool]
 
+    # Ticket status lookup phase tracking (domain/helpdesk/pipeline/
+    # ticket_status_agent.py): "awaiting_incident_id" after the agent asks
+    # for an incident ID with no tool call yet, so classify_message routes
+    # the user's next bare-ID reply straight back here instead of
+    # reclassifying it as an unrelated fresh message.
+    helpdesk_ticket_status_phase: NotRequired[str]
+
     # Supervisor-only routing fields
     routing_action: NotRequired[str]
     routing_reason: NotRequired[str]

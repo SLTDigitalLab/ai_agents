@@ -206,7 +206,7 @@ async def classify_ticket_category(message: str) -> tuple[str, str]:
     main_category, sub_category = _parse_category_draft(reply)
 
     try:
-        all_categories = list_categories()
+        all_categories = await asyncio.to_thread(list_categories)
     except Exception as exc:
         print(f"[classify_ticket_category] list_categories() error: {exc}")
         all_categories = []
@@ -255,7 +255,7 @@ async def classify_ticket_category_vector(message: str, k: int = 5) -> tuple[str
     """Vector-retrieval variant of classify_ticket_category(), for accuracy
     A/B comparison (run_accuracy_eval.py --method vector)."""
     candidates = await search_category_candidates(message, k=k)
-    valid_categories = _load_valid_categories("classify_ticket_category_vector")
+    valid_categories = await _load_valid_categories("classify_ticket_category_vector")
 
     if not candidates:
         print("[classify_ticket_category_vector] no candidates returned from vector search")
@@ -384,7 +384,7 @@ async def classify_ticket_category_pipeline(
     Never raises: falls back to keyword-overlap resolution (confidence 0.0)
     on any error, so an LLM/embedding failure mid-classification degrades
     to a low-confidence fallback instead of killing the ticket-creation turn."""
-    valid_categories = _load_valid_categories("classify_ticket_category_pipeline")
+    valid_categories = await _load_valid_categories("classify_ticket_category_pipeline")
 
     try:
         candidates = await search_hybrid_candidates(message, k=k)
@@ -442,11 +442,16 @@ def _get_sampling_llm(temperature: float):
     )
 
 
-def _load_valid_categories(log_prefix: str) -> list[tuple[str, str, str, str]]:
+async def _load_valid_categories(log_prefix: str) -> list[tuple[str, str, str, str]]:
     """Load the (category_name, subcategory, description, keywords) list
-    from Postgres for the classifiers and _resolve_category() to use."""
+    from Postgres for the classifiers and _resolve_category() to use.
+
+    list_categories() is a synchronous, unpooled psycopg call — run off
+    the event loop (asyncio.to_thread) so it doesn't stall every other
+    in-flight request on this worker for the duration of the query (see
+    check_duplicates() in duplicates.py for the same pattern)."""
     try:
-        all_categories = list_categories()
+        all_categories = await asyncio.to_thread(list_categories)
     except Exception as exc:
         print(f"[{log_prefix}] list_categories() error: {exc}")
         all_categories = []
@@ -478,7 +483,7 @@ def _get_finetuned_llm(model_id: str):
 async def classify_ticket_category_finetuned(message: str, model_id: str) -> tuple[str, str]:
     """Fine-tuned-model classifier, for accuracy A/B comparison
     (run_accuracy_eval.py --method finetuned)."""
-    valid_categories = _load_valid_categories("classify_ticket_category_finetuned")
+    valid_categories = await _load_valid_categories("classify_ticket_category_finetuned")
 
     system_prompt = {
         "role": "system",
@@ -501,7 +506,7 @@ async def classify_ticket_category_finetuned_vector(
     classify_ticket_category_finetuned() (run_accuracy_eval.py --method
     finetuned_vector)."""
     candidates = await search_category_candidates(message, k=k)
-    valid_categories = _load_valid_categories("classify_ticket_category_finetuned_vector")
+    valid_categories = await _load_valid_categories("classify_ticket_category_finetuned_vector")
 
     if not candidates:
         print("[classify_ticket_category_finetuned_vector] no candidates returned from vector search")
@@ -541,7 +546,7 @@ async def classify_ticket_category_examples(message: str, k: int = 5) -> tuple[s
     """Same architecture as classify_ticket_category_vector() but retrieves
     real past tickets instead (run_accuracy_eval.py --method examples)."""
     examples = await search_ticket_examples(message, k=k)
-    valid_categories = _load_valid_categories("classify_ticket_category_examples")
+    valid_categories = await _load_valid_categories("classify_ticket_category_examples")
 
     if not examples:
         print("[classify_ticket_category_examples] no examples returned from ticket-example search")

@@ -8,8 +8,11 @@ domain/helpdesk/tools/. This file just wires everything into the graph.
 
 Flow:
   classify_message -> greeting / research / ticket_related
+                    -> (fresh greeting) already replied in-call -> END
 
   greeting_agent      -> one reply -> END
+                         (fallback only: mid-flow greeting-reset case,
+                         where classify_message didn't generate a reply)
 
   research_agent      -> search solved tickets -> if matched, ask if it
                          helped -> else kb_search_agent -> search KB ->
@@ -131,6 +134,10 @@ def build_helpdesk_workflow() -> StateGraph:
             "greeting_agent": "greeting_agent",
             "research_agent": "research_agent",
             "ticket_status_agent": "ticket_status_agent",
+            # A fresh greeting whose reply classify_message already
+            # generated in the same call (see classifier.py) — no need to
+            # pay for a second LLM round-trip in greeting_agent.
+            "__end__": END,
         },
     )
 

@@ -6,6 +6,8 @@ pipeline (domain/helpdesk/pipeline/*.py).
 import re
 from typing import Any, Literal
 
+from langchain_core.messages import AIMessage
+
 from domain.state import AgentState
 from core.llm import get_chat_model
 
@@ -33,6 +35,21 @@ def _message_to_text(message: Any) -> str:
         return ""
 
     return str(content).strip()
+
+
+def _ai_reply_or_fallback(response: Any, fallback: str) -> AIMessage:
+    """Guard against an LLM call returning a genuinely empty completion —
+    an occasional real failure mode (observed for the low-confidence
+    category-clarification ask in ticket_draft.py, when asked to generate
+    a reply immediately after the model's own prior turn with no new user
+    input in between — see _CONTINUATION_NOTE in prompts/shared.py).
+    Without this, the phase field still advances (e.g. to
+    "awaiting_category_clarification") but the user sees no question and
+    no menu — just silence, with no way to know what to do next."""
+    text = _message_to_text(response)
+    if text.strip():
+        return response if isinstance(response, AIMessage) else AIMessage(content=text)
+    return AIMessage(content=fallback)
 
 
 def _latest_user_message(state: AgentState) -> str:

@@ -18,7 +18,11 @@ from domain.helpdesk.pipeline.helpers import (
     _message_to_text,
     _latest_user_message,
 )
-from domain.helpdesk.prompts import RESEARCH_SYSTEM_PROMPT, SATISFACTION_CLOSING_SYSTEM_PROMPT
+from domain.helpdesk.prompts import (
+    RESEARCH_SYSTEM_PROMPT,
+    SATISFACTION_CLOSING_SYSTEM_PROMPT,
+    SELF_OR_HUMAN_MORE_INFO_SYSTEM_PROMPT,
+)
 from domain.helpdesk.tools.helpdesk_tools import (
     solved_ticket_search_llm,
     solved_ticket_verdict_llm,
@@ -214,14 +218,44 @@ async def satisfaction_handler(state: AgentState) -> dict:
         "isn't",
         "haven't",
         "hasn't",
-        "more",
         "again",
         "another",
+    }
+    # Option 3 ("I'd like to know more information") — same signal set as
+    # self_or_human_handler's more_info_signals (self_or_human.py), which
+    # handles the equivalent option after a KB-search answer.
+    more_info_signals = {
+        "3",
+        "more",
+        "info",
+        "information",
     }
 
     words = set(re.sub(r"[^\w\s]", "", user_lower).split())
     is_not_satisfied = bool(words & not_satisfied_signals)
     is_satisfied = bool(words & satisfied_signals) and not is_not_satisfied
+    is_more_info = (
+        bool(words & more_info_signals) and not is_not_satisfied and not is_satisfied
+    )
+
+    if is_more_info:
+        print(
+            "[satisfaction_handler] user chose option 3 (know more) → "
+            "asking what topic, then awaiting a fresh KB query"
+        )
+        response = await llm.ainvoke([
+            {"role": "system", "content": SELF_OR_HUMAN_MORE_INFO_SYSTEM_PROMPT},
+            {"role": "user", "content": user_message},
+        ])
+        return {
+            "messages": [AIMessage(content=_message_to_text(response))],
+            "helpdesk_research_phase": "",
+            # Reuses kb_search.py's vague-query pre-check phase — the
+            # user's next reply becomes a fresh KB query automatically
+            # (same mechanism self_or_human_handler's option 3 uses).
+            "helpdesk_ticket_phase": "awaiting_retry_clarification",
+            "helpdesk_retry_count": 0,
+        }
 
     if is_not_satisfied or not is_satisfied:
         print("[satisfaction_handler] user not satisfied → proceeding to KB search")
@@ -245,10 +279,14 @@ async def satisfaction_handler(state: AgentState) -> dict:
 def route_after_satisfaction(
     state: AgentState,
 ) -> Literal["kb_search_agent", "__end__"]:
-    """After satisfaction check: not satisfied → KB search, satisfied → END."""
+    """After satisfaction check: not satisfied → KB search, satisfied or
+    awaiting a "what would you like to know" reply → END."""
     phase = state.get("helpdesk_research_phase", "")
     if phase == "not_satisfied":
         print("[router] not satisfied → KB search")
         return "kb_search_agent"
+    if state.get("helpdesk_ticket_phase", "") == "awaiting_retry_clarification":
+        print("[router] asked what to know more about → ending (awaiting reply)")
+        return "__end__"
     print("[router] satisfied → ending")
     return "__end__"
