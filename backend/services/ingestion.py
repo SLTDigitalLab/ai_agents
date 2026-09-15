@@ -23,7 +23,7 @@ if sys.platform == "win32":
 
 from qdrant_client import QdrantClient, models
 
-from core.config import settings
+from core.config import settings, evidence_storage_dir
 
 log = logging.getLogger(__name__)
 
@@ -235,6 +235,34 @@ class IngestionService:
 
         return final_docs
 
+    def _extract_visual_documents(self, file_path: Path, doc_id: str) -> list[Document]:
+        """Detect flowcharts/diagrams/charts (PDF, DOCX, PPTX, XLSX, images),
+        describe them with a vision model, and return them as extra Documents.
+
+        Each returned Document's page_content is the VLM's narrative of the
+        visual (so it's retrievable by normal semantic search), and its
+        metadata carries the base64-encoded source image so the answer can
+        show the actual picture alongside the explanation. Gracefully
+        returns [] on any failure (e.g. missing OPENAI_API_KEY) so visual
+        extraction never blocks plain-text ingestion.
+        """
+        supported = (".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".eml")
+        if file_path.suffix.lower() not in supported:
+            return []
+
+        try:
+            from services.visual_extractor import process_document_visuals
+
+            _, visual_docs = process_document_visuals(file_path=str(file_path), doc_id=doc_id)
+            for doc in visual_docs:
+                doc.metadata.setdefault("doc_id", doc_id)
+            if visual_docs:
+                log.info(f"   🖼️ Extracted {len(visual_docs)} visual(s) from {file_path.name}")
+            return visual_docs
+        except Exception as e:
+            log.warning(f"Visual extraction skipped/failed for {file_path.name}: {e}")
+            return []
+
     def _file_already_ingested(self, collection_name: str, onedrive_id: str, last_modified: str) -> bool:
         """Check if a file with this onedrive_id and lastModified timestamp
         already has vectors in the collection. Returns True if up-to-date."""
@@ -278,6 +306,16 @@ class IngestionService:
             log.info(f"Deleted old vectors for {file_name} (onedrive_id={onedrive_id})")
         except Exception as e:
             log.warning(f"Could not delete old vectors for {file_name}: {e}")
+
+        # Also remove any evidence images/JSON left over from a previous
+        # visual extraction of this file, so stale pictures don't linger
+        # on disk once the source file changes or is re-ingested.
+        try:
+            evidence_dir = evidence_storage_dir()
+            for stale in evidence_dir.glob(f"{onedrive_id}_*"):
+                stale.unlink(missing_ok=True)
+        except Exception as e:
+            log.warning(f"Could not clean up old evidence files for {file_name}: {e}")
 
     async def process_onedrive_ingestion(self, folder_id: str, access_token: str, agent_name: str, force: bool = False):
         """
@@ -400,6 +438,13 @@ class IngestionService:
 
                     # Chunk using semantic logic
                     chunks = self._load_and_chunk_file(dest_path)
+
+                    # Detect flowcharts/diagrams/charts and describe them with
+                    # a vision model, so image content becomes searchable too
+                    # (e.g. "explain the flow of the X process" flowcharts).
+                    visual_chunks = self._extract_visual_documents(dest_path, doc_id=onedrive_id)
+                    chunks = chunks + visual_chunks
+
                     if not chunks:
                         # Empty output usually means a scanned/image-only PDF
                         # with no text layer. Surface it so admins can re-run

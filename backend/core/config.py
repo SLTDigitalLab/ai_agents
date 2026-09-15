@@ -126,6 +126,7 @@ class Settings(BaseSettings):
     EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
     EVIDENCE_RENDER_ZOOM: float = 1.75
     EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
+    VISUAL_AUDIT_ALL_PDF_PAGES: bool = False
 
     # ── Ask LifeStore cart + PayHere checkout ──────────────────────────────
     # Public base URLs used to build PayHere return/cancel/notify links.
