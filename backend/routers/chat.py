@@ -465,6 +465,14 @@ async def chat(request: ChatRequest):
                                     yield text
                                     break
 
+                # Deterministically-injected blocks (below) are yielded straight
+                # into the HTTP stream but never touch the graph's own state, so
+                # they'd normally vanish from a page refresh (which rebuilds
+                # messages from the checkpoint, not the live stream). Accumulate
+                # them here and patch the checkpoint afterward so refreshed
+                # history shows the same thing the user saw live.
+                persisted_suffix = ""
+
                 # Deterministic product-card injection.
                 # The LLM is asked to append the hidden [LIFESTORE_PRODUCT_CARDS]
                 # block, but small models skip it unreliably. If it didn't emit
@@ -480,7 +488,9 @@ async def chat(request: ChatRequest):
                                 request.agent_id,
                                 request.thread_id,
                             )
-                            yield _build_product_cards_block(cards, display)
+                            block = _build_product_cards_block(cards, display)
+                            persisted_suffix += block
+                            yield block
                     except Exception as inject_exc:
                         logger.warning("Product-card injection skipped: %s", inject_exc)
 
@@ -500,9 +510,34 @@ async def chat(request: ChatRequest):
                             request.agent_id,
                             request.thread_id,
                         )
-                        yield _build_evidence_block(safe_evidence)
+                        block = _build_evidence_block(safe_evidence)
+                        persisted_suffix += block
+                        yield block
                 except Exception as evidence_exc:
                     logger.warning("Visual evidence injection skipped: %s", evidence_exc)
+
+                # Patch the checkpointed AI message in place (same id => the
+                # graph's add_messages reducer replaces rather than appends, so
+                # this stays one bubble on reload, not a stray empty second one).
+                if persisted_suffix:
+                    try:
+                        snapshot = await graph.aget_state(config)
+                        if snapshot.values:
+                            for msg in reversed(snapshot.values.get("messages", [])):
+                                if msg.type == "ai":
+                                    existing_text = _message_content_to_text(msg.content, strip=False)
+                                    await graph.aupdate_state(
+                                        config,
+                                        {"messages": [AIMessage(id=msg.id, content=existing_text + persisted_suffix)]},
+                                    )
+                                    break
+                    except Exception as persist_exc:
+                        logger.warning(
+                            "Failed to persist injected blocks to checkpoint | agent=%s | thread=%s: %s",
+                            request.agent_id,
+                            request.thread_id,
+                            persist_exc,
+                        )
 
         except Exception as exc:
             if isinstance(exc, SentinelError):
