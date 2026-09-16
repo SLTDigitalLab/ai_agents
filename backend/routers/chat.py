@@ -17,6 +17,7 @@ from core.sentinel import SentinelError
 from core.config import settings
 from domain.registry import get_agent_builder
 from domain.guardrails import classify_intent
+from domain.tools.rag_tools import clear_thread_evidence, consume_thread_evidence
 from schemas.chat import ChatRequest
 from langchain_core.tracers.context import tracing_v2_enabled
 from langsmith import tracing_context
@@ -34,6 +35,42 @@ BLOCK_MESSAGE = "I'm sorry, but I'm unable to help with that request."
 PRODUCT_CARDS_START = "[LIFESTORE_PRODUCT_CARDS]"
 PRODUCT_CARDS_END = "[/LIFESTORE_PRODUCT_CARDS]"
 PRODUCT_CARD_MAX_ITEMS = 24
+
+# Hidden metadata block the frontend parses into inline Visual RAG evidence
+# images (flowcharts/diagrams pulled from ingested PDFs/DOCX). Unlike the
+# product-card block, the LLM is never asked to emit this itself — it's
+# always appended deterministically from what retrieval actually found in
+# this turn, so there's nothing for a small model to skip unreliably.
+# Must match frontend/src/components/ChatInterface.jsx.
+EVIDENCE_START = "[VISUAL_EVIDENCE]"
+EVIDENCE_END = "[/VISUAL_EVIDENCE]"
+
+
+def _sanitize_evidence_items(items: list) -> list:
+    """Drop any evidence item whose URL isn't a same-origin evidence path.
+
+    Real guard against a poisoned Qdrant payload trying to smuggle a
+    path-traversal or off-origin (XSS-capable) URL into the frontend <img>.
+    """
+    prefix = settings.EVIDENCE_URL_PREFIX
+    safe = []
+    for item in items or []:
+        url = item.get("url") if isinstance(item, dict) else None
+        if not isinstance(url, str) or not url.startswith(prefix):
+            continue
+        safe.append({
+            "type": item.get("type", "image"),
+            "url": url,
+            "source": item.get("source"),
+            "page": item.get("page"),
+            "caption": item.get("caption"),
+        })
+    return safe
+
+
+def _build_evidence_block(items: list) -> str:
+    payload = json.dumps({"items": items}, ensure_ascii=False)
+    return f"\n\n{EVIDENCE_START}{payload}{EVIDENCE_END}"
 
 
 def _join_text_parts(parts: list[str]) -> str:
@@ -289,6 +326,11 @@ async def chat(request: ChatRequest):
                 "sentiment": guardrail.sentiment,
             }
 
+            # Drop any evidence left over from a previous turn on this thread
+            # before retrieval runs, so a turn that finds nothing new doesn't
+            # re-show stale images from an earlier question.
+            clear_thread_evidence(request.thread_id)
+
             # Use the ASYNC checkpointer for streaming – required by astream_events
             async with get_async_postgres_checkpointer(request.agent_id) as checkpointer:
                 workflow = builder_fn()
@@ -441,6 +483,26 @@ async def chat(request: ChatRequest):
                             yield _build_product_cards_block(cards, display)
                     except Exception as inject_exc:
                         logger.warning("Product-card injection skipped: %s", inject_exc)
+
+                # Deterministic Visual RAG evidence injection — append whatever
+                # images retrieval found for this turn, sanitized, as a hidden
+                # block the frontend parses into inline <img> evidence.
+                try:
+                    evidence_items = consume_thread_evidence(
+                        request.thread_id,
+                        max_items=settings.EVIDENCE_MAX_ITEMS_PER_ANSWER,
+                    )
+                    safe_evidence = _sanitize_evidence_items(evidence_items)
+                    if safe_evidence:
+                        logger.info(
+                            "Injected %d visual evidence item(s) | agent=%s | thread=%s",
+                            len(safe_evidence),
+                            request.agent_id,
+                            request.thread_id,
+                        )
+                        yield _build_evidence_block(safe_evidence)
+                except Exception as evidence_exc:
+                    logger.warning("Visual evidence injection skipped: %s", evidence_exc)
 
         except Exception as exc:
             if isinstance(exc, SentinelError):

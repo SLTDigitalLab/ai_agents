@@ -25,6 +25,13 @@ const PRODUCT_CARDS_START = '[LIFESTORE_PRODUCT_CARDS]';
 const PRODUCT_CARDS_END = '[/LIFESTORE_PRODUCT_CARDS]';
 const PRODUCT_CARD_MAX_ITEMS = 24;
 
+// Hidden backend metadata block for Visual RAG evidence images (flowcharts/
+// diagrams pulled from ingested documents). Always appended deterministically
+// by the backend — see backend/routers/chat.py.
+const EVIDENCE_START = '[VISUAL_EVIDENCE]';
+const EVIDENCE_END = '[/VISUAL_EVIDENCE]';
+const EVIDENCE_MAX_ITEMS = 3;
+
 const getHistoryEndpoint = (agentId, threadId) => (
     `${API_URL}/api/v1/chat/${agentId}/${threadId}`
 );
@@ -63,7 +70,7 @@ const saveLocalMessages = (agentId, threadId, messages) => {
     if (!agentId || !threadId || !Array.isArray(messages)) return;
 
     const cleanMessages = messages
-        .filter((msg) => msg && (msg.type === 'user' || msg.text || msg.formType || msg.checkoutOrderId || (msg.productCards && msg.productCards.length)))
+        .filter((msg) => msg && (msg.type === 'user' || msg.text || msg.formType || msg.checkoutOrderId || (msg.productCards && msg.productCards.length) || (msg.visualEvidence && msg.visualEvidence.length)))
         .map((msg) => ({
             type: msg.type,
             text: msg.text || '',
@@ -72,6 +79,7 @@ const saveLocalMessages = (agentId, threadId, messages) => {
             checkoutOrderId: msg.checkoutOrderId || null,
             productCards: Array.isArray(msg.productCards) ? msg.productCards : [],
             productCardDisplay: msg.productCardDisplay || null,
+            visualEvidence: Array.isArray(msg.visualEvidence) ? msg.visualEvidence : [],
             error: !!msg.error,
             timestamp: msg.timestamp || Date.now(),
         }));
@@ -412,6 +420,76 @@ const extractEmbeddedProductCardsFromText = (text) => {
     };
 };
 
+const normalizeEvidenceItem = (raw) => {
+    if (!raw || typeof raw !== 'object') return null;
+    const url = cleanProductText(raw.url);
+    // Same-origin evidence path only — defense in depth alongside the
+    // backend's own prefix check before this ever reaches an <img src>.
+    if (!url || !url.startsWith('/api/v1/evidence/images')) return null;
+
+    return {
+        url,
+        source: cleanProductText(raw.source),
+        page: raw.page ?? null,
+        caption: cleanProductText(raw.caption),
+    };
+};
+
+const dedupeEvidenceItems = (items) => {
+    const seen = new Set();
+    const deduped = [];
+    for (const item of items) {
+        if (!item || seen.has(item.url)) continue;
+        seen.add(item.url);
+        deduped.push(item);
+    }
+    return deduped;
+};
+
+const prepareEvidenceForDisplay = (items, maxItems = EVIDENCE_MAX_ITEMS) => {
+    const values = Array.isArray(items) ? items : [];
+    return dedupeEvidenceItems(values).slice(0, maxItems);
+};
+
+const extractEmbeddedEvidenceFromText = (text) => {
+    const sourceText = String(text || '');
+    let cleanText = sourceText;
+    const extractedItems = [];
+
+    while (true) {
+        const startIdx = cleanText.indexOf(EVIDENCE_START);
+        if (startIdx === -1) break;
+
+        const payloadStart = startIdx + EVIDENCE_START.length;
+        const endIdx = cleanText.indexOf(EVIDENCE_END, payloadStart);
+
+        // Hide an incomplete metadata block while the stream is still arriving.
+        if (endIdx === -1) {
+            cleanText = cleanText.slice(0, startIdx).trimEnd();
+            break;
+        }
+
+        const rawPayload = cleanText.slice(payloadStart, endIdx).trim();
+        const before = cleanText.slice(0, startIdx);
+        const after = cleanText.slice(endIdx + EVIDENCE_END.length);
+
+        try {
+            const parsed = JSON.parse(rawPayload);
+            const items = Array.isArray(parsed?.items) ? parsed.items : [];
+            extractedItems.push(...items.map(normalizeEvidenceItem).filter(Boolean));
+        } catch (error) {
+            console.warn('Failed to parse visual evidence payload:', error);
+        }
+
+        cleanText = `${before}${after}`;
+    }
+
+    return {
+        text: cleanText.trim(),
+        evidenceItems: prepareEvidenceForDisplay(extractedItems),
+    };
+};
+
 const tryParseJsonPayload = (text) => {
     if (!text || typeof text !== 'string') return null;
 
@@ -484,6 +562,8 @@ const buildBotMessageFromJsonResponse = (data) => {
     let text = extractTextFromJsonResponse(data);
     const embedded = extractEmbeddedProductCardsFromText(text);
     text = embedded.text;
+    const embeddedEvidence = extractEmbeddedEvidenceFromText(text);
+    text = embeddedEvidence.text;
 
     let formType = null;
 
@@ -509,6 +589,7 @@ const buildBotMessageFromJsonResponse = (data) => {
             embedded.productCardDisplay,
             normalizeProductDisplay(null, productCards.length),
         ),
+        visualEvidence: embeddedEvidence.evidenceItems,
         formType,
         formData: data.form_payload || data.formData || null,
         checkoutOrderId: checkout.checkoutOrderId,
@@ -530,6 +611,8 @@ const mapHistoryMessage = (msg) => {
 
     const embedded = extractEmbeddedProductCardsFromText(text);
     text = embedded.text;
+    const embeddedEvidence = extractEmbeddedEvidenceFromText(text);
+    text = embeddedEvidence.text;
 
     const checkout = extractCheckoutMarker(text);
     text = checkout.text;
@@ -553,6 +636,10 @@ const mapHistoryMessage = (msg) => {
             embedded.productCardDisplay,
             normalizeProductDisplay(null, productCards.length),
         ),
+        visualEvidence: prepareEvidenceForDisplay([
+            ...(Array.isArray(msg.visualEvidence) ? msg.visualEvidence : []),
+            ...embeddedEvidence.evidenceItems,
+        ]),
         timestamp: msg.timestamp || Date.now(),
     };
 };
@@ -996,6 +1083,49 @@ const ProductCards = ({ products, color, display = null }) => {
     );
 };
 
+
+// ── Visual RAG evidence (flowchart/diagram images pulled from ingested docs) ─
+const EvidenceImage = ({ item }) => {
+    const [failed, setFailed] = useState(false);
+    if (!item?.url || failed) return null;
+
+    return (
+        <figure className="w-full">
+            <div className="rounded-2xl border border-gray-200/80 dark:border-gray-700/80 bg-white dark:bg-gray-950 overflow-hidden shadow-sm">
+                <img
+                    src={`${API_URL}${item.url}`}
+                    alt={item.caption || item.source || 'Evidence image'}
+                    loading="lazy"
+                    onError={() => setFailed(true)}
+                    className="w-full h-auto object-contain max-h-[420px]"
+                />
+            </div>
+            {(item.source || item.page) && (
+                <figcaption className="mt-1.5 text-xs text-gray-400 dark:text-gray-500">
+                    {item.source}{item.page ? ` · page ${item.page}` : ''}
+                </figcaption>
+            )}
+        </figure>
+    );
+};
+
+const VisualEvidence = ({ items }) => {
+    const safeItems = useMemo(() => prepareEvidenceForDisplay(items), [items]);
+    if (safeItems.length === 0) return null;
+
+    return (
+        <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mt-5 mb-1 grid grid-cols-1 sm:grid-cols-2 gap-4"
+        >
+            {safeItems.map((item, index) => (
+                <EvidenceImage key={item.url || index} item={item} />
+            ))}
+        </motion.section>
+    );
+};
 
 // ── Copy-to-clipboard helper used by message and code-block buttons ─────────
 const useCopy = () => {
@@ -1547,6 +1677,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 formType: null,
                 productCards: [],
                 productCardDisplay: null,
+                visualEvidence: [],
                 timestamp: Date.now()
             }]);
             botMessageAdded = true;
@@ -1576,6 +1707,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         checkoutOrderId: botMessage.checkoutOrderId || newMessages[lastIdx].checkoutOrderId || null,
                         productCards: botMessage.productCards || [],
                         productCardDisplay: botMessage.productCardDisplay || newMessages[lastIdx].productCardDisplay || null,
+                        visualEvidence: botMessage.visualEvidence || [],
                     };
                     return newMessages;
                 });
@@ -1601,6 +1733,8 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 let currentFormType = null;
                 const embedded = extractEmbeddedProductCardsFromText(accumulatedText);
                 let cleanText = embedded.text;
+                const embeddedEvidence = extractEmbeddedEvidenceFromText(cleanText);
+                cleanText = embeddedEvidence.text;
 
                 for (const [token, type] of Object.entries(FORM_TOKENS)) {
                     if (cleanText.includes(token)) {
@@ -1618,6 +1752,8 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     const lastIdx = newMessages.length - 1;
                     const existingCards = Array.isArray(newMessages[lastIdx].productCards) ? newMessages[lastIdx].productCards : [];
                     const productCards = prepareProductCardsForDisplay([...existingCards, ...embedded.productCards]);
+                    const existingEvidence = Array.isArray(newMessages[lastIdx].visualEvidence) ? newMessages[lastIdx].visualEvidence : [];
+                    const visualEvidence = prepareEvidenceForDisplay([...existingEvidence, ...embeddedEvidence.evidenceItems]);
                     newMessages[lastIdx] = {
                         ...newMessages[lastIdx],
                         text: cleanText,
@@ -1629,6 +1765,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                             embedded.productCardDisplay,
                             normalizeProductDisplay(null, productCards.length),
                         ),
+                        visualEvidence,
                     };
                     return newMessages;
                 });
@@ -1662,6 +1799,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         checkoutOrderId: botMessage.checkoutOrderId || newMessages[lastIdx].checkoutOrderId || null,
                         productCards: botMessage.productCards || [],
                         productCardDisplay: botMessage.productCardDisplay || newMessages[lastIdx].productCardDisplay || null,
+                        visualEvidence: botMessage.visualEvidence || newMessages[lastIdx].visualEvidence || [],
                     };
                     return newMessages;
                 });
@@ -1908,7 +2046,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         >
                             <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
                                 {messages.map((msg, index) => {
-                                    if (!(msg.type === 'user' || msg.text || msg.formType || msg.checkoutOrderId || (Array.isArray(msg.productCards) && msg.productCards.length > 0))) return null;
+                                    if (!(msg.type === 'user' || msg.text || msg.formType || msg.checkoutOrderId || (Array.isArray(msg.productCards) && msg.productCards.length > 0) || (Array.isArray(msg.visualEvidence) && msg.visualEvidence.length > 0))) return null;
                                     const isLastMsg = index === lastRenderedIdx;
                                     const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
                                     const isErrorMsg = msg.error && isLastMsg;
@@ -1926,6 +2064,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                     const productCards = Array.isArray(msg.productCards) ? msg.productCards : [];
                                     const productCardDisplay = msg.productCardDisplay || normalizeProductDisplay(null, productCards.length);
                                     const checkoutOrderId = msg.checkoutOrderId || null;
+                                    const visualEvidence = Array.isArray(msg.visualEvidence) ? msg.visualEvidence : [];
 
                                     const markdownComponents = {
                                         p: ({ node, ...props }) => <p className="mb-3 last:mb-0" {...props} />,
@@ -1993,6 +2132,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                         {sanitizeMarkdownBold(normalizeAssistantMarkdown(mainText))}
                                                     </ReactMarkdown>
                                                     <ProductCards products={productCards} color={agentConfig.color} display={productCardDisplay} />
+                                                    <VisualEvidence items={visualEvidence} />
                                                     {isStreamingThisMsg && (
                                                         <span className="inline-block align-middle w-[3px] h-4 bg-gray-500/70 dark:bg-gray-300/70 ml-0.5 rounded-sm animate-pulse" />
                                                     )}

@@ -15,9 +15,11 @@ Neo4j:
 
 import json
 import logging
+from pathlib import Path
 from typing import Annotated, Optional
 
 import httpx
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langgraph.prebuilt import InjectedState
@@ -31,6 +33,29 @@ from core.sentinel import SentinelError
 log = logging.getLogger(__name__)
 
 _sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
+
+# ── Thread-scoped visual evidence store ─────────────────────────────────
+# Visual RAG chunks (metadata.type == "visual_description") carry an
+# on-disk image that the LLM's text context can't show. Rather than stuff
+# base64 image data into every turn's context (token/cost bloat), retrieval
+# pushes a lightweight pointer here, keyed by thread_id, for chat.py to
+# pick up once the turn's answer has finished streaming. In-memory only —
+# fine for a single backend process, lost across a multi-worker deploy or
+# restart (same tradeoff the old feature/visual-rag branch shipped with).
+_thread_evidence: dict[str, list[dict]] = {}
+
+
+def clear_thread_evidence(thread_id: str) -> None:
+    _thread_evidence.pop(thread_id, None)
+
+
+def add_thread_evidence(thread_id: str, item: dict) -> None:
+    _thread_evidence.setdefault(thread_id, []).append(item)
+
+
+def consume_thread_evidence(thread_id: str, max_items: int = 3) -> list[dict]:
+    items = _thread_evidence.pop(thread_id, [])
+    return items[:max_items]
 
 try:
     from neo4j import GraphDatabase
@@ -139,6 +164,7 @@ async def _search_qdrant_knowledge_base(
     query: str,
     agent_id: str,
     k: int = 12,
+    thread_id: Optional[str] = None,
 ) -> str:
     """Search the Qdrant knowledge base for documents relevant to the user's query.
 
@@ -234,6 +260,17 @@ async def _search_qdrant_knowledge_base(
                 f"[Vector Source: {source} | Link: {link} | Title: {title}]\n"
                 f"{doc.page_content}"
             )
+
+            if thread_id and doc.metadata.get("type") == "visual_description":
+                image_path = doc.metadata.get("image_path")
+                if image_path:
+                    add_thread_evidence(thread_id, {
+                        "type": "image",
+                        "url": f"{settings.EVIDENCE_URL_PREFIX}/{Path(image_path).name}",
+                        "source": source,
+                        "page": doc.metadata.get("page_number") or doc.metadata.get("page"),
+                        "caption": doc.page_content[:200],
+                    })
 
         log.info(
             "Qdrant search success agent='%s' collection='%s' results=%s",
@@ -506,6 +543,7 @@ def _search_lifestore_graph(query: str, limit: int = 10) -> str:
 async def search_knowledge_base(
     query: str,
     agent_id: Annotated[str, InjectedState("agent_id")],
+    config: RunnableConfig,
 ) -> str:
     """
     Search knowledge base.
@@ -516,10 +554,13 @@ async def search_knowledge_base(
     LifeStore:
     - Qdrant vector retrieval + Neo4j structured graph retrieval.
     """
+    thread_id = (config.get("configurable") or {}).get("thread_id")
+
     qdrant_context = await _search_qdrant_knowledge_base(
         query=query,
         agent_id=agent_id,
         k=12,
+        thread_id=thread_id,
     )
 
     if not _is_lifestore_agent(agent_id):
