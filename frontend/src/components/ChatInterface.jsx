@@ -1095,7 +1095,6 @@ const EvidenceImage = ({ item }) => {
                 <img
                     src={`${API_URL}${item.url}`}
                     alt={item.caption || item.source || 'Evidence image'}
-                    loading="lazy"
                     onError={() => setFailed(true)}
                     className="w-full h-auto object-contain max-h-[420px]"
                 />
