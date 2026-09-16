@@ -307,9 +307,12 @@ class IngestionService:
         except Exception as e:
             log.warning(f"Could not delete old vectors for {file_name}: {e}")
 
-        # Also remove any evidence images/JSON left over from a previous
-        # visual extraction of this file, so stale pictures don't linger
-        # on disk once the source file changes or is re-ingested.
+    def _delete_stale_evidence(self, onedrive_id: str, file_name: str):
+        """Remove evidence images/JSON left over from a previous visual
+        extraction of this file. Must run BEFORE this run's visual
+        extraction writes new files, since both share the same
+        `{onedrive_id}_*` filename prefix — running it after would delete
+        the files that were just created."""
         try:
             evidence_dir = evidence_storage_dir()
             for stale in evidence_dir.glob(f"{onedrive_id}_*"):
@@ -438,6 +441,12 @@ class IngestionService:
 
                     # Chunk using semantic logic
                     chunks = self._load_and_chunk_file(dest_path)
+
+                    # Clear out any evidence images from a previous ingestion
+                    # of this file BEFORE extracting new ones, since the new
+                    # files share the same `{onedrive_id}_*` prefix and would
+                    # otherwise be deleted by this same cleanup afterward.
+                    self._delete_stale_evidence(onedrive_id, file_name)
 
                     # Detect flowcharts/diagrams/charts and describe them with
                     # a vision model, so image content becomes searchable too
