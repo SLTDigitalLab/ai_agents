@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import logging
+import tempfile
 from pathlib import Path
 from typing import Tuple, List
 import fitz  # PyMuPDF
@@ -141,11 +142,34 @@ def process_pdf_visuals(pdf_path: str, doc_id: str) -> Tuple[List[dict], List[Do
     """
     visual_records = []
     vector_documents = []
-    
+    cleaned_path = None
+
     try:
-        doc = fitz.open(pdf_path)
+        # Repair the PDF's internal object structure before touching any
+        # page. Some PDFs (seen on a manually split "-pages-N" file) read
+        # fine structurally (get_images/get_drawings succeed) but crash
+        # PyMuPDF's native renderer with an unrecoverable "double free" the
+        # instant get_pixmap() touches the bad page — a native crash takes
+        # the whole backend process down with it, not just this file, and
+        # no amount of try/except can catch it. PyMuPDF's own garbage-
+        # collection + clean save rebuilds the file's internal objects and
+        # fixes this (confirmed against the file that surfaced this bug).
+        try:
+            raw_doc = fitz.open(pdf_path)
+            fd, cleaned_path = tempfile.mkstemp(suffix=".pdf")
+            os.close(fd)
+            raw_doc.save(cleaned_path, garbage=4, deflate=True, clean=True)
+            raw_doc.close()
+            doc = fitz.open(cleaned_path)
+        except Exception as repair_exc:
+            log.warning(f"PDF repair pass failed for {pdf_path}, falling back to original file: {repair_exc}")
+            if cleaned_path and os.path.exists(cleaned_path):
+                os.remove(cleaned_path)
+            cleaned_path = None
+            doc = fitz.open(pdf_path)
+
         source_file = os.path.basename(pdf_path)
-        
+
         for page_num in range(len(doc)):
             page = doc[page_num]
             images = page.get_images(full=True)
