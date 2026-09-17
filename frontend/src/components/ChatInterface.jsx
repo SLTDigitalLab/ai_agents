@@ -1094,7 +1094,7 @@ const EvidenceImage = ({ item }) => {
             <div className="rounded-2xl border border-gray-200/80 dark:border-gray-700/80 bg-white dark:bg-gray-950 overflow-hidden shadow-sm">
                 <img
                     src={`${API_URL}${item.url}`}
-                    alt={item.caption || item.source || 'Evidence image'}
+                    alt={item.source ? `Diagram from ${item.source}` : 'Evidence image'}
                     onError={() => setFailed(true)}
                     className="w-full h-auto object-contain max-h-[420px]"
                 />
