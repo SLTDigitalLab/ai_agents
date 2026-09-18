@@ -166,7 +166,29 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Consumer Business team."
     },
 
-    // 13. Rainbow Pages
+    // 13. Helpdesk Agent (full LangGraph pipeline)
+    helpdesk: {
+        id: "helpdesk",
+        title: "ASK HELPDESK",
+        subtitle: "Your AI-powered Knowledge Assistant for instant solutions, troubleshooting, and automated IT ticket management.",
+        color: "from-purple-900 to-purple-600",
+        buttonColor: "bg-purple-600 hover:bg-purple-700",
+        idlePrompt: "Describe your IT issue, search for instructional guides, or ask for an update on your existing ticket status.",
+        disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
+    },
+
+    // 14. Helpdesk Agent (n8n workflow integration)
+    helpdesk_dev: {
+        id: "helpdesk_dev",
+        title: "HELPDESK",
+        subtitle: "Your AI-powered Knowledge Assistant for instant solutions, troubleshooting, and automated IT ticket management.",
+        color: "from-purple-900 to-purple-600",
+        buttonColor: "bg-purple-600 hover:bg-purple-700",
+        idlePrompt: "Describe your IT issue, search for instructional guides, or ask for an update on your existing ticket status.",
+        disclaimer: "If you need any further clarifications, please reach out to the Help Desk team."
+    },
+
+    // 15. Rainbow Pages
     askrainbowpages: {
         id: "rainbowpages",
         title: "Rainbowpages",
@@ -177,7 +199,7 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Rainbow Pages team."
     },
 
-    // 14. AI Expo (public — knowledge base from aiexpo.lk)
+    // 16. AI Expo (public — knowledge base from aiexpo.lk)
     aiexpo: {
         public: true,
         id: "aiexpo",
@@ -189,7 +211,7 @@ export const AGENTS = {
         disclaimer: "Event information is sourced from aiexpo.lk and may change. Please verify critical details on the official website."
     },
 
-    // 15. MintCRM (knowledge base only)
+    // 17. MintCRM (knowledge base only)
     askmintcrm: {
         id: "mintcrm",
         title: "ASK MINTCRM",
@@ -200,7 +222,7 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the MintCRM support team."
     },
 
-    // 16. Supply Chain Management (knowledge base only)
+    // 18. Supply Chain Management (knowledge base only)
     askscm: {
         id: "scm",
         title: "ASK SCM",
@@ -211,7 +233,7 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Supply Chain Management team."
     },
 
-    // 17. Embryo (public — knowledge base crawled from the Embryo website)
+    // 19. Embryo (public — knowledge base crawled from the Embryo website)
     askembryo: {
         public: true,
         id: "embryo",
@@ -223,3 +245,9 @@ export const AGENTS = {
         disclaimer: "Information is sourced from the Embryo website and may change. Please verify critical details on the official website."
     }
 };
+
+
+
+
+
+

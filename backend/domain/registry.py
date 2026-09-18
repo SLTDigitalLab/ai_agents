@@ -27,6 +27,8 @@ from domain.archetypes.kb_api_agent import build_kb_api_workflow
 from domain.archetypes.kb_form_agent import build_kb_form_workflow
 from domain.archetypes.kb_slm_agent import build_kb_slm_workflow
 from domain.archetypes.supervisor_agent import build_supervisor_workflow
+from domain.archetypes.helpdesk_n8n_agent import build_helpdesk_n8n_workflow
+from domain.archetypes.helpdesk_agent import build_helpdesk_workflow
 
 # ── Registry ─────────────────────────────────────────────────────────────
 # Maps each agent_id (sent by the frontend) to the *builder function*
@@ -62,6 +64,12 @@ AGENT_BUILDERS: dict[str, callable] = {
 
     # Archetype 4 – KB powered by internal SLM (Ollama)
     "askhrslm": build_kb_slm_workflow,
+
+    # Archetype 5 – Helpdesk
+    # "helpdesk" (localhost/helpdesk) now runs the full LangGraph pipeline,
+    # while "helpdesk_dev" (localhost/helpdesk_dev) forwards to the n8n workflow.
+    "helpdesk": build_helpdesk_workflow,
+    "helpdesk_dev": build_helpdesk_n8n_workflow,
 }
 
 
