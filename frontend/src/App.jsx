@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useParams, useLocation, Navigate, Link } 
 import { MsalProvider, AuthenticatedTemplate, UnauthenticatedTemplate, useMsal } from "@azure/msal-react";
 import { PublicClientApplication, InteractionStatus } from "@azure/msal-browser";
 import { msalConfig, loginRequest } from './authConfig';
+import { handleAuthRedirect } from './authRedirect';
 import { AGENTS } from './config/agents';
 import ChatInterface from './components/ChatInterface';
 import ChatBrowser from './components/admin/ChatBrowser';
@@ -569,38 +570,19 @@ const AgentWrapper = () => {
 // The Main App Component with the Interceptor
 function App() {
   const [isInitialized, setIsInitialized] = useState(false);
+  const [authNotice, setAuthNotice] = useState('');
 
   useEffect(() => {
-    msalInstance.initialize().then(() => {
-      msalInstance.handleRedirectPromise().then((response) => {
-        // Grab the agent the user originally wanted to log into
-        const targetRoute = sessionStorage.getItem('lastAgent') || '/';
-
-        if (response) {
-          // 1. Legitimate, intentional login. 
-          sessionStorage.removeItem('intentionalLogin');
-          window.location.replace(targetRoute);
-          return;
-        }
-
-        // 2. THE KILL SWITCH for the back-button loop
-        // If response is null, but we are stuck on /auth/callback, it means Microsoft
-        // automatically bounced us here from a Back-button press. 
-        if (window.location.pathname === '/auth/callback') {
-          // Wipe the local session storage so React forgets the authenticated state
-          sessionStorage.clear();
-
-          // Send you cleanly to the unauthenticated view
-          window.location.replace(targetRoute);
-          return;
-        }
-
-        setIsInitialized(true);
+    msalInstance.initialize()
+      .then(() => handleAuthRedirect(msalInstance))
+      .then((notice) => {
+        setAuthNotice(notice || '');
       }).catch(e => {
         console.error("MSAL Auth Error:", e);
+        setAuthNotice('Microsoft sign-in could not finish. Reload the page and try signing in again.');
+      }).finally(() => {
         setIsInitialized(true);
       });
-    });
   }, []);
 
   if (!isInitialized) {
@@ -622,6 +604,13 @@ function App() {
     <MsalProvider instance={msalInstance}>
       <ThemeProvider>
       <BrowserRouter>
+        {authNotice && (
+          <div role="alert" className="flex items-center justify-between gap-4 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+            <span>{authNotice}</span>
+            <Link to="/workmateai" className="shrink-0 font-semibold underline">Go to sign-in</Link>
+            <button type="button" onClick={() => setAuthNotice('')} className="font-semibold underline">Dismiss</button>
+          </div>
+        )}
         <Routes>
           <Route path="/" element={<RootRedirect />} />
 

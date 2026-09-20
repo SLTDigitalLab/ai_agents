@@ -1,24 +1,37 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useMsal } from '@azure/msal-react';
+import { useNavigate } from 'react-router-dom';
+import { useTheme } from '../contexts/ThemeContext';
 import { motion as Motion } from 'framer-motion';
 import sltLogo from '../assets/slt-mobitel-logo.png';
 import embryoLogo from '../assets/embryo-removebg.png';
-import VoiceAgentPage from './VoiceAgentPage';
-import SimliAvatarPanel from '../components/SimliAvatarPanel';
-import { createSimliAudioOutput } from '../components/avatar/SimliAudioOutput';
+import Avatar from '../components/Avatar';
+import '../components/NapsterAvatarPanel.css';
+import '@touchcastllc/napster-companion-api/styles';
+
+import useNapsterAvatar from '../components/avatar/useNapsterAvatar';
 import UserMenu from '../components/voice_agent/UserMenu';
-import { PHASE } from '../components/voice_agent/constants';
+
 
 export default function VoiceAvatarPage() {
-    const [audioOutput] = useState(() => createSimliAudioOutput());
+    const { accounts, instance } = useMsal();
+    const user = accounts[0] || {};
+    const navigate = useNavigate();
+    const { theme, toggleTheme } = useTheme();
+    const [showUserMenu, setShowUserMenu] = useState(false);
+    const initials = (user.name || 'U').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+    const { mountRef, status, displayStatus, errorMessage, exchange, reconnect, stop, waiting } = useNapsterAvatar(user);
+    useEffect(() => { document.documentElement.classList.toggle('dark', theme === 'dark'); }, [theme]);
+    const backToChat = () => navigate('/workmateai');
+    const handleLogout = () => { stop(); instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin }); };
     return (
-        <VoiceAgentPage
-            audioOutput={audioOutput}
-            renderPresentation={({
-                phase, startConversation, errorMessage, displayStatus,
-                user, initials, showUserMenu, setShowUserMenu, handleLogout,
-                theme, toggleTheme, backToChat,
-            }) => (
                 <div className="visual-agent-shell">
+            {waiting && (
+                <aside className="workmate-waiting-toast" role="status" aria-live="polite" aria-atomic="true">
+                    <strong><span aria-hidden="true">⏳</span> Workmate AI</strong>
+                    <p>I'm still checking that for you.<br />This may take a little longer.</p>
+                </aside>
+            )}
             <div className="hidden sm:flex w-14 flex-shrink-0 flex-col items-center py-4 gap-2 border-r border-gray-200 dark:border-white/[0.06] bg-white dark:bg-[#0d0f14]">
                 <div className="flex-1" />
 
@@ -78,24 +91,25 @@ export default function VoiceAvatarPage() {
                         <h1>Visual Agent</h1>
                         <img src={sltLogo} alt="SLTMobitel" />
                     </header>
-                    <SimliAvatarPanel audioOutput={audioOutput} showControls={false} />
+                    <section className="workmate-napster"><Avatar mountRef={mountRef} status={status} /></section>
                     <div className="avatar-conversation-controls">
                         <div className="visual-conversation-status" role="status" aria-live="polite">
-                            <span className={phase === PHASE.CONNECTING ? 'visual-status-dot connecting' : 'visual-status-dot'} aria-hidden="true" />
+                            <span className={status === 'connecting' ? 'visual-status-dot connecting' : 'visual-status-dot'} aria-hidden="true" />
                             {displayStatus}
                         </div>
-                        {errorMessage && <p role="status">{errorMessage}</p>}
+                        {errorMessage && <p className="napster-error" role="alert">{errorMessage}</p>}
+                        {exchange && <details className="napster-answer"><summary>Workmate AI response</summary><p><strong>You:</strong> {exchange.question}</p><p>{exchange.answer}</p></details>}
                         <Motion.button
                             whileHover={{ scale: 1.03 }}
                             whileTap={{ scale: 0.97 }}
                             type="button"
-                            onClick={startConversation}
-                            disabled={phase === PHASE.CONNECTING || phase === PHASE.CONNECTED}
-                            aria-busy={phase === PHASE.CONNECTING}
+                            onClick={status === 'connected' ? stop : reconnect}
+                            disabled={status === 'connecting'}
+                            aria-busy={status === 'connecting'}
                         >
-                            {phase === PHASE.CONNECTING ? 'Connecting...'
-                                : phase === PHASE.CONNECTED ? 'Conversation started'
-                                : 'Start Conversation'}
+                            {status === 'connecting' ? 'Connecting...'
+                                : status === 'connected' ? 'End Conversation'
+                                : status === 'disconnected' ? 'Reconnect' : 'Start Conversation'}
                         </Motion.button>
                         <div className="avatar-page-attribution">
                             <span>WorkMate AI powered by VoiceGenie AI</span>
@@ -104,7 +118,5 @@ export default function VoiceAvatarPage() {
                     </div>
                 </main>
                 </div>
-            )}
-        />
     );
 }

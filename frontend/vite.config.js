@@ -14,9 +14,9 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3000,
     proxy: {
-      '/api/simli': {
+      '/api/napster': {
         // Inside Docker, loopback is the frontend container, not FastAPI.
-        target: process.env.SIMLI_PROXY_TARGET || (existsSync('/.dockerenv')
+        target: process.env.NAPSTER_PROXY_TARGET || (existsSync('/.dockerenv')
           ? 'http://backend:8000'
           : 'http://127.0.0.1:8000'),
         changeOrigin: true,

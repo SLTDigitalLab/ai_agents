@@ -6,6 +6,8 @@ Includes input guardrails (LLM-based intent + sentiment classification) run befo
 import json
 import logging
 import re
+import time
+from datetime import datetime, timezone
 from typing import AsyncGenerator
 from urllib.parse import urlparse
 
@@ -423,12 +425,22 @@ def _build_evidence_stream_chunk(answer_text: str, thread_id: str) -> str:
 @router.post("")
 async def chat(request: ChatRequest):
     """Handle an incoming chat message from the frontend with streaming."""
+    request_started = time.perf_counter()
+    timing_enabled = not request.stream
+    if timing_enabled:
+        logger.info("Chat timing | stage=request_received | thread=%s | at=%s", request.thread_id, datetime.now(timezone.utc).isoformat())
     try:
         builder_fn = get_agent_builder(request.agent_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
     async def event_generator() -> AsyncGenerator[str, None]:
+        tool_starts = {}
+        model_starts = {}
+        retrieval_ms = 0.0
+        llm_ms = 0.0
+        llm_calls = 0
+        retrieval_calls = 0
         clear_thread_evidence(request.thread_id)
         # Skip masking for product agents so SKU/model numbers survive.
         if request.agent_id in PII_MASK_EXEMPT_AGENTS:
@@ -467,7 +479,10 @@ async def chat(request: ChatRequest):
             # ── Run guardrail classifier FIRST ──────────────────────────
             # gpt-4.1-nano is ~100-200ms, so this adds minimal latency
             # and lets us pass real sentiment into the agent state.
+            guardrail_started = time.perf_counter()
             guardrail = await classify_intent(safe_user_message)
+            if timing_enabled:
+                logger.info("Chat timing | stage=guardrail | thread=%s | duration_ms=%.1f", request.thread_id, (time.perf_counter() - guardrail_started) * 1000)
 
             if guardrail.action == "BLOCK":
                 logger.info(f"Guardrail BLOCK | reason={guardrail.reason}")
@@ -549,6 +564,24 @@ async def chat(request: ChatRequest):
             async for event in graph.astream_events(state, config, version="v2"):
                 # ── Extract tokens from stream events ────────
                 kind = event["event"]
+                if timing_enabled:
+                    run_id = event.get("run_id")
+                    name = event.get("name")
+                    if kind == "on_tool_start" and name == "search_knowledge_base":
+                        tool_starts[run_id] = time.perf_counter()
+                    elif kind in {"on_tool_end", "on_tool_error"} and run_id in tool_starts:
+                        duration_ms = (time.perf_counter() - tool_starts.pop(run_id)) * 1000
+                        retrieval_ms += duration_ms
+                        retrieval_calls += 1
+                        logger.info("Chat timing | stage=rag_retrieval | thread=%s | duration_ms=%.1f", request.thread_id, duration_ms)
+                    elif kind == "on_chat_model_start":
+                        model_starts[run_id] = (time.perf_counter(), name)
+                    elif kind in {"on_chat_model_end", "on_chat_model_error"} and run_id in model_starts:
+                        started, model_name = model_starts.pop(run_id)
+                        duration_ms = (time.perf_counter() - started) * 1000
+                        llm_ms += duration_ms
+                        llm_calls += 1
+                        logger.info("Chat timing | stage=llm_generation | thread=%s | model=%s | duration_ms=%.1f", request.thread_id, model_name, duration_ms)
 
                 if kind == "on_chat_model_stream":
                     metadata = event.get("metadata") or {}
@@ -637,6 +670,14 @@ async def chat(request: ChatRequest):
             if evidence_chunk and request.stream:
                 yield evidence_chunk
 
+            if timing_enabled:
+                logger.info(
+                    "Chat timing | stage=final_response | thread=%s | at=%s | total_ms=%.1f | rag_ms=%.1f | rag_calls=%d | llm_ms=%.1f | llm_calls=%d",
+                    request.thread_id, datetime.now(timezone.utc).isoformat(),
+                    (time.perf_counter() - request_started) * 1000,
+                    retrieval_ms, retrieval_calls, llm_ms, llm_calls,
+                )
+
         except Exception as exc:
             import traceback
             error_details = traceback.format_exc()
@@ -648,6 +689,10 @@ async def chat(request: ChatRequest):
                 user_message = BUSY_MESSAGE
             else:
                 user_message = GENERIC_ERROR_MESSAGE
+
+            # Complete-answer callers must not mistake a failure for a generated answer.
+            if not request.stream:
+                raise HTTPException(503 if _is_quota_error(exc) else 502, user_message) from None
 
             # If we already streamed part of an answer, separate the notice.
             if streamed_any_text:

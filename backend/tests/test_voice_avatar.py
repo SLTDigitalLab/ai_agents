@@ -1,19 +1,19 @@
-"""Isolated endpoint tests: no model, database, or paid Simli calls.
+"""Isolated endpoint tests: no model, database, or paid provider calls.
 
 Load the actual endpoint definitions without importing main's unrelated services.
 """
 import ast
 import logging
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 from typing import AsyncGenerator
 
-import httpx
-from fastapi import FastAPI, APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from fastapi.testclient import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,56 +23,6 @@ def load_function(path, name, namespace):
     node = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == name)
     exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
     return namespace[name]
-
-
-class SimliSessionTests(unittest.TestCase):
-    def setUp(self):
-        self.settings = SimpleNamespace(SIMLI_API_KEY="private-key", SIMLI_FACE_ID="face")
-        self.app = FastAPI()
-        load_function(ROOT / "main.py", "simli_session", dict(
-            app=self.app, settings=self.settings, httpx=httpx,
-            HTTPException=HTTPException, Response=Response,
-        ))
-        self.client = TestClient(self.app)
-
-    def upstream(self, payload, status=200):
-        mock = AsyncMock()
-        mock.__aenter__.return_value = mock
-        mock.post.return_value = httpx.Response(status, json=payload,
-            request=httpx.Request("POST", "https://api.simli.ai/compose/token"))
-        return mock
-
-    def test_token_only_and_no_cache(self):
-        mock = self.upstream({"session_token": "temporary", "private": "private-key"})
-        with patch.object(httpx, "AsyncClient", return_value=mock):
-            response = self.client.post("/api/simli/session")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"session_token": "temporary"})
-        self.assertEqual(response.headers["cache-control"], "no-store")
-        self.assertEqual(mock.post.call_args.kwargs["headers"], {"x-simli-api-key": "private-key"})
-        self.assertEqual(mock.post.call_args.kwargs["json"], dict(
-            faceId="face", handleSilence=True, maxSessionLength=600, maxIdleTime=600))
-
-    def test_missing_configuration_does_not_call_provider(self):
-        self.settings.SIMLI_API_KEY = ""
-        with patch.object(httpx, "AsyncClient") as client:
-            self.assertEqual(self.client.post("/api/simli/session").status_code, 503)
-            client.assert_not_called()
-
-    def test_provider_errors_are_redacted(self):
-        for payload, status in [({"detail": "private-key"}, 401),
-                                ({"session_token": ""}, 200),
-                                ({"session_token": 123}, 200), ([], 200)]:
-            with self.subTest(payload=payload), patch.object(httpx, "AsyncClient", return_value=self.upstream(payload, status)):
-                response = self.client.post("/api/simli/session")
-            self.assertEqual(response.status_code, 502)
-            self.assertNotIn("private-key", response.text)
-
-    def test_timeout(self):
-        mock = self.upstream({})
-        mock.post.side_effect = httpx.ReadTimeout("private-key")
-        with patch.object(httpx, "AsyncClient", return_value=mock):
-            self.assertEqual(self.client.post("/api/simli/session").status_code, 504)
 
 
 class VoiceChatCompatibilityTests(unittest.IsolatedAsyncioTestCase):
@@ -85,6 +35,7 @@ class VoiceChatCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         self.graph = SimpleNamespace(astream_events=events, aupdate_state=AsyncMock())
         self.classify = AsyncMock(return_value=SimpleNamespace(action="ALLOW", sentiment="neutral", reason="ok"))
         self.namespace = dict(
+            time=time, datetime=datetime, timezone=timezone,
             router=APIRouter(), ChatRequest=object, AsyncGenerator=AsyncGenerator,
             HTTPException=HTTPException, StreamingResponse=StreamingResponse,
             get_agent_builder=Mock(), clear_thread_evidence=Mock(),
@@ -124,6 +75,18 @@ class VoiceChatCompatibilityTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as error:
             await self.chat(self.request(False))
         self.assertEqual(error.exception.status_code, 404)
+
+    async def test_generation_failure_is_not_a_successful_voice_answer(self):
+        self.namespace["get_compiled_async_graph"].side_effect = RuntimeError("private provider details")
+        with self.assertRaises(HTTPException) as error:
+            await self.chat(self.request(False))
+        self.assertEqual(error.exception.status_code, 502)
+        self.assertEqual(error.exception.detail, "Error")
+
+    async def test_streaming_generation_failure_keeps_existing_behavior(self):
+        self.namespace["get_compiled_async_graph"].side_effect = RuntimeError("private provider details")
+        response = await self.chat(self.request())
+        self.assertEqual([chunk async for chunk in response.body_iterator], ["Error"])
 
 
 if __name__ == "__main__":

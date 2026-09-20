@@ -14,8 +14,8 @@ load_dotenv(ROOT_DIR / ".env")
 class Settings(BaseSettings):
     GOOGLE_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
-    SIMLI_API_KEY: Optional[str] = None
-    SIMLI_FACE_ID: Optional[str] = None
+    NAPSTER_API_KEY: Optional[str] = None
+    NAPSTER_AGENT_ID: Optional[str] = None
 
     # Workmate voice settings retained from voice-test.
     PROJECT_ID: Optional[str] = None

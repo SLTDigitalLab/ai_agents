@@ -1,15 +1,25 @@
-import { memo } from "react";
+import { useImperativeHandle, useRef } from 'react';
 
-function Avatar({ mountRef, status, connected }) {
-  const label = connected ? "Live" : status === "Connecting..." ? "Connecting" : "Offline";
-  return <section className="avatar-card" aria-label="Aria live AI avatar">
-    <div ref={mountRef} className="simli-avatar"><video className="avatar-video" autoPlay playsInline muted /><audio autoPlay muted /></div>
-    {!connected && <div className="avatar-placeholder" aria-hidden="true"><div className="avatar-glow" /><div className="avatar-silhouette"><span /><span /></div><p>{label === "Connecting" ? "Connecting to Aria..." : "Your AI assistant is ready when you are"}</p></div>}
-    <div className={`live-label ${label.toLowerCase()}`}><span /> {connected ? "Live AI Avatar" : label}</div>
-  </section>;
+export default function Avatar({ mountRef, status }) {
+  const containerRef = useRef(null);
+
+  // SDK 1.5 owns and connects the actual video/audio nodes inside this container.
+  // Getters stay current when it creates or replaces those nodes on reconnect.
+  useImperativeHandle(mountRef, () => ({
+    get container() { return containerRef.current; },
+    get video() { return containerRef.current?.querySelector('video') ?? null; },
+    get audio() { return containerRef.current?.querySelector('audio') ?? null; },
+  }), []);
+
+  return (
+    <section className={`avatar-card avatar-card--${status}`} aria-label="Napster live avatar">
+      <div ref={containerRef} className="napster-avatar" />
+      {status !== 'connected' && (
+        <div className="avatar-placeholder" aria-hidden="true">
+          <p>{status === 'connecting' ? 'Connecting to Napster' : 'Napster is offline'}</p>
+          <span>{status === 'connecting' ? 'Establishing a secure connection' : 'Start a conversation when you’re ready'}</span>
+        </div>
+      )}
+    </section>
+  );
 }
-
-export default memo(Avatar);
-
-
-
