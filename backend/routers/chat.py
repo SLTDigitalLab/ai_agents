@@ -225,8 +225,17 @@ def _message_content_to_text(content, strip: bool = True) -> str:
                 text_parts.append(block)
             elif isinstance(block, dict) and "text" in block:
                 text_parts.append(str(block["text"]))
+
+        # Responses API streaming deltas often arrive as a one-item list whose
+        # text starts or ends with a meaningful space/newline. Joining through
+        # _join_text_parts() strips that boundary on every event, causing the
+        # browser to render "Youcanapply" and flatten Markdown lists. Preserve
+        # the provider text exactly when the caller requests streaming output.
+        if not strip:
+            return "".join(text_parts)
+
         merged = _join_text_parts(text_parts)
-        return merged.strip() if strip else merged
+        return merged.strip()
 
     if content is None:
         return ""
