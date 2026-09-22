@@ -97,6 +97,13 @@ class Settings(BaseSettings):
     KB_REMOTE_URL: Optional[str] = None
     KB_REMOTE_API_KEY: Optional[str] = None
 
+    # Comma-separated agent_ids that should always use the LOCAL Qdrant
+    # database, even when KB_REMOTE_URL is set for everyone else. Lets an
+    # environment migrate one agent at a time onto local retrieval (e.g. to
+    # pick up Visual RAG evidence, which only the local-Qdrant path produces)
+    # without switching every other agent off the shared remote KB at once.
+    KB_LOCAL_AGENTS: str = ""
+
     # Bitrix24 CRM
     BITRIX24_WEBHOOK_URL: str = ""
 

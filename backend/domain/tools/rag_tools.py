@@ -97,6 +97,12 @@ def _is_lifestore_agent(agent_id: str) -> bool:
     return "lifestore" in agent_id.lower()
 
 
+def _is_local_agent(agent_id: str) -> bool:
+    """True if this agent should bypass KB_REMOTE_URL and always use local Qdrant."""
+    local_agents = {a.strip().lower() for a in settings.KB_LOCAL_AGENTS.split(",") if a.strip()}
+    return agent_id.lower() in local_agents
+
+
 def _resolve_collection_name(agent_id: str) -> str:
     """
     Resolve the actual Qdrant collection used for retrieval.
@@ -183,7 +189,7 @@ async def _search_qdrant_knowledge_base(
     """
     collection_name = _resolve_collection_name(agent_id)
 
-    if settings.KB_REMOTE_URL:
+    if settings.KB_REMOTE_URL and not _is_local_agent(agent_id):
         try:
             return await _search_remote(agent_id, query, k=10)
         except Exception as e:
