@@ -11,6 +11,16 @@ from core.config import settings
 log = logging.getLogger(__name__)
 
 
+def _openai_chat_transport(model_name: str) -> dict:
+    """Return transport overrides required by particular OpenAI models."""
+    if model_name.lower().strip() == "gpt-5.6-luna":
+        return {
+            "use_responses_api": True,
+            "reasoning": {"effort": "none"},
+        }
+    return {}
+
+
 # gemini-embedding-2 ignores the `task_type` field; the task must instead be
 # given as a text-instruction prefix (Vertex docs). These are pure prefixes
 # (content is appended), so chunks containing '{' or '}' are safe — we do NOT
@@ -80,6 +90,7 @@ def get_chat_model():
             api_key=final_api_key,
             base_url=base_url,
             temperature=0,
+            **_openai_chat_transport(model_name),
         )
     elif provider == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
