@@ -5,6 +5,7 @@ export const VERBATIM_SUFFIX = ' [speak verbatim]';
 // implicit-function deadline. A function_call_timeout event ends the session.
 export const WORKMATE_REQUEST_TIMEOUT_MS = 30_000;
 export const NAPSTER_INTERIM_RESULT_MS = 7_500;
+export const NAPSTER_INTERIM_SETTLE_MS = 750;
 
 // Compare spoken text rather than Markdown bold delimiters. Only paired ** at
 // word boundaries are formatting; preserve arithmetic, words, numbers, links
@@ -197,7 +198,9 @@ export function createWorkmateBridge({
       interimTimer = setTimeout(() => {
         if (disposed || request.expired || active !== request) return;
         request.deferred = true;
-        output(callId, true, "I'm still checking that for you.");
+        // Close the 10-second Napster tool call without starting a competing
+        // spoken response. The completed Workmate answer is injected below.
+        output(callId, true, '');
         diagnostic('interim_function_output_sent', callId);
       }, NAPSTER_INTERIM_RESULT_MS);
       const deadline = new Promise((_, reject) => {
@@ -215,9 +218,18 @@ export function createWorkmateBridge({
         requestDurationMs: Math.round(performance.now() - requestStartedAt),
         callDurationMs: Math.round(performance.now() - callStartedAt),
       });
-      waitForSpeech(answer, callId);
-      if (request.deferred) deliverDeferredAnswer(answer, callId);
-      else output(callId, true, answer);
+      if (request.deferred) {
+        // The empty function output completes its own provider response. Let
+        // that response close before starting the deferred answer; otherwise
+        // its late talk-state events can suppress or cancel the real answer.
+        await new Promise(resolve => { request.settleTimer = setTimeout(resolve, NAPSTER_INTERIM_SETTLE_MS); });
+        if (disposed || request.expired || active !== request) return;
+        waitForSpeech(answer, callId);
+        deliverDeferredAnswer(answer, callId);
+      } else {
+        waitForSpeech(answer, callId);
+        output(callId, true, answer);
+      }
       onExchange({ question, answer, callId });
     } catch (error) {
       if (disposed || request.expired) return;
@@ -231,11 +243,12 @@ export function createWorkmateBridge({
         // the page UI. Napster must never improvise or speak when Workmate is down.
         clearSpeech();
         if (!request.deferred) output(callId, false, '');
-        onState('Microphone muted');
+        onState('Listening...');
       } catch { clearSpeech(); fatal('Unable to return the response to Napster. Please reconnect.'); }
     } finally {
       clearTimeout(timer);
       clearTimeout(interimTimer);
+      clearTimeout(request.settleTimer);
       clearWaiting(request);
       if (active === request) active = null;
       if (!disposed && !active && !expectedSpeech && pendingText === null) onBusy(false);
@@ -281,7 +294,7 @@ export function createWorkmateBridge({
           active.expired = true;
           active.controller.abort();
           onError('Napster timed out waiting for Workmate AI. Please try again.');
-          onState('Microphone muted');
+          onState('Listening...');
           onBusy(false);
         } else if (expectedSpeech && (!data?.call_id || data.call_id === expectedSpeech.callId)) {
           // Workmate already supplied the function output. A late provider

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createWorkmateBridge, NAPSTER_INTERIM_RESULT_MS, VERBATIM_SUFFIX,
+  createWorkmateBridge, NAPSTER_INTERIM_RESULT_MS, NAPSTER_INTERIM_SETTLE_MS, VERBATIM_SUFFIX,
 } from './WorkmateBridge.js';
 
 const call = (id = 'call-1', args = { user_message: 'What services can you help me with?' }) => ({
@@ -253,7 +253,7 @@ test('expired provider call aborts Workmate and cannot send a late answer', asyn
   assert.equal(commands.length, 0);
   assert.equal(fatals.length, 0);
   assert.match(errors.at(-1), /timed out/);
-  assert.equal(states.at(-1), 'Microphone muted');
+  assert.equal(states.at(-1), 'Listening...');
 });
 
 test('unmount cancels work with no stale function output', async t => {
@@ -281,8 +281,10 @@ test('slow Workmate response uses an interim result then delivers the final answ
   assert.equal(signal.aborted, false);
   assert.equal(commands.length, 1);
   assert.equal(commands[0].type, 'send_function_output');
-  assert.match(commands[0].data.output.message, /still checking/);
+  assert.equal(commands[0].data.output.message, '');
   resolveResponse({ ok: true, json: async () => ({ response: answer }) });
+  for (let index = 0; index < 5; index += 1) await Promise.resolve();
+  t.mock.timers.tick(NAPSTER_INTERIM_SETTLE_MS);
   await pending;
   assert.equal(fatals.length, 0);
   assert.equal(commands.length, 2);
@@ -303,6 +305,8 @@ test('timeout after interim result is ignored and final answer is still delivere
   await bridge.handleEvent({ type: 'function_call_timeout', data: { call_id: 'call-1' } });
   assert.equal(signal.aborted, false);
   resolveResponse({ ok: true, json: async () => ({ response: 'A late Workmate answer.' }) });
+  for (let index = 0; index < 5; index += 1) await Promise.resolve();
+  t.mock.timers.tick(NAPSTER_INTERIM_SETTLE_MS);
   await pending;
   assert.equal(commands.length, 2);
   assert.equal(commands[1].type, 'send_message');

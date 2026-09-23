@@ -20,10 +20,7 @@ export default function VoiceAvatarPage() {
     const { theme, toggleTheme } = useTheme();
     const [showUserMenu, setShowUserMenu] = useState(false);
     const initials = (user.name || 'U').split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
-    const {
-        mountRef, status, displayStatus, errorMessage, exchange, reconnect, stop, waiting,
-        busy, microphoneEnabled, toggleMicrophone,
-    } = useNapsterAvatar(user);
+    const { mountRef, status, displayStatus, errorMessage, exchange, reconnect, stop, waiting } = useNapsterAvatar(user);
     useEffect(() => { document.documentElement.classList.toggle('dark', theme === 'dark'); }, [theme]);
     const backToChat = () => navigate('/workmateai');
     const handleLogout = () => { stop(); instance.logoutRedirect({ postLogoutRedirectUri: window.location.origin }); };
@@ -102,19 +99,6 @@ export default function VoiceAvatarPage() {
                         </div>
                         {errorMessage && <p className="napster-error" role="alert">{errorMessage}</p>}
                         {exchange && <details className="napster-answer"><summary>Workmate AI response</summary><p><strong>You:</strong> {exchange.question}</p><p>{exchange.answer}</p></details>}
-                        {status === 'connected' && (
-                            <Motion.button
-                                className={microphoneEnabled ? 'microphone-toggle active' : 'microphone-toggle'}
-                                whileHover={{ scale: 1.03 }}
-                                whileTap={{ scale: 0.97 }}
-                                type="button"
-                                onClick={toggleMicrophone}
-                                disabled={busy}
-                                aria-pressed={microphoneEnabled}
-                            >
-                                {microphoneEnabled ? 'Mute microphone' : 'Enable microphone'}
-                            </Motion.button>
-                        )}
                         <Motion.button
                             whileHover={{ scale: 1.03 }}
                             whileTap={{ scale: 0.97 }}
