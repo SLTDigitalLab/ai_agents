@@ -77,6 +77,8 @@
 .avatar-conversation-controls button:hover:not(:disabled) { box-shadow: 0 10px 15px -3px #164e634d; }
 .avatar-conversation-controls button:disabled { opacity: .55; cursor: default; }
 .avatar-conversation-controls button:focus-visible { outline: 2px solid #67e8f9; outline-offset: 4px; }
+.avatar-conversation-controls .microphone-toggle { background: linear-gradient(135deg, #334155, #475569); }
+.avatar-conversation-controls .microphone-toggle.active { background: linear-gradient(135deg, #047857, #059669); }
 
 @keyframes workmate-avatar-pulse { 50% { opacity: .4; } }
 

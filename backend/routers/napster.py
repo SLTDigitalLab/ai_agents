@@ -76,6 +76,15 @@ async def create_session(response: Response):
                 raise HTTPException(503, "Napster requires an implicit answer function with user_message.")
             provider_settings = dict(agent.get("providerSettings") or {})
             provider_settings["instructions"] = INSTRUCTIONS
+            # Office conversations were being accepted as customer turns. Napster's
+            # near-field filter targets laptop/headset microphones, while a high VAD
+            # threshold requires speech to be close and clear before opening a turn.
+            provider_settings["turnDetection"] = {
+                "threshold": 0.9,
+                "prefix_padding_ms": 400,
+                "silence_duration_ms": 500,
+            }
+            provider_settings["noiseReduction"] = {"type": "nearField"}
             provider = {"settings": provider_settings}
             if agent.get("voiceId"):
                 provider["voiceId"] = agent["voiceId"]
@@ -84,7 +93,6 @@ async def create_session(response: Response):
                 "providerConfig": provider,
                 "functions": ["answer"],
                 "useWebSearch": False,
-                "initialSpeech": "Remain silent and wait for the customer. Call answer for every customer utterance.",
             }
             if agent.get("language"):
                 payload["language"] = agent["language"]

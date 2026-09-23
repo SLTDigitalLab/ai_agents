@@ -49,7 +49,17 @@ class NapsterSessionTests(unittest.TestCase):
         self.assertEqual(payload["providerConfig"]["voiceId"], "existing-voice")
         self.assertEqual(payload["functions"], ["answer"])
         self.assertFalse(payload["useWebSearch"])
+        self.assertNotIn("initialSpeech", payload)
         self.assertIn("EVERY customer utterance", payload["providerConfig"]["settings"]["instructions"])
+        self.assertEqual(payload["providerConfig"]["settings"]["turnDetection"], {
+            "threshold": 0.9,
+            "prefix_padding_ms": 400,
+            "silence_duration_ms": 500,
+        })
+        self.assertEqual(
+            payload["providerConfig"]["settings"]["noiseReduction"],
+            {"type": "nearField"},
+        )
         self.assertEqual(self.mock.get.call_count, 2)
 
     def test_missing_configuration_does_not_call_provider(self):

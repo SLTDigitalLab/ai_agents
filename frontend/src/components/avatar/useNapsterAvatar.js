@@ -9,8 +9,6 @@ const SESSION_ENDED = 'Napster disconnected. Reconnect to continue.';
 const AUTOPLAY_ERROR = 'Your browser paused playback. Select Reconnect to resume.';
 const CONNECTION_TIMEOUT = 45_000;
 
-const INITIAL_GREETING = 'Hello! Welcome to Workmate AI. How can I help you today?';
-
 // Napster exports a singleton. Serialize init/teardown across component remounts.
 let sdkQueue = Promise.resolve();
 
@@ -30,7 +28,9 @@ export default function useNapsterAvatar(user) {
   const cleanupRef = useRef(null);
   const resumeRef = useRef(null);
   const sendTextRef = useRef(null);
+  const microphoneRef = useRef(null);
   const [busy, setBusy] = useState(false);
+  const [microphoneEnabled, setMicrophoneEnabled] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [status, setStatus] = useState('idle');
   const [voiceStatus, setVoiceStatus] = useState('Ready to connect');
@@ -53,8 +53,7 @@ export default function useNapsterAvatar(user) {
     let connectedOnce = false;
     let blocked = false;
     let speechAllowed = false;
-    let avatarReady = false;
-    let greetingSent = false;
+    let customerMicEnabled = false;
     let timeout;
     let stallTimeout;
     let observer;
@@ -69,26 +68,10 @@ export default function useNapsterAvatar(user) {
       removers.push(() => target.removeEventListener(event, handler));
     };
 
-    const sendGreeting = () => {
-      if (disposed || greetingSent || !avatarReady) return;
-      if (!instance) {
-        console.info('[Napster/Greeting]', { step: 'command_deferred', reason: 'instance_unavailable' });
-        return;
-      }
-      greetingSent = true;
-      // The normal bridge mutes unverified companion speech. The greeting is the
-      // one deliberate exception, so allow its audio before asking Napster to say it.
-      instance.unmuteAudio();
-      instance.sendCommand({
-        type: 'send_message',
-        data: {
-          role: 'system',
-          text: `Speak this greeting exactly. Do not invoke a function: ${INITIAL_GREETING}`,
-          trigger_response: true,
-          delay: false,
-        },
-      });
-      console.info('[Napster/Greeting]', { step: 'command_sent', text: INITIAL_GREETING });
+    const setCustomerMic = (enabled) => {
+      customerMicEnabled = enabled;
+      setMicrophoneEnabled(enabled);
+      if (enabled) instance?.unmuteMic(); else instance?.muteMic();
     };
 
     const cleanup = () => {
@@ -97,6 +80,8 @@ export default function useNapsterAvatar(user) {
       abort.abort();
       bridge?.dispose();
       sendTextRef.current = null;
+      microphoneRef.current = null;
+      setMicrophoneEnabled(false);
       clearTimeout(timeout);
       clearTimeout(stallTimeout);
       observer?.disconnect();
@@ -127,13 +112,26 @@ export default function useNapsterAvatar(user) {
         instance.sendCommand(command);
       },
       onState: setVoiceStatus, onError: setNotification, onExchange: setExchange,
-      onBusy: setBusy,
+      onBusy: (value) => {
+        setBusy(value);
+        // A function call means Napster has accepted the current utterance.
+        // Close the microphone before office chatter can create another turn.
+        if (value) setCustomerMic(false);
+      },
       onWaiting: setWaiting,
       stopSpeaking: () => instance?.stopAvatarTalking(),
       onSpeechAllowed: (allowed) => {
         speechAllowed = allowed;
         if (mount.audio) mount.audio.muted = !allowed;
-        if (allowed) instance?.unmuteAudio(); else instance?.muteAudio();
+        if (allowed) {
+          // Prevent the avatar's own speaker output from being transcribed as a
+          // new customer turn and recursively sent back to Workmate.
+          instance?.muteMic();
+          instance?.unmuteAudio();
+        } else {
+          instance?.muteAudio();
+          if (customerMicEnabled) instance?.unmuteMic(); else instance?.muteMic();
+        }
       },
       onFatal: fail,
       onDiagnostic: (event) => console.info('[Napster/Workmate]', event),
@@ -145,6 +143,13 @@ export default function useNapsterAvatar(user) {
         return false;
       }
       return bridge.sendText(text);
+    };
+    microphoneRef.current = () => {
+      if (disposed || !instance || !connectedOnce || blocked || busy || speechAllowed) return false;
+      setCustomerMic(!customerMicEnabled);
+      setNotification('');
+      setVoiceStatus(customerMicEnabled ? 'Listening...' : 'Microphone muted');
+      return true;
     };
 
     const markPlaying = () => {
@@ -237,7 +242,8 @@ export default function useNapsterAvatar(user) {
 
     setStatus('connecting');
     setBusy(false);
-    setVoiceStatus('Listening...');
+    setMicrophoneEnabled(false);
+    setVoiceStatus('Microphone muted');
     setExchange(null);
     setNotification('');
     setAutoplayBlocked(false);
@@ -306,15 +312,10 @@ export default function useNapsterAvatar(user) {
             faceTracking: { enabled: false },
           },
           onAvatarReady: (isReady) => {
-            console.info('[Napster/Greeting]', { step: 'avatar_ready', isReady: isReady !== false });
             if (isReady === false) return;
-            avatarReady = true;
             bindMedia();
-            sendGreeting();
           },
           onData: (event) => {
-            // Every Napster event, including real customer function calls, must
-            // reach the bridge. Greeting state must never intercept a Workmate turn.
             if (!disposed) void bridge.handleEvent(event).catch(() => fail(CONNECTION_ERROR));
           },
           onError: (error) => {
@@ -342,12 +343,11 @@ export default function useNapsterAvatar(user) {
           container.replaceChildren();
           return;
         }
-        // Napster captures speech; only answer function results supply customer answers.
-        instance.unmuteMic();
+        // Shared-office mode: listen only after the user explicitly enables the mic.
+        instance.muteMic();
         if (speechAllowed) instance.unmuteAudio(); else instance.muteAudio();
         instance.setAudioVolume(1);
         bindMedia();
-        sendGreeting();
       } catch {
         if (!disposed) fail(STARTUP_ERROR);
       }
@@ -371,8 +371,12 @@ export default function useNapsterAvatar(user) {
       setAttempt((value) => value + 1);
     }
   };
-  return { mountRef, status, displayStatus: status === 'connecting' ? 'Connecting...' : voiceStatus,
-    errorMessage: notification, exchange, reconnect, busy, waiting,
+  const displayStatus = status === 'connecting'
+    ? 'Connecting...'
+    : status === 'connected' && !microphoneEnabled && !busy ? 'Microphone muted' : voiceStatus;
+  return { mountRef, status, displayStatus,
+    errorMessage: notification, exchange, reconnect, busy, waiting, microphoneEnabled,
+    toggleMicrophone: () => microphoneRef.current?.() ?? false,
     sendText: (text) => status === 'connected' && (sendTextRef.current?.(text) ?? false),
     stop: () => stopRef.current?.() };
 }

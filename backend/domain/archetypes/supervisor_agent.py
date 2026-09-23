@@ -866,6 +866,8 @@ async def _invoke_specialist_for_fan_out(
 class _SubQueryAssignment(BaseModel):
     """One sub-question paired with the specialist responsible for it."""
 
+    model_config = {"extra": "forbid"}
+
     specialist_id: str = Field(
         description="The specialist id this sub-question belongs to. MUST be one of the ids provided in the prompt."
     )
@@ -875,6 +877,9 @@ class _SubQueryAssignment(BaseModel):
 
 
 class _Decomposition(BaseModel):
+    # Responses structured output requires closed objects, including nested ones.
+    model_config = {"extra": "forbid"}
+
     sub_queries: list[_SubQueryAssignment] = Field(
         description="One entry per relevant specialist. Omit a specialist entirely if nothing in the user query relates to its scope."
     )

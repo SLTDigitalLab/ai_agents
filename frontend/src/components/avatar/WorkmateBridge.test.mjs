@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorkmateBridge, VERBATIM_SUFFIX } from './WorkmateBridge.js';
+import {
+  createWorkmateBridge, NAPSTER_INTERIM_RESULT_MS, VERBATIM_SUFFIX,
+} from './WorkmateBridge.js';
 
 const call = (id = 'call-1', args = { user_message: 'What services can you help me with?' }) => ({
   event: 'function_implicitly_called', data: { call_id: id, name: 'answer', arguments: args },
@@ -209,6 +211,7 @@ for (const [label, fetchImpl] of [
   assert.equal(commands[0].type, 'send_function_output');
   assert.equal(commands[0].data.call_id, 'call-1');
   assert.equal(commands[0].data.output.success, false);
+  assert.equal(commands[0].data.output.message, '');
   assert.ok(errors.at(-1));
   assert.equal(exchanges.length, 0);
 });
@@ -221,7 +224,7 @@ test('deadline covers fetching and reading the response body', async t => {
   } });
   await bridge.handleEvent(call());
   assert.equal(signal.aborted, true);
-  assert.match(commands[0].data.output.message, /too long/);
+  assert.equal(commands[0].data.output.message, '');
 });
 
 test('missing call ID stops the session and does not fabricate one', async t => {
@@ -243,12 +246,14 @@ test('missing question and malformed arguments return correlated failures', asyn
 });
 
 test('expired provider call aborts Workmate and cannot send a late answer', async t => {
-  const { bridge, commands, fatals } = setup(t, { fetchImpl: () => new Promise(() => {}) });
+  const { bridge, commands, errors, fatals, states } = setup(t, { fetchImpl: () => new Promise(() => {}) });
   const pending = bridge.handleEvent(call());
   await bridge.handleEvent({ event: 'function_call_timeout', data: { call_id: 'call-1' } });
   await pending;
   assert.equal(commands.length, 0);
-  assert.match(fatals[0], /timed out/);
+  assert.equal(fatals.length, 0);
+  assert.match(errors.at(-1), /timed out/);
+  assert.equal(states.at(-1), 'Microphone muted');
 });
 
 test('unmount cancels work with no stale function output', async t => {
@@ -259,7 +264,7 @@ test('unmount cancels work with no stale function output', async t => {
   assert.equal(commands.length, 0);
 });
 
-test('24.5-second Workmate response is preserved if the provider call remains alive', async t => {
+test('slow Workmate response uses an interim result then delivers the final answer', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let resolveResponse;
   let signal;
@@ -272,18 +277,20 @@ test('24.5-second Workmate response is preserved if the provider call remains al
   event.type = event.event;
   delete event.event;
   const pending = bridge.handleEvent(event);
-  t.mock.timers.tick(24_500);
+  t.mock.timers.tick(NAPSTER_INTERIM_RESULT_MS);
   assert.equal(signal.aborted, false);
-  assert.equal(commands.length, 0);
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].type, 'send_function_output');
+  assert.match(commands[0].data.output.message, /still checking/);
   resolveResponse({ ok: true, json: async () => ({ response: answer }) });
   await pending;
   assert.equal(fatals.length, 0);
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0].type, 'send_function_output');
-  assert.equal(commands[0].data.output.message, answer + VERBATIM_SUFFIX);
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1].type, 'send_message');
+  assert.ok(commands[1].data.text.includes(answer));
 });
 
-test('provider expiry at 10 seconds prevents delivery of a 24.5-second answer', async t => {
+test('timeout after interim result is ignored and final answer is still delivered', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   let resolveResponse;
   let signal;
@@ -292,17 +299,15 @@ test('provider expiry at 10 seconds prevents delivery of a 24.5-second answer', 
     return new Promise(resolve => { resolveResponse = resolve; });
   } });
   const pending = bridge.handleEvent(call());
-  t.mock.timers.tick(10_000);
+  t.mock.timers.tick(NAPSTER_INTERIM_RESULT_MS);
   await bridge.handleEvent({ type: 'function_call_timeout', data: { call_id: 'call-1' } });
-  await pending;
-  assert.equal(signal.aborted, true);
-  t.mock.timers.tick(14_500);
+  assert.equal(signal.aborted, false);
   resolveResponse({ ok: true, json: async () => ({ response: 'A late Workmate answer.' }) });
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(commands.length, 0);
-  assert.equal(exchanges.length, 0);
-  assert.equal(fatals.length, 1);
+  await pending;
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1].type, 'send_message');
+  assert.equal(exchanges.length, 1);
+  assert.equal(fatals.length, 0);
 });
 
 test('local HTTP deadline is 30 seconds and does not extend the provider call', async t => {
@@ -315,11 +320,12 @@ test('local HTTP deadline is 30 seconds and does not extend the provider call', 
   const pending = bridge.handleEvent(call());
   t.mock.timers.tick(29_999);
   assert.equal(signal.aborted, false);
+  assert.equal(commands.length, 1);
   t.mock.timers.tick(1);
   await pending;
   assert.equal(signal.aborted, true);
-  assert.equal(commands[0].data.output.success, false);
-  assert.match(commands[0].data.output.message, /too long/);
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].data.output.success, true);
 });
 
 test('provider expiry after output was sent does not disconnect the next turn', async t => {
