@@ -16,13 +16,13 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     
     # LLM and Embedding Configuration
-    LLM_PROVIDER: str = "gemini" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'
-    LLM_MODEL: str = "gemini-3-flash-preview"
+    LLM_PROVIDER: str = "openai" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'
+    LLM_MODEL: str = "gpt-4.1"
     LLM_API_KEY: Optional[str] = None
     LLM_BASE_URL: Optional[str] = None
 
-    EMBEDDING_PROVIDER: str = "gemini" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'
-    EMBEDDING_MODEL: str = "models/gemini-embedding-001"
+    EMBEDDING_PROVIDER: str = "openai" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'
+    EMBEDDING_MODEL: str = "text-embedding-3-large"
     EMBEDDING_DIMENSIONS: int = 3072
     EMBEDDING_API_KEY: Optional[str] = None
     EMBEDDING_BASE_URL: Optional[str] = None
@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     INGESTION_EMBEDDING_DIMENSIONS: Optional[int] = None
     INGESTION_EMBEDDING_API_KEY: Optional[str] = None
     INGESTION_EMBEDDING_BASE_URL: Optional[str] = None
+
+    # Local parsing/OCR first; OpenAI vision retries difficult PDF/image pages.
+    EXTRACTION_OPENAI_ENABLED: bool = True
+    EXTRACTION_OPENAI_MODEL: str = "gpt-4.1"
+    EXTRACTION_OPENAI_TIMEOUT_SECONDS: float = 90.0
 
     # Vertex AI (Google Cloud). Used when LLM_PROVIDER / EMBEDDING_PROVIDER == "vertex".
     # Auth is via a service-account JSON; the SDK reads GOOGLE_APPLICATION_CREDENTIALS

@@ -202,6 +202,8 @@ class IngestionService:
             chunking_strategy="by_title",
             max_characters=1800,
             combine_text_under_n_chars=500,
+            multipage_sections=False,
+            infer_table_structure=strategy == "hi_res",
             strategy=strategy,
             languages=["eng", "sin"],
         )
@@ -1113,7 +1115,11 @@ class IngestionService:
             docs = self._load_xlsx(file_path)
         # Images always need OCR
         elif ext in (".png", ".jpg", ".jpeg"):
-            docs = self._load_with_strategy(file_path, "hi_res")
+            try:
+                docs = self._load_with_strategy(file_path, "hi_res")
+            except Exception as e:
+                log.warning("Image OCR failed for %s: %s", file_path.name, e)
+                docs = []
         else:
             # 1. Try fast first
             try:
@@ -1140,6 +1146,12 @@ class IngestionService:
             # those pages instead of silently dropping them.
             elif ext == ".pdf":
                 docs = self._ocr_missing_pdf_pages(file_path, docs)
+
+        # Retry difficult pages with OpenAI before applying the shared chunking
+        # and table-preservation rules. Successful pages retain citation metadata.
+        if ext in (".pdf", ".png", ".jpg", ".jpeg"):
+            from services.document_extraction import OpenAIPageExtractor
+            docs = OpenAIPageExtractor(settings).improve(file_path, docs)
 
         # Re-split any chunks that are still too large after semantic
         # chunking.  Oversized chunks dilute embedding precision because
