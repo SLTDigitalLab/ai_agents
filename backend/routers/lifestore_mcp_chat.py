@@ -1074,17 +1074,37 @@ def _retrieve_products(module: Any, message: str, plan: dict[str, Any]) -> tuple
     mode = _safe_text(plan.get("answer_mode"))
     product_query = _safe_text(plan.get("product_query")) or message
     desired_limit = _bounded_int(plan.get("desired_product_count"), 1, 1, 8)
+
     # The user's explicit identity outranks LLM rewrites and previous selections.
-    explicit_query = (explicit_identity_query(message)
-                      if mode in {"single_product", "availability", "purchase"}
-                      and plan.get("price_intent", "none") == "none" else None)
+    # Exception: for availability of several explicitly requested products,
+    # comparison_queries already contains the individual product identities.
+    # Do not collapse the whole sentence into one identity query.
+    comparison_queries = [
+        _safe_text(query)
+        for query in (plan.get("comparison_queries") or [])
+        if _safe_text(query)
+    ]
+
+    multi_product_availability = (
+        mode == "availability"
+        and len(comparison_queries) > 1
+    )
+
+    explicit_query = (
+        explicit_identity_query(message)
+        if mode in {"single_product", "availability", "purchase"}
+        and plan.get("price_intent", "none") == "none"
+        and not multi_product_availability
+        else None
+    )
+
     if explicit_query:
         product_query = explicit_query
         plan["product_query"] = product_query
 
     if mode == "availability":
         products = []
-        queries = [product_query] if explicit_query else plan.get("comparison_queries") or [product_query]
+        queries = [product_query] if explicit_query else comparison_queries or [product_query]
         remembered = None if explicit_query else plan.get("availability_products")
         if remembered is not None:
             cache = {}
