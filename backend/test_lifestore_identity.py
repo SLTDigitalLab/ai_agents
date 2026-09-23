@@ -7,8 +7,13 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from routers import lifestore_mcp_chat as chat
-from services.lifestore_identity import CLARIFICATION, select_identity_product, dedupe_identity_candidates
-
+from services.lifestore_identity import (
+    CLARIFICATION,
+    clean_identity_query,
+    explicit_identity_query,
+    select_identity_product,
+    dedupe_identity_candidates,
+)
 
 def product(name, **fields):
     return {"name": name, "url": "https://lifestore.lk/product/" + name.lower().replace(" ", "-"),
@@ -44,6 +49,8 @@ class IdentityTests(unittest.TestCase):
                 self.assertEqual(products[0]["stock_status"], "out_of_stock")
                 live.assert_called_once_with(correct["url"])
 
+
+
     def test_how_about_ups_without_availability_intent_does_not_scrape(self):
         with patch.object(self.server, "_graph_identity_rows", return_value=[WRONG_UPS, UPS]), \
              patch.object(self.server, "load_products", return_value=[]), \
@@ -54,6 +61,37 @@ class IdentityTests(unittest.TestCase):
                 {"answer_mode": "single_product", "product_query": WRONG_UPS["name"]})
             self.assertEqual(products[0]["name"], UPS["name"])
             live.assert_not_called()
+
+    def test_explicit_identity_removes_request_framing_but_preserves_product_name(self):
+        cases = [
+            (
+                "what is Prolink PRS1140 ADSL Router",
+                "prolink prs1140 adsl router",
+            ),
+            (
+                 "is Prolink PRS1140 ADSL Router available",
+                "prolink prs1140 adsl router",
+            ),
+            (
+                 "what is the price of Prolink PRS1140 ADSL Router",
+                "prolink prs1140 adsl router",
+            ),
+            (
+                "i want to order Prolink PRS1140 ADSL Router",
+                "prolink prs1140 adsl router",
+            ),
+        ]
+
+        for message, expected in cases:
+            with self.subTest(message=message):
+                self.assertEqual(clean_identity_query(message), expected)
+                self.assertEqual(explicit_identity_query(message), expected)
+
+    # A pronoun is a memory reference, not a literal product identity.
+        self.assertIsNone(explicit_identity_query("i want to order it"))
+
+
+
 
     def test_exact_local_identity_not_hidden_by_graph_similar_hit(self):
         with patch.object(self.server, "_graph_identity_rows", return_value=[WRONG_PHONE]), \

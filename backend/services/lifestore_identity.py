@@ -6,7 +6,8 @@ import unicodedata
 CLARIFICATION = "I couldn't find an exact match for that product. Could you confirm the product name?"
 _QUESTION_WORDS = set("""is are was were the a an how about what currently available availability
     in out of stock do does you have can i buy now please tell me more regarding
-    im i'm m asking for it this that these those one ones product products its""".split())
+    im i'm m asking for it this that these those one ones product products its
+    price of want to order purchase""".split())
 _REFERENCES = re.compile(r"\b(this|that|these|those|it|its|first|second|third|fourth|fifth|sixth|seventh|eighth)\b", re.I)
 
 
