@@ -44,29 +44,34 @@ Napster captures microphone speech and presents the returned Workmate answer.
    });
    ```
 
-Experimental waiting voice: if the Workmate request is still pending after four
-seconds, the bridge sends a separate Napster `send_message` asking it to speak
-"I'm still checking that for you. This may take a little longer." The original
-implicit call remains pending, and its original `call_id` is used for the final
-`send_function_output`. Diagnostics include `waiting_voice_sent`,
-`original_call_id`, and `final_function_output_sent`. This has automated bridge
-coverage but still requires a live Napster acceptance test to confirm that the
-provider speaks the status without expiring the pending function call.
-
-The answer string is preserved, including whitespace, Unicode and formatting.
-The only addition is the requested control suffix. The bridge never sends an
-answer through `send_message` and does not invoke another answer generator.
-The existing text chat and separate voice-only routes retain their own flows.
+If Workmate is still pending after four seconds, the bridge displays the waiting
+notice and completes the implicit call with a `working` acknowledgement. The
+final answer is delivered through a system `send_message` with
+`trigger_response: true` and instructions to speak the answer verbatim.
+Fast answers still use the original `send_function_output` directly.
+The Workmate response text is preserved in both paths. The waiting acknowledgement is audible while Workmate prepares the answer.
+Its playback completion keeps the request busy and does not end the answer turn.
 
 ## Configuration
 
 ### Backend settings
 
 Keep `NAPSTER_API_KEY` and `NAPSTER_AGENT_ID` in the backend environment.
+Set `NAPSTER_VOICE_ID=coral` (or another Napster-supported voice) to override
+the agent voice for new connections without editing the Napster dashboard.
+Leave it blank to inherit the agent voice. Restart the backend and reconnect;
+with Docker Compose, recreate the backend to reload its environment file:
+`docker compose up -d --force-recreate backend`.
 The agent must already have a companion, voice and implicit `answer` function
 whose arguments include `user_message`. Credentials stay server-side; the
 session endpoint returns only the temporary token with `Cache-Control: no-store`.
 The frontend uses its existing `VITE_API_URL` configuration.
+
+New avatar sessions override speech detection with a 0.65 activation threshold,
+400 ms of prefix padding, and 800 ms of silence before completing an utterance.
+Near-field noise reduction filters laptop/headset background noise. This reduces
+false interruptions from faint sounds while keeping clear spoken interruptions
+available. Reconnect after a backend update to apply these session settings.
 
 ## Timeout investigation and remaining limitation
 
@@ -85,20 +90,15 @@ The installed `@touchcastllc/napster-companion-api` version is **1.5.0**.
 [Napster's tool execution documentation](https://developers.napster.com/docs/building-your-omniagent/tools/executing-tools)
 documents a default 10-second tool deadline. Its supported deferred implicit
 result pattern completes the tool with an interim result, then uses
-`send_message` for the eventual result. That pattern conflicts with this
-integration's required command flow and is not implemented.
+`send_message` for the eventual result. The bridge implements this deferred
+result pattern for slow requests.
 
-`WORKMATE_REQUEST_TIMEOUT_MS = 30_000` is strictly the bridge's local HTTP
-deadline (including reading the response body). It does **not** change Napster's
-deadline. The existing backend `VOICE_CHAT_TIMEOUT_SECONDS` setting belongs to
-the separate realtime voice bridge; this avatar calls `/api/v1/chat` directly.
-
-If Napster emits `function_call_timeout`, the bridge aborts its pending request,
-stops the avatar session and prevents late answer delivery. Increasing the HTTP
-deadline cannot make a 24.5-second response work under a 10-second provider limit.
-There is no verified supported long-running implicit-call solution in this SDK
-or the inspected documentation. A provider-supported extension, or Workmate
-responses within the provider's deadline, is required for that case.
+`WORKMATE_REQUEST_TIMEOUT_MS = 30_000` limits the local HTTP request, including
+reading its response body. A provider `function_call_timeout` switches the
+pending request to deferred delivery without aborting it or closing the avatar.
+The local deadline returns a spoken error through the same deferred path.
+User interruption and disposal still cancel pending requests and suppress late
+answers. Live Napster playback requires an acceptance check with a real session.
 
 ## States, errors and validation
 
@@ -150,3 +150,7 @@ with?" Check the displayed Workmate answer, outgoing function output, audio and
 lip-sync. Diagnostics report call IDs, stages, character counts and transcript
 match results without logging answer text or API keys. Do not mark acceptance
 complete if the provider expires the call or the spoken answer differs.
+
+Deferred answer instructions apply only to the current turn; new utterances must
+call answer again. The Stop speaking / Ask another question control cancels the
+current turn without closing the session and keeps microphone input enabled.

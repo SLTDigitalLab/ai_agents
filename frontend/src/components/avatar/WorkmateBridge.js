@@ -2,8 +2,9 @@
 // SDK 1.5 forwards this command unchanged over its data channel.
 export const VERBATIM_SUFFIX = ' [speak verbatim]';
 // This limits our HTTP request only. It does NOT extend Napster's server-side
-// implicit-function deadline. A function_call_timeout event ends the session.
+// implicit-function deadline. Slow calls are acknowledged and delivered later.
 export const WORKMATE_REQUEST_TIMEOUT_MS = 30_000;
+export const WAITING_MESSAGE = "I'm still checking that for you. This may take a little longer.";
 
 // Compare spoken text rather than Markdown bold delimiters. Only paired ** at
 // word boundaries are formatting; preserve arithmetic, words, numbers, links
@@ -51,6 +52,14 @@ export function createWorkmateBridge({
   });
   const output = (callId, success, message) => {
     if (disposed) return;
+    if (active?.callId === callId && active.deferred) {
+      sendCommand({
+        type: 'send_message',
+        data: { role: 'system', text: `Workmate AI has completed this turn. For this response only, speak the supplied answer without calling a tool. After speaking, listen for the next customer utterance and call answer for that new utterance as usual. Supplied answer:\n${message}${VERBATIM_SUFFIX}`, trigger_response: true, delay: false },
+      });
+      diagnostic('deferred_answer_sent', callId, { success, answerChars: message.length });
+      return;
+    }
     sendCommand({
       type: 'send_function_output',
       data: { call_id: callId, output: { success, message: message + VERBATIM_SUFFIX }, delay: false },
@@ -79,8 +88,9 @@ export function createWorkmateBridge({
     onFatal(message);
   };
   const waitForSpeech = (answer, callId) => {
+    if (active) active.waitingSpeech = false;
     clearSpeech();
-    expectedSpeech = { answer, callId, started: false };
+    expectedSpeech = { answer, callId, started: false, deferred: !!active?.deferred };
     onSpeechAllowed(true);
     onState('Napster is preparing a response...');
     speechTimer = setTimeout(() => fatal('Napster did not start speaking. Please reconnect.'), 30000);
@@ -154,7 +164,20 @@ export function createWorkmateBridge({
       diagnostic('workmate_request_started', callId, { questionChars: question.length });
       const requestStartedAt = performance.now();
       request.waitingTimer = setTimeout(() => {
-        if (!disposed && !request.expired && active === request) onWaiting(true);
+        if (!disposed && !request.expired && active === request) {
+          onWaiting(true);
+          if (!request.deferred) {
+            request.deferred = true;
+            try {
+              request.waitingSpeech = true;
+              onSpeechAllowed(true);
+              sendCommand({ type: 'send_function_output', data: {
+                call_id: callId, output: { status: 'working', message: WAITING_MESSAGE + VERBATIM_SUFFIX }, delay: false,
+              } });
+              diagnostic('pending_function_acknowledged', callId);
+            } catch { fatal('Unable to contact Napster. Please reconnect.'); }
+          }
+        }
       }, 4000);
       const task = (async () => {
         const response = await fetchImpl(`${apiUrl}/api/v1/chat`, {
@@ -216,6 +239,10 @@ export function createWorkmateBridge({
   }
 
   return {
+    interrupt() {
+      if (disposed) return;
+      interruptTurn();
+    },
     sendText(text) {
       if (disposed || active || expectedSpeech || pendingText !== null) return false;
       if (typeof text !== 'string' || !text.trim()) return false;
@@ -243,14 +270,24 @@ export function createWorkmateBridge({
       if (disposed) return;
       const event = msg?.event || msg?.type;
       const data = msg?.data;
+      if (['speech_started', 'input_audio_buffer.speech_started'].includes(event)) {
+        if (data?.item_id && userSpeechItems.has(data.item_id)) return;
+        if (data?.item_id) userSpeechItems.add(data.item_id);
+        interruptTurn();
+        onState('Listening...');
+        diagnostic('customer_speech_detected', null);
+        return;
+      }
       if (event === 'function_implicitly_called' && data?.name === 'answer') {
         await handleCall(data);
       } else if (event === 'function_call_timeout') {
         if (data?.call_id && retiredCalls.has(data.call_id)) return;
         if (active && (!data?.call_id || data.call_id === active.callId)) {
           diagnostic('napster_function_expired', active.callId);
-          active.expired = true;
-          fatal('Napster timed out waiting for Workmate AI. Please reconnect and try again.');
+          // The provider has closed this tool call, not the WebRTC session.
+          // Keep the HTTP request alive and inject its result as a new message.
+          active.deferred = true;
+          onWaiting(true);
         } else if (expectedSpeech && (!data?.call_id || data.call_id === expectedSpeech.callId)) {
           // Workmate already supplied the function output. A late provider
           // timeout must not tear down a completed turn or the next question.
@@ -258,11 +295,24 @@ export function createWorkmateBridge({
         }
       } else if (event === 'talk_state_changed') {
         if (messageKeys(data).some(key => retiredMessages.has(key))) return;
+        // The acknowledgement is audible, but is not the completed answer.
+        // Its playback must not start answer timers or release the busy state.
+        if (active?.waitingSpeech && !expectedSpeech) {
+          if (data?.state === 'started') {
+            onSpeechAllowed(true);
+            diagnostic('waiting_speech_started', active.callId);
+          } else if (['ended', 'canceled', 'cancelled'].includes(data?.state)) {
+            active.waitingSpeech = false;
+            onSpeechAllowed(false);
+            onState('Thinking...');
+          }
+          return;
+        }
         if (data?.state === 'started') {
           if (!expectedSpeech) {
             // Startup/late speech is suppressed without tearing down the session.
             onSpeechAllowed(false);
-            stopSpeaking();
+            if (!active?.deferred) stopSpeaking();
             onState(active ? 'Thinking...' : 'Listening...');
             diagnostic('unsolicited_speech_suppressed', null);
             return;
@@ -274,8 +324,10 @@ export function createWorkmateBridge({
           onState('Napster is speaking...');
           diagnostic('napster_speaking', expectedSpeech.callId);
         } else if (['canceled', 'cancelled'].includes(data?.state)) {
+          if (active?.deferred) return;
           if (!ignoreUntaggedStop || messageKeys(data).length) interruptTurn(false);
         } else if (expectedSpeech && data?.state === 'ended') {
+          if (expectedSpeech.deferred && !expectedSpeech.started) return;
           if (ignoreUntaggedStop && !expectedSpeech.started && !messageKeys(data).length) return;
           // Transcript events may follow the ended event; retain expected text briefly.
           clearTimeout(speechTimer);
@@ -314,6 +366,7 @@ export function createWorkmateBridge({
           }
           for (const key of keys) currentMessages.add(key);
           if (['cancelled', 'canceled'].includes(message.action)) {
+            if (active?.deferred) return;
             interruptTurn(false);
             return;
           }

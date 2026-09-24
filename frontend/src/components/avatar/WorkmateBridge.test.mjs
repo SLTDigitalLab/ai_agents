@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorkmateBridge, VERBATIM_SUFFIX } from './WorkmateBridge.js';
+import { createWorkmateBridge, VERBATIM_SUFFIX, WAITING_MESSAGE } from './WorkmateBridge.js';
 
 const call = (id = 'call-1', args = { user_message: 'What services can you help me with?' }) => ({
   event: 'function_implicitly_called', data: { call_id: id, name: 'answer', arguments: args },
@@ -39,15 +39,14 @@ test('waiting toast starts at four seconds and disappears before function output
   assert.equal(visible, false);
   t.mock.timers.tick(1);
   assert.equal(visible, true);
-  assert.deepEqual(commands, []);
+  assert.equal(commands[0].data.output.status, 'working');
   assert.deepEqual(exchanges, []);
   resolve({ ok: true, json: async () => ({ response: 'Exact answer.' }) });
   await pending;
   assert.equal(visible, false);
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0].type, 'send_function_output');
-  assert.equal(commands[0].data.call_id, 'call-1');
-  assert.equal(commands[0].data.output.message, 'Exact answer.' + VERBATIM_SUFFIX);
+  assert.equal(commands.length, 2);
+  assert.equal(commands[1].type, 'send_message');
+  assert.ok(commands[1].data.text.endsWith('Exact answer.' + VERBATIM_SUFFIX));
   t.mock.timers.tick(4000);
   assert.equal(waiting.filter(Boolean).length, 1);
 });
@@ -80,7 +79,7 @@ test('response arrival hides the waiting toast before a delayed body is read', a
   await pending;
 });
 
-for (const finish of ['failure', 'dispose', 'interrupt', 'provider timeout']) {
+for (const finish of ['failure', 'dispose', 'interrupt']) {
   for (const elapsed of [2000, 4000]) {
     test(`${finish} clears waiting notification at ${elapsed}ms without a stale timer`, async t => {
       t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -98,7 +97,6 @@ for (const finish of ['failure', 'dispose', 'interrupt', 'provider timeout']) {
       if (finish === 'interrupt') await bridge.handleEvent({ event: 'message_received', data: {
         message: { role: 'user', action: 'speech_started', item_id: 'new-user' },
       } });
-      if (finish === 'provider timeout') await bridge.handleEvent({ event: 'function_call_timeout', data: { call_id: 'call-1' } });
       await pending;
       assert.equal(visible, false);
       t.mock.timers.tick(4000);
@@ -242,15 +240,6 @@ test('missing question and malformed arguments return correlated failures', asyn
   }
 });
 
-test('expired provider call aborts Workmate and cannot send a late answer', async t => {
-  const { bridge, commands, fatals } = setup(t, { fetchImpl: () => new Promise(() => {}) });
-  const pending = bridge.handleEvent(call());
-  await bridge.handleEvent({ event: 'function_call_timeout', data: { call_id: 'call-1' } });
-  await pending;
-  assert.equal(commands.length, 0);
-  assert.match(fatals[0], /timed out/);
-});
-
 test('unmount cancels work with no stale function output', async t => {
   const { bridge, commands } = setup(t, { fetchImpl: () => new Promise(() => {}) });
   const pending = bridge.handleEvent(call());
@@ -259,67 +248,45 @@ test('unmount cancels work with no stale function output', async t => {
   assert.equal(commands.length, 0);
 });
 
-test('24.5-second Workmate response is preserved if the provider call remains alive', async t => {
+for (const expiryAt of [0, 4000, 10000, null]) {
+  test(`slow answer survives provider timeout at ${expiryAt}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let resolve;
+    let signal;
+    const { bridge, commands, exchanges, fatals } = setup(t, { fetchImpl: (_, options) => {
+      signal = options.signal;
+      return new Promise(r => { resolve = r; });
+    } });
+    const pending = bridge.handleEvent(call());
+    if (expiryAt !== null) {
+      t.mock.timers.tick(expiryAt);
+      await bridge.handleEvent({ type: 'function_call_timeout', data: { call_id: 'call-1' } });
+    }
+    t.mock.timers.tick(24500 - (expiryAt || 0));
+    assert.equal(signal.aborted, false);
+    resolve({ ok: true, json: async () => ({ response: 'A late Workmate answer.' }) });
+    await pending;
+    assert.equal(commands.at(-1).type, 'send_message');
+    assert.ok(commands.at(-1).data.text.endsWith('A late Workmate answer.' + VERBATIM_SUFFIX));
+    assert.equal(exchanges.length, 1);
+    assert.deepEqual(fatals, []);
+  });
+}
+
+test('local deadline delivers an error without disconnecting', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  let resolveResponse;
   let signal;
-  const answer = 'Your current leave balance is 12 days.';
   const { bridge, commands, fatals } = setup(t, { fetchImpl: (_, options) => {
-    signal = options.signal;
-    return new Promise(resolve => { resolveResponse = resolve; });
-  } });
-  const event = call();
-  event.type = event.event;
-  delete event.event;
-  const pending = bridge.handleEvent(event);
-  t.mock.timers.tick(24_500);
-  assert.equal(signal.aborted, false);
-  assert.equal(commands.length, 0);
-  resolveResponse({ ok: true, json: async () => ({ response: answer }) });
-  await pending;
-  assert.equal(fatals.length, 0);
-  assert.equal(commands.length, 1);
-  assert.equal(commands[0].type, 'send_function_output');
-  assert.equal(commands[0].data.output.message, answer + VERBATIM_SUFFIX);
-});
-
-test('provider expiry at 10 seconds prevents delivery of a 24.5-second answer', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  let resolveResponse;
-  let signal;
-  const { bridge, commands, exchanges, fatals } = setup(t, { fetchImpl: (_, options) => {
-    signal = options.signal;
-    return new Promise(resolve => { resolveResponse = resolve; });
-  } });
-  const pending = bridge.handleEvent(call());
-  t.mock.timers.tick(10_000);
-  await bridge.handleEvent({ type: 'function_call_timeout', data: { call_id: 'call-1' } });
-  await pending;
-  assert.equal(signal.aborted, true);
-  t.mock.timers.tick(14_500);
-  resolveResponse({ ok: true, json: async () => ({ response: 'A late Workmate answer.' }) });
-  await Promise.resolve();
-  await Promise.resolve();
-  assert.equal(commands.length, 0);
-  assert.equal(exchanges.length, 0);
-  assert.equal(fatals.length, 1);
-});
-
-test('local HTTP deadline is 30 seconds and does not extend the provider call', async t => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  let signal;
-  const { bridge, commands } = setup(t, { fetchImpl: (_, options) => {
     signal = options.signal;
     return new Promise(() => {});
   } });
   const pending = bridge.handleEvent(call());
-  t.mock.timers.tick(29_999);
-  assert.equal(signal.aborted, false);
-  t.mock.timers.tick(1);
+  t.mock.timers.tick(30000);
   await pending;
   assert.equal(signal.aborted, true);
-  assert.equal(commands[0].data.output.success, false);
-  assert.match(commands[0].data.output.message, /too long/);
+  assert.equal(commands.at(-1).type, 'send_message');
+  assert.match(commands.at(-1).data.text, /too long/);
+  assert.deepEqual(fatals, []);
 });
 
 test('provider expiry after output was sent does not disconnect the next turn', async t => {
@@ -665,3 +632,97 @@ test('typed input reports a command transport failure', t => {
   assert.match(fatals[0], /Unable to send/);
   assert.equal(requests.length, 0);
 });
+
+for (const interrupt of [false, true]) {
+  test(`interim provider events preserve work; user interrupt=${interrupt}`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let resolve;
+    let signal;
+    const { bridge, commands, stops, fatals } = setup(t, { fetchImpl: (_, options) => {
+      signal = options.signal;
+      return new Promise(r => { resolve = r; });
+    } });
+    const pending = bridge.handleEvent(call());
+    t.mock.timers.tick(4000);
+    await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'started' } });
+    await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'canceled' } });
+    await bridge.handleEvent({ event: 'message_received', data: { message: { role: 'assistant', action: 'canceled' } } });
+    assert.equal(signal.aborted, false);
+    assert.deepEqual(stops, []);
+    if (interrupt) {
+      await bridge.handleEvent({ event: 'message_received', data: { message: { role: 'user', action: 'speech_started', item_id: 'interrupt' } } });
+      assert.equal(signal.aborted, true);
+    }
+    resolve({ ok: true, json: async () => ({ response: 'Final answer.' }) });
+    await pending;
+    assert.equal(commands.length, interrupt ? 1 : 2);
+    assert.deepEqual(fatals, []);
+  });
+}
+
+test('waiting message is audible and its end does not finish the pending answer', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let resolve;
+  const { bridge, commands, playback, busy, states, fatals } = setup(t, {
+    fetchImpl: () => new Promise(r => { resolve = r; }),
+  });
+  const pending = bridge.handleEvent(call());
+  t.mock.timers.tick(4000);
+  assert.equal(playback.at(-1), true);
+  assert.equal(commands[0].data.output.message, WAITING_MESSAGE + VERBATIM_SUFFIX);
+  await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'started' } });
+  assert.equal(playback.at(-1), true);
+  await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'ended' } });
+  t.mock.timers.tick(1500);
+  assert.equal(playback.at(-1), false);
+  assert.equal(busy.at(-1), true);
+  assert.equal(states.at(-1), 'Thinking...');
+  resolve({ ok: true, json: async () => ({ response: 'Final answer.' }) });
+  await pending;
+  assert.equal(playback.at(-1), true);
+  // A delayed end from the acknowledgement must not mute the final answer.
+  await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'ended' } });
+  t.mock.timers.tick(1500);
+  assert.equal(playback.at(-1), true);
+  assert.equal(busy.at(-1), true);
+  await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'started' } });
+  await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'ended' } });
+  t.mock.timers.tick(1500);
+  assert.equal(busy.at(-1), false);
+  assert.deepEqual(fatals, []);
+});
+
+for (const interruption of ['button', 'speech_started', 'input_audio_buffer.speech_started', 'nested']) {
+  test(`slow answer -> ${interruption} -> next answer -> third question`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let resolve;
+    const { bridge, commands, busy, playback, fatals, stops } = setup(t, {
+      fetchImpl: () => new Promise(r => { resolve = r; }),
+    });
+    const first = bridge.handleEvent(call('first'));
+    t.mock.timers.tick(4000);
+    resolve({ ok: true, json: async () => ({ response: 'First answer.' }) });
+    await first;
+    assert.match(commands.at(-1).data.text, /next customer utterance/);
+    await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'started' } });
+    if (interruption === 'button') bridge.interrupt();
+    else if (interruption === 'nested') await bridge.handleEvent({ event: 'message_received', data: {
+      message: { role: 'user', action: 'speech_started', item_id: 'user-2' },
+    } });
+    else await bridge.handleEvent({ event: interruption, data: { item_id: 'user-2' } });
+    assert.equal(playback.at(-1), false);
+    assert.equal(busy.at(-1), false);
+    assert.equal(stops.length, 1);
+    for (const id of ['second', 'third']) {
+      const next = bridge.handleEvent(call(id));
+      resolve({ ok: true, json: async () => ({ response: `${id} answer.` }) });
+      await next;
+      assert.equal(playback.at(-1), true);
+      await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'started' } });
+      await bridge.handleEvent({ event: 'talk_state_changed', data: { state: 'ended' } });
+      t.mock.timers.tick(1500);
+      assert.equal(busy.at(-1), false);
+    }
+    assert.deepEqual(fatals, []);
+  });
+}

@@ -27,6 +27,7 @@ function releaseMedia(container) {
 export default function useNapsterAvatar(user) {
   const mountRef = useRef(null);
   const stopRef = useRef(null);
+  const interruptRef = useRef(null);
   const cleanupRef = useRef(null);
   const resumeRef = useRef(null);
   const sendTextRef = useRef(null);
@@ -97,6 +98,7 @@ export default function useNapsterAvatar(user) {
       abort.abort();
       bridge?.dispose();
       sendTextRef.current = null;
+      interruptRef.current = null;
       clearTimeout(timeout);
       clearTimeout(stallTimeout);
       observer?.disconnect();
@@ -129,7 +131,10 @@ export default function useNapsterAvatar(user) {
       onState: setVoiceStatus, onError: setNotification, onExchange: setExchange,
       onBusy: setBusy,
       onWaiting: setWaiting,
-      stopSpeaking: () => instance?.stopAvatarTalking(),
+      stopSpeaking: () => {
+        instance?.stopAvatarTalking();
+        instance?.unmuteMic();
+      },
       onSpeechAllowed: (allowed) => {
         speechAllowed = allowed;
         if (mount.audio) mount.audio.muted = !allowed;
@@ -138,6 +143,11 @@ export default function useNapsterAvatar(user) {
       onFatal: fail,
       onDiagnostic: (event) => console.info('[Napster/Workmate]', event),
     });
+    interruptRef.current = () => {
+      if (disposed || !instance) return;
+      bridge.interrupt();
+      instance.unmuteMic();
+    };
     sendTextRef.current = (text) => {
       if (disposed || !instance || !connectedOnce || blocked) return false;
       if (instance.isUserTalking) {
@@ -374,5 +384,6 @@ export default function useNapsterAvatar(user) {
   return { mountRef, status, displayStatus: status === 'connecting' ? 'Connecting...' : voiceStatus,
     errorMessage: notification, exchange, reconnect, busy, waiting,
     sendText: (text) => status === 'connected' && (sendTextRef.current?.(text) ?? false),
+    interrupt: () => interruptRef.current?.(),
     stop: () => stopRef.current?.() };
 }

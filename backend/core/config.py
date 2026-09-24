@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     NAPSTER_API_KEY: Optional[str] = None
     NAPSTER_AGENT_ID: Optional[str] = None
+    NAPSTER_VOICE_ID: Optional[str] = None
 
     # Workmate voice settings retained from voice-test.
     PROJECT_ID: Optional[str] = None
