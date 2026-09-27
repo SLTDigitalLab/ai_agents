@@ -39,6 +39,46 @@ class AgentState(TypedDict):
     # Used by agent nodes to adapt response tone.
     sentiment: str
 
+    # Helpdesk classifier output used by the greeting/research/ticket router.
+    message_type: NotRequired[str]
+
+    # Helpdesk n8n resume metadata persisted across turns so a paused workflow
+    # can continue instead of starting from the webhook again.
+    # Managed internally by helpdesk_n8n_agent archetype.
+    helpdesk_execution_id: NotRequired[str]
+    helpdesk_resume_url: NotRequired[str]
+    helpdesk_waiting_for_input: NotRequired[bool]
+
+    # Research workflow phase tracking for the helpdesk solved-ticket → KB flow.
+    helpdesk_research_phase: NotRequired[str]
+    helpdesk_original_query: NotRequired[str]
+
+    # Ticket creation flow tracking for the helpdesk agent.
+    helpdesk_ticket_phase: NotRequired[str]
+    helpdesk_draft_ticket_id: NotRequired[str]
+    helpdesk_draft_main_category: NotRequired[str]
+    helpdesk_draft_sub_category: NotRequired[str]
+    helpdesk_retry_count: NotRequired[int]
+    # Confidence-gated clarification (see draft_ticket() / category_
+    # clarification_handler() in domain/helpdesk/pipeline/ticket_draft.py):
+    # 0 until draft_ticket
+    # asks a low-confidence clarifying question, then 1 — caps the loop at
+    # one re-ask so a structurally ambiguous ticket (see
+    # helpdesk-category-accuracy-gap project memory) can't loop forever on
+    # a question the user can't actually answer.
+    helpdesk_category_clarify_count: NotRequired[int]
+    # True if a different node already sent a user-visible reply earlier in
+    # the same turn as this ticket draft, decided once on the first call into
+    # draft_ticket() and reused across its Turn 1 -> Turn 2 tool-call cycle.
+    helpdesk_draft_continuation: NotRequired[bool]
+
+    # Ticket status lookup phase tracking (domain/helpdesk/pipeline/
+    # ticket_status_agent.py): "awaiting_incident_id" after the agent asks
+    # for an incident ID with no tool call yet, so classify_message routes
+    # the user's next bare-ID reply straight back here instead of
+    # reclassifying it as an unrelated fresh message.
+    helpdesk_ticket_status_phase: NotRequired[str]
+
     # Supervisor-only routing fields
     routing_action: NotRequired[str]
     routing_reason: NotRequired[str]

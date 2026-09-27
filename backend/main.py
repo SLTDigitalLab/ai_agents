@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 # This ensures Langfuse (and other services) pick up the .env credentials immediately
 load_dotenv()
 
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s | %(message)s",
@@ -17,6 +19,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat
+from routers.helpdesk import router as helpdesk_router
 from services.ingestion import router as ingestion_router
 from core.config import settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
@@ -105,12 +108,13 @@ app.add_middleware(
 # --- 2. Register Routers ---
 app.include_router(admin.router)
 app.include_router(chat.router)  # The Langfuse logic goes inside here!
-app.include_router(orders.router)  
-app.include_router(enterprise.router)  
-app.include_router(admin_dashboard.router)  
-app.include_router(feedback.router)  
-app.include_router(finance.router)  
-app.include_router(kb_retrieval.router)  
+app.include_router(orders.router)  # LifeStore order submissions
+app.include_router(enterprise.router)  # Enterprise lead → Bitrix24
+app.include_router(admin_dashboard.router)  # Admin dashboard panel
+app.include_router(feedback.router)  # Feedback (thumbs up/down)
+app.include_router(finance.router)  # External Finance KB retrieval (voice assistant)
+app.include_router(kb_retrieval.router)  # Generic per-agent KB retrieval (dev local → prod vectors)
+app.include_router(helpdesk_router)  # Helpdesk ticket storage/viewing
 app.include_router(ingestion_router)
 app.include_router(contact.router)  # Contact Us email form
 app.include_router(lifestore_mcp_chat.router)  # Ask LifeStore MCP chat (/api/v1/lifestore/*)
