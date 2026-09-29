@@ -1,3 +1,4 @@
+import { useAdminFetch } from '../../useAdminFetch';
 import { useState, useEffect } from 'react';
 import { AGENTS } from '../../config/agents';
 import { motion } from 'framer-motion';
@@ -95,13 +96,14 @@ const DEFAULT_COLOR = {
 };
 
 const FeedbackPanel = () => {
+    const adminFetch = useAdminFetch();
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [expandedId, setExpandedId] = useState(null);
 
     useEffect(() => {
-        fetch(`${API_BASE}/feedback`)
+        adminFetch(`${API_BASE}/feedback`)
             .then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
@@ -114,7 +116,7 @@ const FeedbackPanel = () => {
                 setError(err.message);
                 setLoading(false);
             });
-    }, []);
+    }, [adminFetch]);
 
     const satisfactionRate = stats && stats.total_feedback > 0
         ? Math.round((stats.thumbs_up / stats.total_feedback) * 100)

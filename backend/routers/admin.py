@@ -1,8 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from core.admin_auth import require_admin, require_agent_access
 from pydantic import BaseModel
 
 import asyncio
-import json
 import logging
 import requests
 
@@ -16,39 +16,12 @@ from services.ingestion import IngestionService
 from services.ingestion_slm import slm_ingestion_service
 from services import ingestion_status
 from domain.tools.api_tools import LEAVE_BALANCE_API_URL
-from core.config import settings
 
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/admin", tags=["Admin"])
+router = APIRouter(prefix="/api/v1/admin", tags=["Admin"], dependencies=[Depends(require_admin)])
 ingestion_service = IngestionService()
-
-
-try:
-    ADMIN_AGENT_MAP: dict[str, list[str]] = {
-        email.lower(): agents
-        for email, agents in json.loads(settings.ADMIN_AGENT_MAP or "{}").items()
-    }
-except json.JSONDecodeError as e:
-    logger.error(f"ADMIN_AGENT_MAP is not valid JSON: {e}")
-    ADMIN_AGENT_MAP = {}
-
-
-def require_agent_access(user_email: str | None, agent_name: str) -> None:
-    """Reject if the caller's email is not authorised for this agent.
-
-    A user with ["*"] is treated as super-admin (access to every agent).
-    """
-    if not user_email:
-        raise HTTPException(status_code=401, detail="Missing user_email.")
-    allowed = ADMIN_AGENT_MAP.get(user_email.lower(), [])
-    if "*" in allowed or agent_name in allowed:
-        return
-    raise HTTPException(
-        status_code=403,
-        detail=f"User '{user_email}' is not authorised to ingest into agent '{agent_name}'.",
-    )
 
 
 class UrlIngestRequest(BaseModel):
@@ -377,7 +350,7 @@ async def _crawl_and_ingest_urls(
 
 
 @router.post("/ingest-url")
-async def ingest_url(request: UrlIngestRequest):
+async def ingest_url(request: UrlIngestRequest, user: dict = Depends(require_admin)):
     """
     Ingest content from URL(s) and store embeddings in Qdrant.
     Runs in the background; poll /ingestion-status for completion.
@@ -397,7 +370,7 @@ async def ingest_url(request: UrlIngestRequest):
       "max_depth": 3
     }
     """
-    require_agent_access(request.user_email, request.agent_name)
+    require_agent_access(user, request.collection_name or request.agent_name)
 
     current = ingestion_status.get_status()
 
@@ -455,14 +428,14 @@ async def ingest_url(request: UrlIngestRequest):
 
 
 @router.post("/ingest-onedrive")
-async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
+async def process_onedrive_ingestion_api(request: OneDriveIngestRequest, user: dict = Depends(require_admin)):
     """
     Process OneDrive Ingestion API.
 
     Ingest PDFs, Word docs, PowerPoint and Excel files from a OneDrive folder
     using the Graph API. Runs in the background; poll /ingestion-status for completion.
     """
-    require_agent_access(request.user_email, request.agent_name)
+    require_agent_access(user, request.agent_name)
 
     current = ingestion_status.get_status()
 
@@ -506,7 +479,7 @@ async def process_onedrive_ingestion_api(request: OneDriveIngestRequest):
 
 
 @router.post("/ingest-sharepoint")
-async def process_sharepoint_ingestion_api(request: SharePointIngestRequest):
+async def process_sharepoint_ingestion_api(request: SharePointIngestRequest, user: dict = Depends(require_admin)):
     """
     Process SharePoint Ingestion API - Ingest PDFs, Word docs, PowerPoint,
     Excel, images, and EML files from a SharePoint document library folder
@@ -514,6 +487,8 @@ async def process_sharepoint_ingestion_api(request: SharePointIngestRequest):
 
     Runs in the background; poll /ingestion-status for completion.
     """
+    require_agent_access(user, request.agent_name)
+
     current = ingestion_status.get_status()
     if current.get("active"):
         raise HTTPException(status_code=409, detail="Another ingestion job is already running.")
@@ -551,11 +526,11 @@ async def get_ingestion_status():
     return ingestion_status.get_status()
 
 @router.post("/kb-documents")
-async def list_kb_documents(request: KBListRequest):
+async def list_kb_documents(request: KBListRequest, user: dict = Depends(require_admin)):
     """
     List documents currently stored in the selected agent KB.
     """
-    require_agent_access(request.user_email, request.agent_name)
+    require_agent_access(user, request.agent_name)
 
     result = await asyncio.to_thread(
         ingestion_service.list_kb_documents,
@@ -569,11 +544,11 @@ async def list_kb_documents(request: KBListRequest):
 
 
 @router.post("/delete-kb-document")
-async def delete_kb_document(request: KBDeleteDocumentRequest):
+async def delete_kb_document(request: KBDeleteDocumentRequest, user: dict = Depends(require_admin)):
     """
     Delete one document from selected agent KB.
     """
-    require_agent_access(request.user_email, request.agent_name)
+    require_agent_access(user, request.agent_name)
 
     result = await asyncio.to_thread(
         ingestion_service.delete_kb_document,
@@ -589,11 +564,11 @@ async def delete_kb_document(request: KBDeleteDocumentRequest):
 
 
 @router.post("/delete-agent-kb")
-async def delete_agent_kb(request: KBDeleteAgentRequest):
+async def delete_agent_kb(request: KBDeleteAgentRequest, user: dict = Depends(require_admin)):
     """
     Delete full KB collection for selected agent.
     """
-    require_agent_access(request.user_email, request.agent_name)
+    require_agent_access(user, request.agent_name)
 
     result = await asyncio.to_thread(
         ingestion_service.delete_agent_kb,
@@ -606,11 +581,11 @@ async def delete_agent_kb(request: KBDeleteAgentRequest):
     return result
 
 @router.post("/kb-document-chunks")
-async def list_kb_document_chunks(request: KBListChunksRequest):
+async def list_kb_document_chunks(request: KBListChunksRequest, user: dict = Depends(require_admin)):
     """
     List all chunks for one document in selected agent KB.
     """
-    require_agent_access(request.user_email, request.agent_name)
+    require_agent_access(user, request.agent_name)
 
     result = await asyncio.to_thread(
         ingestion_service.list_kb_document_chunks,
@@ -626,11 +601,11 @@ async def list_kb_document_chunks(request: KBListChunksRequest):
 
 
 @router.post("/delete-kb-chunk")
-async def delete_kb_chunk(request: KBDeleteChunkRequest):
+async def delete_kb_chunk(request: KBDeleteChunkRequest, user: dict = Depends(require_admin)):
     """
     Delete one selected chunk from selected agent KB.
     """
-    require_agent_access(request.user_email, request.agent_name)
+    require_agent_access(user, request.agent_name)
 
     result = await asyncio.to_thread(
         ingestion_service.delete_kb_chunk,

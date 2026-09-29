@@ -60,6 +60,14 @@ async def get_current_user(
             "name": "Test User",
         }
 
+    return await get_verified_user(creds)
+
+
+async def get_verified_user(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> dict:
+    """Validate a Microsoft token even when development chat auth is disabled."""
+
     if creds is None or not creds.credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -68,6 +76,9 @@ async def get_current_user(
         )
 
     token = creds.credentials
+
+    if not AZURE_TENANT_ID or not AZURE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Microsoft authentication is not configured.")
 
     try:
         jwks = get_jwks()
@@ -93,7 +104,7 @@ async def get_current_user(
             algorithms=["RS256"],
             audience=AZURE_CLIENT_ID,
             issuer=ISSUER,
-            options={"verify_aud": True}
+            options={"verify_aud": True, "require_aud": True, "require_iss": True, "require_exp": True}
         )
         
         return payload

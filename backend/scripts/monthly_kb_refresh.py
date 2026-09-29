@@ -197,8 +197,13 @@ def print_section(title: str):
 
 
 def request_json(method: str, url: str, **kwargs) -> dict[str, Any]:
+    token = os.getenv("ADMIN_API_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("ADMIN_API_TOKEN must contain a current Microsoft API token for an approved administrator.")
+    headers = dict(kwargs.pop("headers", {}))
+    headers["Authorization"] = f"Bearer {token}"
     try:
-        response = requests.request(method, url, timeout=30, **kwargs)
+        response = requests.request(method, url, timeout=30, headers=headers, **kwargs)
     except requests.RequestException as exc:
         raise RuntimeError(
             f"Request failed for {method} {url}: {type(exc).__name__}: {exc}"

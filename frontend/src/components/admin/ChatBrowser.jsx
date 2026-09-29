@@ -1,3 +1,4 @@
+import { useAdminFetch } from '../../useAdminFetch';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AGENTS } from '../../config/agents';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,6 +18,7 @@ const AGENT_LIST = Object.entries(AGENTS).map(([key, cfg]) => ({
 
 // ── Slide-over Detail Panel ─────────────────────────────────────────────
 const SessionDetail = ({ session, agent, onClose }) => {
+    const adminFetch = useAdminFetch();
     const [messages, setMessages] = useState([]);
     const [feedback, setFeedback] = useState({});
     const [loading, setLoading] = useState(true);
@@ -30,12 +32,12 @@ const SessionDetail = ({ session, agent, onClose }) => {
         setFeedback({});
 
         Promise.all([
-            fetch(`${API_BASE}/sessions/${agent}/${session.session_id}`)
+            adminFetch(`${API_BASE}/sessions/${agent}/${session.session_id}`)
                 .then(res => {
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     return res.json();
                 }),
-            fetch(`${API_BASE.replace('/admin/dashboard', '')}/feedback/${agent}/${session.session_id}`)
+            adminFetch(`${API_BASE.replace('/admin/dashboard', '')}/feedback/${agent}/${session.session_id}`)
                 .then(res => res.ok ? res.json() : { feedback: {} })
                 .catch(() => ({ feedback: {} })),
         ])
@@ -55,7 +57,7 @@ const SessionDetail = ({ session, agent, onClose }) => {
                 setError(err.message);
                 setLoading(false);
             });
-    }, [session, agent]);
+    }, [session, agent, adminFetch]);
 
     return (
         <AnimatePresence>
@@ -211,6 +213,7 @@ const SessionDetail = ({ session, agent, onClose }) => {
 
 // ── Main ChatBrowser Component ──────────────────────────────────────────
 const ChatBrowser = () => {
+    const adminFetch = useAdminFetch();
     const [selectedAgent, setSelectedAgent] = useState(AGENT_LIST[0]?.id || '');
     const [sessions, setSessions] = useState([]);
     const [total, setTotal] = useState(0);
@@ -248,7 +251,7 @@ const ChatBrowser = () => {
         setError(null);
         try {
             const searchParam = debouncedSearch ? `&search=${encodeURIComponent(debouncedSearch)}` : '';
-            const res = await fetch(
+            const res = await adminFetch(
                 `${API_BASE}/sessions?agent=${selectedAgent}&skip=${skip}&limit=${limit}${searchParam}`
             );
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -261,7 +264,7 @@ const ChatBrowser = () => {
         } finally {
             setLoading(false);
         }
-    }, [selectedAgent, skip, limit, debouncedSearch]);
+    }, [selectedAgent, skip, limit, debouncedSearch, adminFetch]);
 
     useEffect(() => {
         fetchSessions();

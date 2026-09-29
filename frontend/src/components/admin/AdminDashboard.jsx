@@ -1,3 +1,4 @@
+import { useAdminFetch } from '../../useAdminFetch';
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AGENTS } from '../../config/agents';
@@ -47,6 +48,7 @@ const StatCard = ({ label, value, helper, accent = 'text-white', children }) => 
 );
 
 const AdminDashboard = () => {
+    const adminFetch = useAdminFetch();
     const navigate = useNavigate();
     const [stats, setStats] = useState(null);
     const [feedbackStats, setFeedbackStats] = useState(null);
@@ -55,11 +57,11 @@ const AdminDashboard = () => {
 
     useEffect(() => {
         Promise.all([
-            fetch(`${API_BASE}/stats`).then(res => {
+            adminFetch(`${API_BASE}/stats`).then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
             }),
-            fetch(`${API_BASE}/feedback`).then(res => {
+            adminFetch(`${API_BASE}/feedback`).then(res => {
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 return res.json();
             }).catch(() => null),
@@ -73,7 +75,7 @@ const AdminDashboard = () => {
                 setError(err.message);
                 setLoading(false);
             });
-    }, []);
+    }, [adminFetch]);
 
     return (
         <AdminLayout

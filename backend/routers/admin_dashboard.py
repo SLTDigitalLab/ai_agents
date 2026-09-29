@@ -8,7 +8,8 @@ GET /api/v1/admin/dashboard/sessions/{agent}/{session_id}  → full conversation
 """
 
 import re
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from core.admin_auth import require_admin
 
 import psycopg
 from psycopg.rows import dict_row
@@ -17,7 +18,7 @@ from core.config import settings
 from domain.registry import AGENT_BUILDERS, get_compiled_sync_graph
 from services.sessions import get_sessions_users
 
-router = APIRouter(prefix="/api/v1/admin/dashboard", tags=["Admin Dashboard"])
+router = APIRouter(prefix="/api/v1/admin/dashboard", tags=["Admin Dashboard"], dependencies=[Depends(require_admin)])
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 

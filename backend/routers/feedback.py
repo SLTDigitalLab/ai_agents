@@ -9,7 +9,8 @@ GET  /api/v1/admin/dashboard/feedback  → aggregate stats for admin panel
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from core.admin_auth import require_admin
 import psycopg
 from psycopg.rows import dict_row
 
@@ -237,7 +238,7 @@ async def get_thread_feedback(agent_id: str, thread_id: str):
 
 # ── Admin: Feedback Stats ────────────────────────────────────────────────
 
-@router.get("/api/v1/admin/dashboard/feedback")
+@router.get("/api/v1/admin/dashboard/feedback", dependencies=[Depends(require_admin)])
 async def get_feedback_stats(
     agent: Optional[str] = Query(None, description="Filter by agent ID"),
 ):

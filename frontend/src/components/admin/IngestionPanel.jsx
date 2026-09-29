@@ -1,3 +1,4 @@
+import { useAdminFetch } from '../../useAdminFetch';
 import React, { useState, useEffect, useRef } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { AGENTS } from '../../config/agents';
@@ -550,6 +551,7 @@ const ChunkViewerDialog = ({
 
 // ── Main Ingestion Panel ──────────────────────────────────────────────
 const IngestionPanel = () => {
+    const adminFetch = useAdminFetch();
     const { instance, accounts } = useMsal();
     const userEmail = accounts[0]?.username || '';
 
@@ -613,7 +615,7 @@ const IngestionPanel = () => {
         let cancelled = false;
         const poll = async () => {
             try {
-                const res = await fetch(`${API_BASE}/ingestion-status`);
+                const res = await adminFetch(`${API_BASE}/ingestion-status`);
                 if (!res.ok) return;
                 const data = await res.json();
                 if (cancelled) return;
@@ -654,7 +656,7 @@ const IngestionPanel = () => {
         poll();
         const id = setInterval(poll, 3000);
         return () => { cancelled = true; clearInterval(id); };
-    }, []);
+    }, [adminFetch]);
 
     useEffect(() => {
         if (!serverStatus?.active) return;
@@ -680,7 +682,7 @@ const IngestionPanel = () => {
         setUrlLoading(true);
         setStatus(null);
         try {
-            const res = await fetch(`${API_BASE}/ingest-url`, {
+            const res = await adminFetch(`${API_BASE}/ingest-url`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...urlForm, user_email: userEmail }),
@@ -773,7 +775,7 @@ const IngestionPanel = () => {
                 token,
             };
 
-            const res = await fetch(`${API_BASE}/ingest-onedrive`, {
+            const res = await adminFetch(`${API_BASE}/ingest-onedrive`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ...payload, user_email: userEmail }),
@@ -854,7 +856,7 @@ const IngestionPanel = () => {
         setStatus(null);
 
         try {
-            const res = await fetch(`${API_BASE}/ingest-sharepoint`, {
+            const res = await adminFetch(`${API_BASE}/ingest-sharepoint`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -924,7 +926,7 @@ const IngestionPanel = () => {
         }
 
         try {
-            const res = await fetch(`${API_BASE}/kb-documents`, {
+            const res = await adminFetch(`${API_BASE}/kb-documents`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -973,7 +975,7 @@ const IngestionPanel = () => {
         setKbActionLoading(true);
 
         try {
-            const res = await fetch(`${API_BASE}/delete-kb-document`, {
+            const res = await adminFetch(`${API_BASE}/delete-kb-document`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1028,7 +1030,7 @@ const IngestionPanel = () => {
         setKbActionLoading(true);
 
         try {
-            const res = await fetch(`${API_BASE}/delete-agent-kb`, {
+            const res = await adminFetch(`${API_BASE}/delete-agent-kb`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -1080,7 +1082,7 @@ const IngestionPanel = () => {
     };
 
     const fetchKbDocumentChunks = async (doc) => {
-        const res = await fetch(`${API_BASE}/kb-document-chunks`, {
+        const res = await adminFetch(`${API_BASE}/kb-document-chunks`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1137,7 +1139,7 @@ const IngestionPanel = () => {
         setChunkActionLoading(true);
 
         try {
-            const res = await fetch(`${API_BASE}/delete-kb-chunk`, {
+            const res = await adminFetch(`${API_BASE}/delete-kb-chunk`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
