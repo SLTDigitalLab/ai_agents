@@ -1,0 +1,251 @@
+[
+  {
+    "path": "/",
+    "checked_at_utc": "2026-10-02T10:37:22.605424+00:00",
+    "credentials_sent": false,
+    "method": "GET",
+    "status": 200,
+    "content_type": "text/html",
+    "headers_present": {
+      "Strict-Transport-Security": false,
+      "Content-Security-Policy": false,
+      "X-Content-Type-Options": false,
+      "X-Frame-Options": false
+    },
+    "vite_dev_client_referenced": true
+  },
+  {
+    "path": "/@vite/client",
+    "checked_at_utc": "2026-10-02T10:37:22.935605+00:00",
+    "credentials_sent": false,
+    "method": "GET",
+    "status": 200,
+    "content_type": "text/javascript",
+    "headers_present": {
+      "Strict-Transport-Security": false,
+      "Content-Security-Policy": false,
+      "X-Content-Type-Options": false,
+      "X-Frame-Options": false
+    },
+    "vite_client_code": true
+  },
+  {
+    "path": "/api/openapi.json",
+    "checked_at_utc": "2026-10-02T10:37:23.439539+00:00",
+    "credentials_sent": false,
+    "method": "GET",
+    "status": 200,
+    "content_type": "application/json",
+    "headers_present": {
+      "Strict-Transport-Security": false,
+      "Content-Security-Policy": false,
+      "X-Content-Type-Options": false,
+      "X-Frame-Options": false
+    },
+    "response_keys": [
+      "components",
+      "info",
+      "openapi",
+      "paths"
+    ],
+    "registered_routes": {
+      "/api/v1/admin/ingest-url": [
+        "post"
+      ],
+      "/api/v1/admin/ingest-onedrive": [
+        "post"
+      ],
+      "/api/v1/admin/ingest-sharepoint": [
+        "post"
+      ],
+      "/api/v1/admin/ingestion-status": [
+        "get"
+      ],
+      "/api/v1/admin/kb-documents": [
+        "post"
+      ],
+      "/api/v1/admin/delete-kb-document": [
+        "post"
+      ],
+      "/api/v1/admin/delete-agent-kb": [
+        "post"
+      ],
+      "/api/v1/admin/kb-document-chunks": [
+        "post"
+      ],
+      "/api/v1/admin/delete-kb-chunk": [
+        "post"
+      ],
+      "/api/v1/admin/test-leave-balance": [
+        "post"
+      ],
+      "/api/v1/chat": [
+        "post"
+      ],
+      "/api/v1/chat/{agent_id}/{thread_id}": [
+        "get"
+      ],
+      "/api/v1/orders/products/search": [
+        "get"
+      ],
+      "/api/v1/orders/submit": [
+        "post"
+      ],
+      "/api/v1/enterprise/lead": [
+        "post"
+      ],
+      "/api/v1/enterprise/test-webhook": [
+        "post"
+      ],
+      "/api/v1/admin/dashboard/sessions": [
+        "get"
+      ],
+      "/api/v1/admin/dashboard/sessions/{agent}/{session_id}": [
+        "get"
+      ],
+      "/api/v1/admin/dashboard/stats": [
+        "get"
+      ],
+      "/api/v1/feedback": [
+        "post",
+        "delete"
+      ],
+      "/api/v1/feedback/{agent_id}/{thread_id}": [
+        "get"
+      ],
+      "/api/v1/admin/dashboard/feedback": [
+        "get"
+      ],
+      "/api/v1/finance/retrieve": [
+        "post"
+      ],
+      "/api/v1/kb/{agent_id}/retrieve": [
+        "post"
+      ],
+      "/api/v1/helpdesk_dev/tickets": [
+        "get",
+        "post"
+      ],
+      "/api/v1/helpdesk_dev/tickets/{ticket_id}": [
+        "get"
+      ],
+      "/api/v1/helpdesk_dev/solved-tickets": [
+        "get",
+        "post"
+      ],
+      "/api/v1/helpdesk_dev/solved-tickets/{solved_id}": [
+        "get"
+      ],
+      "/api/v1/helpdesk_dev/categories": [
+        "get",
+        "post"
+      ],
+      "/api/v1/helpdesk_dev/categories/{category_id}": [
+        "get"
+      ],
+      "/api/v1/contact-us": [
+        "post"
+      ],
+      "/api/v1/lifestore/mcp-health": [
+        "get"
+      ],
+      "/api/v1/lifestore/mcp-chat": [
+        "post"
+      ],
+      "/": [
+        "get"
+      ]
+    }
+  },
+  {
+    "path": "/api/v1/admin/ingestion-status",
+    "checked_at_utc": "2026-10-02T10:37:23.812972+00:00",
+    "credentials_sent": false,
+    "method": "GET",
+    "status": 401,
+    "content_type": "application/json",
+    "headers_present": {
+      "Strict-Transport-Security": false,
+      "Content-Security-Policy": false,
+      "X-Content-Type-Options": false,
+      "X-Frame-Options": false
+    },
+    "response_keys": [
+      "detail"
+    ],
+    "detail": "Not authenticated"
+  },
+  {
+    "path": "/api/v1/admin/dashboard/stats",
+    "checked_at_utc": "2026-10-02T10:37:24.056525+00:00",
+    "credentials_sent": false,
+    "method": "GET",
+    "status": 401,
+    "content_type": "application/json",
+    "headers_present": {
+      "Strict-Transport-Security": false,
+      "Content-Security-Policy": false,
+      "X-Content-Type-Options": false,
+      "X-Frame-Options": false
+    },
+    "response_keys": [
+      "detail"
+    ],
+    "detail": "Not authenticated"
+  },
+  {
+    "path": "/api/v1/helpdesk_dev/tickets?userId=security-audit-d43af977-500b-4a65-971a-88f0269d2250&limit=1",
+    "checked_at_utc": "2026-10-02T10:37:24.317805+00:00",
+    "credentials_sent": false,
+    "method": "GET",
+    "status": 200,
+    "content_type": "application/json",
+    "headers_present": {
+      "Strict-Transport-Security": false,
+      "Content-Security-Policy": false,
+      "X-Content-Type-Options": false,
+      "X-Frame-Options": false
+    },
+    "response_keys": [
+      "count",
+      "tickets"
+    ],
+    "returned_ticket_count": 0
+  },
+  {
+    "path": "/api/v1/feedback/hr/security-audit-d43af977-500b-4a65-971a-88f0269d2250",
+    "checked_at_utc": "2026-10-02T10:37:24.642108+00:00",
+    "credentials_sent": false,
+    "method": "GET",
+    "status": 200,
+    "content_type": "application/json",
+    "headers_present": {
+      "Strict-Transport-Security": false,
+      "Content-Security-Policy": false,
+      "X-Content-Type-Options": false,
+      "X-Frame-Options": false
+    },
+    "response_keys": [
+      "feedback"
+    ],
+    "returned_feedback_entry_count": 0
+  },
+  {
+    "path": "/api/v1/chat/hr/security-audit-d43af977-500b-4a65-971a-88f0269d2250",
+    "checked_at_utc": "2026-10-02T10:37:24.889323+00:00",
+    "credentials_sent": false,
+    "method": "GET",
+    "status": 401,
+    "content_type": "application/json",
+    "headers_present": {
+      "Strict-Transport-Security": false,
+      "Content-Security-Policy": false,
+      "X-Content-Type-Options": false,
+      "X-Frame-Options": false
+    },
+    "response_keys": [
+      "detail"
+    ],
+    "detail": "Not authenticated"
+  }
+]

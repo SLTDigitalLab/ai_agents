@@ -1,0 +1,33 @@
+[
+  {
+    "environment": "Staging",
+    "url": "https://theaisle.raccoon-ai.io/api/v1/admin/ingestion-status",
+    "checked_at": "2026-10-01T04:45:08.038797+00:00",
+    "method": "GET",
+    "credentials_sent": false,
+    "status": 200,
+    "response_keys": [
+      "active",
+      "agent_name",
+      "last_result",
+      "source",
+      "started_at"
+    ],
+    "dashboard_data_returned": false,
+    "ingestion_status_returned": true
+  },
+  {
+    "environment": "Production",
+    "url": "https://aiagents.sltdigitallab.lk/api/v1/admin/ingestion-status",
+    "checked_at": "2026-10-01T04:45:26.648469+00:00",
+    "method": "GET",
+    "credentials_sent": false,
+    "status": 401,
+    "response_keys": [
+      "detail"
+    ],
+    "dashboard_data_returned": false,
+    "ingestion_status_returned": false,
+    "detail": "Not authenticated"
+  }
+]

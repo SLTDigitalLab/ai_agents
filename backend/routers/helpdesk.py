@@ -2,7 +2,10 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from core.auth import get_verified_user
+from core.admin_auth import admin_email, require_admin
 
 from services.helpdesk_tickets import (
     # helpdesk tickets
@@ -19,7 +22,30 @@ from services.helpdesk_tickets import (
     list_categories,
 )
 
-router = APIRouter(prefix="/api/v1/helpdesk_dev", tags=["Helpdesk"])
+router = APIRouter(
+    prefix="/api/v1/helpdesk_dev", tags=["Helpdesk"],
+    dependencies=[Depends(get_verified_user)],
+)
+
+
+def _owner_id(user: dict) -> str:
+    # Existing tickets use Microsoft usernames. Never take ownership from input.
+    owner = admin_email(user)
+    if not user.get("oid") or not owner:
+        raise HTTPException(status_code=403, detail="Helpdesk user identity is required.")
+    return owner
+
+
+async def _ticket_user(user: dict, requested: Optional[str]) -> str:
+    owner = _owner_id(user)
+    if requested is None:
+        return owner
+    if not isinstance(requested, str) or not requested.strip():
+        raise HTTPException(status_code=422, detail="userId must be a nonempty string.")
+    target = requested.strip().lower()
+    if target != owner:
+        await require_admin(user)
+    return target
 
 
 # ---------------------------------------------------------------------------
@@ -31,28 +57,37 @@ async def get_tickets(
     userId: Optional[str] = Query(None, description="Filter tickets by userId"),
     status: Optional[str] = Query(None, description="Filter tickets by status"),
     limit: int = Query(100, ge=1, le=500),
+    user: dict = Depends(get_verified_user),
 ):
-    """List recent helpdesk tickets, optionally filtered by userId or status.
-    Used by the LangGraph agent to fetch a user's ticket history.
-    """
-    tickets = list_helpdesk_tickets(user_id=userId, status=status, limit=limit)
+    """List own tickets; administrators may explicitly select another user."""
+    owner = await _ticket_user(user, userId)
+    tickets = list_helpdesk_tickets(user_id=owner, status=status, limit=limit)
     return {"tickets": tickets, "count": len(tickets)}
 
 
 @router.get("/tickets/{ticket_id}")
-async def get_ticket(ticket_id: str):
+async def get_ticket(ticket_id: str, user: dict = Depends(get_verified_user)):
     """Fetch a single helpdesk ticket by ticket_id."""
+    owner = _owner_id(user)
     ticket = get_helpdesk_ticket(ticket_id)
     if not ticket:
         raise HTTPException(status_code=404, detail=f"Ticket '{ticket_id}' not found")
+    if str(ticket.get("userId") or "").strip().lower() != owner:
+        try:
+            await require_admin(user)
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+            # Do not reveal whether another user's ticket exists.
+            raise HTTPException(status_code=404, detail=f"Ticket '{ticket_id}' not found")
     return ticket
 
 
 @router.post("/tickets")
-async def post_ticket(body: dict):
+async def post_ticket(body: dict, user: dict = Depends(get_verified_user)):
     """Create a new helpdesk ticket.
     Expected body fields:
-        userId              (str, required)
+        userId              (str, optional; defaults to verified user)
         message             (str, required)
         sub_category        (str, required)
         ticket_id           (str, optional)
@@ -63,7 +98,15 @@ async def post_ticket(body: dict):
         updated_main_category   (str, optional, default 'chat')
         updated_sub_category    (str, optional)
     """
-    required = ("userId", "message", "sub_category")
+    owner = await _ticket_user(user, body.get("userId"))
+    # Workflow state and ticket identifiers may only be supplied by admins.
+    managed_fields = {
+        "ticket_id", "status", "duplicate_check", "need_more_informations",
+        "updated_main_category", "updated_sub_category",
+    }
+    if managed_fields.intersection(body):
+        await require_admin(user)
+    required = ("message", "sub_category")
     missing = [f for f in required if not body.get(f)]
     if missing:
         raise HTTPException(
@@ -72,7 +115,7 @@ async def post_ticket(body: dict):
         )
 
     ticket = create_helpdesk_ticket(
-        user_id=body["userId"],
+        user_id=owner,
         message=body["message"],
         sub_category=body["sub_category"],
         ticket_id=body.get("ticket_id"),
@@ -90,7 +133,7 @@ async def post_ticket(body: dict):
 # Solved tickets
 # ---------------------------------------------------------------------------
 
-@router.get("/solved-tickets")
+@router.get("/solved-tickets", dependencies=[Depends(require_admin)])
 async def get_solved_tickets(
     limit: int = Query(100, ge=1, le=500),
 ):
@@ -101,7 +144,7 @@ async def get_solved_tickets(
     return {"solved_tickets": tickets, "count": len(tickets)}
 
 
-@router.get("/solved-tickets/{solved_id}")
+@router.get("/solved-tickets/{solved_id}", dependencies=[Depends(require_admin)])
 async def get_solved_ticket_by_id(solved_id: int):
     """Fetch a single solved ticket by its numeric id."""
     ticket = get_solved_ticket(solved_id)
@@ -112,7 +155,7 @@ async def get_solved_ticket_by_id(solved_id: int):
     return ticket
 
 
-@router.post("/solved-tickets")
+@router.post("/solved-tickets", dependencies=[Depends(require_admin)])
 async def post_solved_ticket(body: dict):
     """Store a newly solved ticket.
     Expected body fields:
@@ -138,7 +181,7 @@ async def post_solved_ticket(body: dict):
 # Categories
 # ---------------------------------------------------------------------------
 
-@router.get("/categories")
+@router.get("/categories", dependencies=[Depends(require_admin)])
 async def get_categories(
     category_name: Optional[str] = Query(
         None, description="Filter by category name"
@@ -152,7 +195,7 @@ async def get_categories(
     return {"categories": cats, "count": len(cats)}
 
 
-@router.get("/categories/{category_id}")
+@router.get("/categories/{category_id}", dependencies=[Depends(require_admin)])
 async def get_category_by_id(category_id: str):
     """Fetch a single category by its category_id."""
     cat = get_category(category_id)
@@ -163,7 +206,7 @@ async def get_category_by_id(category_id: str):
     return cat
 
 
-@router.post("/categories")
+@router.post("/categories", dependencies=[Depends(require_admin)])
 async def post_category(body: dict):
     """Create a new category entry.
     Expected body fields:
