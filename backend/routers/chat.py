@@ -672,7 +672,7 @@ async def chat(
                 request.thread_id,
             )
 
-            if evidence_chunk:
+            if evidence_chunk and request.stream:
                 yield evidence_chunk
 
         except Exception as exc:
@@ -691,6 +691,10 @@ async def chat(
             if streamed_any_text:
                 yield "\n\n"
             yield user_message
+
+    if not request.stream:
+        chunks = [chunk async for chunk in event_generator()]
+        return {"response": "".join(chunks)}
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

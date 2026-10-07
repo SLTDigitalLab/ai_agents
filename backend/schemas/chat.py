@@ -61,6 +61,10 @@ class ChatRequest(BaseModel):
         max_length=MAX_THREAD_ID_CHARS,
         description="Conversation thread identifier.",
     )
+    stream: bool = Field(
+        default=True,
+        description="Stream plain-text chunks when true; return one JSON response when false.",
+    )
 
     @field_validator("message")
     @classmethod

@@ -66,6 +66,8 @@ class ChatSecurityTests(unittest.TestCase):
                 spec = importlib.util.spec_from_file_location('test_chat_routes_' + name, path)
                 router = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(router)
+                if name == 'chat':
+                    self.chat_router = router
                 if name == 'feedback':
                     router._ensure_feedback_table = Mock()
                 self.app.include_router(router.router)
@@ -95,6 +97,29 @@ class ChatSecurityTests(unittest.TestCase):
         self.assertIsNone(stored['job_title'])
         self.assertEqual(self.record.call_args.kwargs['user_id'], 'owner@example.test')
         self.assertEqual(self.record.call_args.kwargs['thread_id'], stored['thread_id'])
+
+    def test_non_streaming_voice_response_preserves_verified_identity(self):
+        response = self.client.post('/api/v1/chat', json={**self.body, 'stream': False}, headers=self.owner)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {'response': "I'm sorry, but I'm unable to help with that request."})
+        self.assertEqual(next(iter(self.state.values()))['user_id'], 'owner@example.test')
+
+    def test_streaming_remains_the_default(self):
+        response = self.client.post('/api/v1/chat', json=self.body, headers=self.owner)
+        self.assertTrue(response.headers['content-type'].startswith('text/event-stream'))
+
+    def test_voice_gets_answer_without_hidden_visual_evidence(self):
+        self.classifier.return_value = SimpleNamespace(action='PASS', reason='synthetic', sentiment='neutral')
+        async def events(*args, **kwargs):
+            yield {'event': 'on_chat_model_stream', 'metadata': {'langgraph_node': 'agent'},
+                   'data': {'chunk': SimpleNamespace(content='Complete answer')}}
+        self.graph.astream_events.side_effect = events
+        evidence = '[[EVIDENCE_JSON]]{"items": [{"url": "private-image"}]}[[/EVIDENCE_JSON]]'
+        with patch.object(self.chat_router, '_build_evidence_stream_chunk', return_value=evidence):
+            response = self.client.post('/api/v1/chat', json={**self.body, 'stream': False}, headers=self.owner)
+            self.assertEqual(response.json(), {'response': 'Complete answer'})
+            response = self.client.post('/api/v1/chat', json=self.body, headers=self.owner)
+            self.assertIn(evidence, response.text)
 
     def test_same_thread_id_cannot_read_or_overwrite_another_users_conversation(self):
         self.client.post('/api/v1/chat', json=self.body, headers=self.owner)

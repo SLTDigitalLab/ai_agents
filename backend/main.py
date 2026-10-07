@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat
 from routers.helpdesk import router as helpdesk_router
+from routers.voice_agent import realtime
 from services.ingestion import router as ingestion_router
 from core.config import settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
@@ -118,6 +119,7 @@ app.include_router(helpdesk_router)  # Helpdesk ticket storage/viewing
 app.include_router(ingestion_router)
 app.include_router(contact.router)  # Contact Us email form
 app.include_router(lifestore_mcp_chat.router)  # Ask LifeStore MCP chat (/api/v1/lifestore/*)
+app.include_router(realtime.router)  # Workmate live voice agent (/api/v1/realtime/*)
 
 @app.get("/")
 def read_root():
