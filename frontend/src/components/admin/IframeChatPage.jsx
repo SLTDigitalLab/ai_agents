@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import EnterpriseForm from "../forms/EnterpriseForm";
 import LifestoreForm from "../forms/LifestoreForm";
 import "./IframeChatPage.css";
+import { getGuestChatHeaders } from "../../chatSession";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "";
@@ -534,6 +535,7 @@ function FeedbackButtons({
         const response = await fetch(`${API_URL}/api/v1/feedback`, {
           method: "DELETE",
           headers: {
+            ...getGuestChatHeaders(),
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -556,6 +558,7 @@ function FeedbackButtons({
       const response = await fetch(`${API_URL}/api/v1/feedback`, {
         method: "POST",
         headers: {
+          ...getGuestChatHeaders(),
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -802,6 +805,7 @@ export default function IframeChatPage() {
       const response = await fetch(chatEndpoint, {
         method: "POST",
         headers: {
+          ...getGuestChatHeaders(),
           "Content-Type": "application/json",
           Accept: "application/json, text/plain, text/event-stream",
         },

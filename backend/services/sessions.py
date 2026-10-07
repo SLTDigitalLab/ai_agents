@@ -74,7 +74,7 @@ def record_session(
     department: Optional[str] = None,
     job_title: Optional[str] = None,
 ) -> None:
-    """Upsert the user identity for a session and bump its last-active time.
+    """Record identity at creation; update activity only for the same user.
 
     Safe to call on every chat turn. The display name, department and job title
     are preserved when a later turn omits them (COALESCE), so we never overwrite
@@ -95,11 +95,11 @@ def record_session(
                         (%(agent_id)s, %(thread_id)s, %(user_id)s, %(user_name)s, %(department)s, %(job_title)s)
                     ON CONFLICT (agent_id, thread_id)
                     DO UPDATE SET
-                        user_id        = EXCLUDED.user_id,
                         user_name      = COALESCE(EXCLUDED.user_name, public.chat_sessions.user_name),
                         department     = COALESCE(EXCLUDED.department, public.chat_sessions.department),
                         job_title      = COALESCE(EXCLUDED.job_title, public.chat_sessions.job_title),
                         last_active_at = NOW()
+                    WHERE public.chat_sessions.user_id = EXCLUDED.user_id
                 """, {
                     "agent_id": agent_id,
                     "thread_id": thread_id,

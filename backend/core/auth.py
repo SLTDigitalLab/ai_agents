@@ -141,3 +141,12 @@ async def get_optional_user(
         return None
 
     return await get_current_user(creds)
+
+
+async def get_optional_verified_user(
+    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[dict]:
+    """Optional login without the development identity bypass."""
+    if creds is None:
+        return None
+    return await get_verified_user(creds)

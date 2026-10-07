@@ -1,5 +1,6 @@
 import { InteractionRequiredAuthError } from "@azure/msal-browser";
 import { loginRequest } from "./authConfig";
+import { getGuestChatHeaders } from "./chatSession";
 
 /**
  * Azure ID token for the Ask SLT API.
@@ -32,6 +33,10 @@ export async function getChatAuthHeaders(instance, account, extra = {}) {
     const token = await getApiIdToken(instance, account);
     if (token) {
         headers.Authorization = `Bearer ${token}`;
+    } else if (account) {
+        throw new Error("Please sign in again to continue your conversation.");
+    } else {
+        Object.assign(headers, getGuestChatHeaders());
     }
     return headers;
 }

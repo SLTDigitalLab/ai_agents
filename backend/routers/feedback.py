@@ -9,8 +9,10 @@ GET  /api/v1/admin/dashboard/feedback  → aggregate stats for admin panel
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from core.admin_auth import require_admin
+from core.auth import get_optional_verified_user
+from core.chat_access import chat_identity, scoped_thread_id, bind_chat_request, require_agent_identity
 import psycopg
 from psycopg.rows import dict_row
 
@@ -110,7 +112,9 @@ def _load_session_messages(agent_id: str, thread_id: str) -> list:
 # ── Submit / Toggle Feedback ──────────────────────────────────────────────
 
 @router.post("/api/v1/feedback", response_model=FeedbackResponse)
-async def submit_feedback(req: FeedbackRequest):
+async def submit_feedback(req: FeedbackRequest,
+                          user: dict | None = Depends(get_optional_verified_user),
+                          guest_session: str | None = Header(default=None, alias="X-Chat-Session", max_length=64)):
     """Submit or update feedback for an AI message.
 
     Uses upsert: if the user already rated this message, the rating is updated.
@@ -118,6 +122,8 @@ async def submit_feedback(req: FeedbackRequest):
     if req.agent_id not in VALID_AGENTS:
         raise HTTPException(status_code=404, detail=f"Unknown agent '{req.agent_id}'")
 
+    require_agent_identity(req.agent_id, user)
+    req = bind_chat_request(req, chat_identity(user, guest_session))
     _ensure_feedback_table()
 
     try:
@@ -167,11 +173,15 @@ async def submit_feedback(req: FeedbackRequest):
 # ── Delete Feedback ───────────────────────────────────────────────────────
 
 @router.delete("/api/v1/feedback")
-async def delete_feedback(req: FeedbackRequest):
+async def delete_feedback(req: FeedbackRequest,
+                          user: dict | None = Depends(get_optional_verified_user),
+                          guest_session: str | None = Header(default=None, alias="X-Chat-Session", max_length=64)):
     """Delete a user's feedback for a specific AI message."""
     if req.agent_id not in VALID_AGENTS:
         raise HTTPException(status_code=404, detail=f"Unknown agent '{req.agent_id}'")
 
+    require_agent_identity(req.agent_id, user)
+    req = bind_chat_request(req, chat_identity(user, guest_session))
     _ensure_feedback_table()
 
     try:
@@ -200,7 +210,9 @@ async def delete_feedback(req: FeedbackRequest):
 # ── Get Feedback for a Conversation ───────────────────────────────────────
 
 @router.get("/api/v1/feedback/{agent_id}/{thread_id}")
-async def get_thread_feedback(agent_id: str, thread_id: str):
+async def get_thread_feedback(agent_id: str, thread_id: str,
+                              user: dict | None = Depends(get_optional_verified_user),
+                              guest_session: str | None = Header(default=None, alias="X-Chat-Session", max_length=64)):
     """Return all feedback entries for a specific conversation thread.
 
     Returns a dict mapping message_index → rating for easy frontend lookup.
@@ -208,6 +220,9 @@ async def get_thread_feedback(agent_id: str, thread_id: str):
     if agent_id not in VALID_AGENTS:
         raise HTTPException(status_code=404, detail=f"Unknown agent '{agent_id}'")
 
+    require_agent_identity(agent_id, user)
+    identity = chat_identity(user, guest_session)
+    thread_id = scoped_thread_id(agent_id, thread_id, identity)
     _ensure_feedback_table()
 
     try:
@@ -229,7 +244,7 @@ async def get_thread_feedback(agent_id: str, thread_id: str):
                 feedback_map[idx] = {}
             feedback_map[idx][row["user_id"]] = row["rating"]
 
-        return {"feedback": feedback_map}
+        return {"feedback": feedback_map, "user_id": identity.user_id}
 
     except Exception as exc:
         logger.error(f"Failed to get feedback: {exc}")

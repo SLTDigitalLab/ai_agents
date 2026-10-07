@@ -1112,6 +1112,7 @@ const CodeBlock = ({ children, ...props }) => {
 
 // ── Feedback Buttons Component ──────────────────────────────────────
 const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, existingRating, onFeedback }) => {
+    const { instance, accounts } = useMsal();
     const [rating, setRating] = useState(existingRating || null);
     const [submitting, setSubmitting] = useState(false);
 
@@ -1131,7 +1132,7 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, ex
                 // Remove feedback from database
                 const res = await fetch(`${API_URL}/api/v1/feedback`, {
                     method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: await getChatAuthHeaders(instance, accounts[0], { 'Content-Type': 'application/json' }),
                     body: JSON.stringify({
                         agent_id: agentId,
                         thread_id: threadId,
@@ -1148,7 +1149,7 @@ const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, ex
                 // Submit or update feedback
                 const res = await fetch(`${API_URL}/api/v1/feedback`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: await getChatAuthHeaders(instance, accounts[0], { 'Content-Type': 'application/json' }),
                     body: JSON.stringify({
                         agent_id: agentId,
                         thread_id: threadId,
@@ -1327,10 +1328,10 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         setMessages(mappedMessages);
 
                         try {
-                            const fbRes = await fetch(`${API_URL}/api/v1/feedback/${agentConfig.id}/${currentThreadId}`);
+                            const fbRes = await fetch(`${API_URL}/api/v1/feedback/${agentConfig.id}/${currentThreadId}`, { headers });
                             if (fbRes.ok) {
                                 const fbData = await fbRes.json();
-                                const userId = user.username || "anonymous";
+                                const userId = fbData.user_id;
                                 const map = {};
                                 for (const [idx, users] of Object.entries(fbData.feedback || {})) {
                                     if (users[userId]) {

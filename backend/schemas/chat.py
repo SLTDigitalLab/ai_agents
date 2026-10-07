@@ -55,8 +55,8 @@ class ChatRequest(BaseModel):
         max_length=MAX_JOB_TITLE_CHARS,
         description="User's job title from Azure AD, for admin attribution.",
     )
-    thread_id: Optional[str] = Field(
-        default="default_thread",
+    thread_id: str = Field(
+        ...,
         min_length=1,
         max_length=MAX_THREAD_ID_CHARS,
         description="Conversation thread identifier.",
@@ -137,10 +137,10 @@ class ChatRequest(BaseModel):
     @field_validator("thread_id", mode="before")
     @classmethod
     def validate_thread_id(cls, value: Optional[str]) -> str:
-        if value is None:
-            return "default_thread"
+        if value is None or not str(value).strip():
+            raise ValueError("A thread_id is required.")
 
-        value = str(value).strip() or "default_thread"
+        value = str(value).strip()
 
         if not SAFE_THREAD_ID_PATTERN.fullmatch(value):
             raise ValueError("Invalid thread_id format.")
