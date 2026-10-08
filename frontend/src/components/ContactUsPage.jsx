@@ -316,7 +316,7 @@ const ContactUsPage = () => {
   };
 
   return (
-    <div className="h-screen flex flex-row relative overflow-hidden bg-[#fbfbfd] dark:bg-[#14171c] text-gray-900 dark:text-gray-100">
+    <div className="h-[100dvh] flex flex-row relative overflow-hidden bg-[#fbfbfd] dark:bg-[#14171c] text-gray-900 dark:text-gray-100">
       <AuthenticatedTemplate>
         <SidebarRail
           user={user}
@@ -361,7 +361,7 @@ const ContactUsPage = () => {
           </div>
         </motion.header>
 
-        <main className="flex-1 flex items-center justify-center px-4 sm:px-6 pb-20 pt-4 relative z-10">
+        <main className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex items-center justify-center px-4 sm:px-6 py-4 relative z-10">
           <AuthenticatedTemplate>
             <motion.div
               initial={{ opacity: 0, y: 14 }}
@@ -475,7 +475,7 @@ const ContactUsPage = () => {
           </UnauthenticatedTemplate>
         </main>
 
-        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center justify-center gap-1.5 pointer-events-auto cursor-default select-none z-20">
+        <div className="shrink-0 flex items-center justify-center gap-1.5 px-4 py-3 pointer-events-auto cursor-default select-none z-20">
           <span className="text-[0.65rem] uppercase tracking-wider font-semibold text-gray-500 dark:text-gray-400">
             Powered by
           </span>
