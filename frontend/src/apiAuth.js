@@ -33,10 +33,23 @@ export async function getChatAuthHeaders(instance, account, extra = {}) {
     const token = await getApiIdToken(instance, account);
     if (token) {
         headers.Authorization = `Bearer ${token}`;
+        const graphToken = await getGraphProfileToken(instance, account);
+        if (graphToken) headers['X-Graph-Token'] = graphToken;
     } else if (account) {
         throw new Error("Please sign in again to continue your conversation.");
     } else {
         Object.assign(headers, getGuestChatHeaders());
     }
     return headers;
+}
+
+// Profile enrichment is optional and must not interrupt chat with a login popup.
+export async function getGraphProfileToken(instance, account) {
+    if (!instance || !account) return null;
+    try {
+        const result = await instance.acquireTokenSilent({ scopes: ['User.Read'], account });
+        return result.accessToken || null;
+    } catch {
+        return null;
+    }
 }

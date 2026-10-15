@@ -23,7 +23,7 @@ import { useNavigate } from 'react-router-dom';
 import sltLogo    from '../assets/slt-mobitel-logo.png';
 import embryoLogo from '../assets/embryo-removebg.png';
 import { useTheme } from '../contexts/ThemeContext';
-import { getApiIdToken } from '../apiAuth';
+import { getApiIdToken, getGraphProfileToken } from '../apiAuth';
 
 import { PHASE, API_URL, WS_URL, SYSTEM_PROMPT } from '../components/voice_agent/constants';
 import { float32ToPcm16Base64, pcm16Base64ToFloat32 } from '../components/voice_agent/AudioHelpers';
@@ -78,6 +78,7 @@ const VoiceAgentPage = () => {
     const nextPlayTimeRef    = useRef(0);
     const activeAudioSourcesRef = useRef([]);
     const apiIdTokenRef      = useRef(null);
+    const graphTokenRef = useRef(null);
     const voiceThreadRef     = useRef(null);
 
 
@@ -228,6 +229,7 @@ const VoiceAgentPage = () => {
                 headers: {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${apiIdTokenRef.current}`,
+                    ...(graphTokenRef.current ? { 'X-Graph-Token': graphTokenRef.current } : {}),
                 },
                 body: JSON.stringify({
                     message: args.question,
@@ -317,6 +319,7 @@ const stopAllAudio = useCallback(() => {
             const apiIdToken = await getApiIdToken(instance, accounts[0]);
             if (!apiIdToken) throw new Error('Your sign-in session is unavailable. Please sign in again.');
             apiIdTokenRef.current = apiIdToken;
+            graphTokenRef.current = await getGraphProfileToken(instance, accounts[0]);
             voiceThreadRef.current = `voice_openai_${crypto.randomUUID()}`;
 
             const providerRes   = await fetch(`${API_URL}/api/v1/realtime/provider`, {
@@ -407,6 +410,7 @@ const stopAllAudio = useCallback(() => {
                             user_id: user.username || '',
                             user_name: user.name || '',
                             auth_token: apiIdTokenRef.current,
+                            graph_token: graphTokenRef.current,
                         }));
                         setStatusText('Verifying voice session...');
                         break;

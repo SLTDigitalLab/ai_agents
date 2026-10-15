@@ -27,6 +27,7 @@ from domain.archetypes.helpdesk_agent import INTERNAL_LLM_TAG
 from domain.tools.rag_tools import clear_thread_evidence, consume_thread_evidence
 from schemas.chat import ChatRequest
 from services.sessions import record_session
+from services.user_profile import enrich_chat_identity
 
 # --- 1. Import Langfuse CallbackHandler ---
 from langfuse.langchain import CallbackHandler
@@ -445,10 +446,13 @@ async def chat(
     request: ChatRequest,
     user: dict | None = Depends(get_optional_verified_user),
     guest_session: str | None = Header(default=None, alias="X-Chat-Session", max_length=64),
+    graph_token: str | None = Header(default=None, alias="X-Graph-Token", max_length=16384),
 ):
     """Handle an incoming chat message from the frontend with streaming."""
     _enforce_agent_auth(request.agent_id, user)
-    request = bind_chat_request(request, chat_identity(user, guest_session))
+    identity = chat_identity(user, guest_session)
+    identity = await enrich_chat_identity(identity, user, graph_token)
+    request = bind_chat_request(request, identity)
 
     try:
         builder_fn = get_agent_builder(request.agent_id)

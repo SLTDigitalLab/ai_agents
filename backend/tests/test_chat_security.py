@@ -98,6 +98,20 @@ class ChatSecurityTests(unittest.TestCase):
         self.assertEqual(self.record.call_args.kwargs['user_id'], 'owner@example.test')
         self.assertEqual(self.record.call_args.kwargs['thread_id'], stored['thread_id'])
 
+    def test_verified_graph_profile_is_saved_for_admin_display(self):
+        from services import user_profile
+        user_profile._cache.clear()
+        response = Mock(status_code=200)
+        response.json.return_value = {'id': 'owner', 'department': 'HR Operations', 'jobTitle': 'Manager'}
+        with patch.object(user_profile.httpx, 'AsyncClient') as factory:
+            factory.return_value.__aenter__.return_value.get = AsyncMock(return_value=response)
+            result = self.client.post('/api/v1/chat', json=self.body,
+                                      headers={**self.owner, 'X-Graph-Token': 'synthetic-profile-token'})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(self.record.call_args.kwargs['department'], 'HR Operations')
+        self.assertEqual(self.record.call_args.kwargs['job_title'], 'Manager')
+        self.assertEqual(self.record.call_args.kwargs['user_id'], 'owner@example.test')
+
     def test_non_streaming_voice_response_preserves_verified_identity(self):
         response = self.client.post('/api/v1/chat', json={**self.body, 'stream': False}, headers=self.owner)
         self.assertEqual(response.status_code, 200, response.text)
