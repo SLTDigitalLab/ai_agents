@@ -126,9 +126,9 @@ class VoiceSecurityTests(unittest.TestCase):
         client.post.return_value = upstream
         with patch.object(self.voice.httpx, 'AsyncClient') as factory:
             factory.return_value.__aenter__.return_value = client
-            answer = asyncio.run(self.voice._ask_agent('Question', 'employee', 'User', 'thread', 'signed-token'))
+            answer = asyncio.run(self.voice._ask_agent('Question', 'employee', 'User', 'thread', 'signed-token', graph_token='graph-profile-token'))
         self.assertEqual(answer, 'Complete answer')
-        self.assertEqual(client.post.call_args.kwargs['headers'], {'Authorization': 'Bearer signed-token'})
+        self.assertEqual(client.post.call_args.kwargs['headers'], {'Authorization': 'Bearer signed-token', 'X-Graph-Token': 'graph-profile-token'})
         self.assertFalse(client.post.call_args.kwargs['json']['stream'])
 
 

@@ -236,6 +236,7 @@ async def _ask_agent(
     user_name: str,
     thread_id: str,
     auth_token: str,
+    graph_token: str | None = None,
 ) -> str:
     """
     Sends the user's question to /api/v1/chat with stream=False.
@@ -246,7 +247,8 @@ async def _ask_agent(
         async with httpx.AsyncClient(timeout=settings.VOICE_CHAT_TIMEOUT_SECONDS) as client:
             resp = await client.post(
                 CHAT_API_URL,
-                headers={"Authorization": f"Bearer {auth_token}"} if auth_token else {},
+                headers={**({"Authorization": f"Bearer {auth_token}"} if auth_token else {}),
+                         **({"X-Graph-Token": graph_token} if graph_token else {})},
                 json={
                     "message":   question,
                     "agent_id":  "supervisor",
@@ -302,6 +304,9 @@ async def gemini_voice_proxy(websocket: WebSocket):
             if not isinstance(msg, dict) or msg.get("type") != "user_identity":
                 raise HTTPException(status_code=401, detail="Sign in to use voice.")
             session_auth_token = msg.get("auth_token")
+            session_graph_token = msg.get("graph_token")
+            if not isinstance(session_graph_token, str) or len(session_graph_token) > 16384:
+                session_graph_token = None
             if not isinstance(session_auth_token, str) or not session_auth_token:
                 raise HTTPException(status_code=401, detail="Sign in to use voice.")
             user = await get_verified_user(HTTPAuthorizationCredentials(
@@ -407,6 +412,7 @@ async def gemini_voice_proxy(websocket: WebSocket):
                                 user_name=session_name,
                                 thread_id=voice_thread,
                                 auth_token=session_auth_token,
+                                graph_token=session_graph_token,
                             )
                         logger.info("Voice tool result: id=%s, %d chars", call_id, len(answer))
                         result = {"output": answer}

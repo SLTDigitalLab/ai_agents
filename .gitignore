@@ -2,6 +2,7 @@
 .DS_Store
 Thumbs.db
 .claude
+security-evidence
 
 # Python
 __pycache__/

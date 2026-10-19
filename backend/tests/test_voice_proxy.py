@@ -88,7 +88,7 @@ class VoiceProxyTests(unittest.IsolatedAsyncioTestCase):
         self.patch = patch.dict('sys.modules', {'websockets': SimpleNamespace(connect=lambda *a, **k: self.gemini)})
         self.patch.start()
         await self.browser.incoming.put({'type': 'user_identity', 'user_id': 'employee',
-                                         'user_name': 'Test User', 'auth_token': 'test-auth-token'})
+                                         'user_name': 'Test User', 'auth_token': 'test-auth-token', 'graph_token': 'test-graph-token'})
         self.session = asyncio.create_task(self.ns['gemini_voice_proxy'](self.browser))
         await self.until(lambda: bool(self.gemini.sent))
 
@@ -139,6 +139,7 @@ class VoiceProxyTests(unittest.IsolatedAsyncioTestCase):
         await self.gemini.incoming.put(call('identity'))
         await self.until(lambda: len(self.results()) == 1)
         self.assertEqual(self.agent.call_args.kwargs['auth_token'], 'test-auth-token')
+        self.assertEqual(self.agent.call_args.kwargs['graph_token'], 'test-graph-token')
         self.assertEqual(self.agent.call_args.kwargs['user_id'], 'employee')
         self.assertEqual(self.agent.call_args.kwargs['user_name'], 'Test User')
         self.ns['get_verified_user'].assert_awaited_once()
