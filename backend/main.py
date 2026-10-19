@@ -100,7 +100,15 @@ app.mount(
 # --- 1. Add CORS Middleware ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"], # React URL
+    # Local Vite may choose its default (5173) or the next free port (3001),
+    # and developers may open it using localhost or 127.0.0.1.  Keep all
+    # supported local origins explicit so protected voice requests with an
+    # Authorization header pass the browser CORS preflight.
+    allow_origins=[
+        "http://localhost:3000", "http://127.0.0.1:3000",
+        "http://localhost:3001", "http://127.0.0.1:3001",
+        "http://localhost:5173", "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

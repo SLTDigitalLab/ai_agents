@@ -606,6 +606,15 @@ function App() {
   useEffect(() => {
     msalInstance.initialize().then(() => {
       msalInstance.handleRedirectPromise().then((response) => {
+        // MSAL stores the account in sessionStorage after a redirect, but it
+        // does not always mark it as active on a fresh local dev load. Restore
+        // it explicitly so AuthenticatedTemplate does not fall back to the
+        // sign-in screen immediately after a successful Microsoft login.
+        const signedInAccount = response?.account
+          || msalInstance.getActiveAccount()
+          || msalInstance.getAllAccounts()[0];
+        if (signedInAccount) msalInstance.setActiveAccount(signedInAccount);
+
         // Grab the agent the user originally wanted to log into
         const targetRoute = sessionStorage.getItem('lastAgent') || '/';
 
@@ -685,6 +694,8 @@ function App() {
           <Route path="/rainbowpages" element={<RainbowPages />} />
           <Route path="/contact-us" element={<ContactUsPage />} />
           <Route path="/voice" element={<VoiceAgentPage />} />
+          <Route path="/workmateai/voice" element={<VoiceAgentPage />} />
+          <Route path="/workmateai/voice/agent" element={<VoiceAgentPage avatarExperience />} />
 
           <Route path="/:agentType" element={<AgentWrapper />} />
         </Routes>

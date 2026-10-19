@@ -1,4 +1,11 @@
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const configuredApiUrl = import.meta.env.VITE_API_URL;
+
+// In Vite development, route through the dev-server proxy so calls originate
+// from http://localhost:3000. Deployed environments continue to use their
+// explicit VITE_API_URL setting.
+export const API_URL = configuredApiUrl || (
+    import.meta.env.DEV ? window.location.origin : 'http://localhost:8000'
+);
 export const WS_URL = API_URL.replace(/^http/, 'ws');
 
 export const PHASE = {
