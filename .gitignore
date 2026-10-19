@@ -50,3 +50,8 @@ backend/storage
 # LifeStore MCP runtime image cache (regenerated at runtime)
 mcp_lifestore/cache/
 mcp_lifestore/orders/
+
+# Local avatar/browser diagnostics must not be deployed.
+/chrome-*/
+/avatar-check*.png
+/luma-*.png

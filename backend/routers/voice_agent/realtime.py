@@ -374,6 +374,13 @@ async def gemini_voice_proxy(websocket: WebSocket):
                 "setup": {
                     "model": model_resource,
                     "generation_config": {
+                        # Output transcription is required by the browser's
+                        # dynamic Luma lip-sync planner. Gemini streams it
+                        # alongside native audio; it does not change the voice
+                        # provider, microphone, or Workmate response pipeline.
+                        # Gemini Live accepts exactly one response modality.
+                        # Output-audio transcription below is the separate
+                        # mechanism that streams text alongside AUDIO.
                         "response_modalities": ["AUDIO"],
                         "speech_config": {
                             "voice_config": {
@@ -381,6 +388,8 @@ async def gemini_voice_proxy(websocket: WebSocket):
                             }
                         },
                     },
+                    "input_audio_transcription": {},
+                    "output_audio_transcription": {},
                     "system_instruction": {"parts": [{"text": personalized_prompt}]},
                     "tools": [{"function_declarations": [WORKMATE_TOOL]}],
                 }
@@ -495,6 +504,11 @@ async def gemini_voice_proxy(websocket: WebSocket):
                             if task is not None:
                                 task.cancel()
 
+                        # Prefer output-audio transcription when available;
+                        # otherwise retain modelTurn text as the compatible
+                        # fallback. Forwarding both duplicates the response.
+                        output_text = server_content.get("outputTranscription", {}).get("text", "")
+
                         # forward audio and transcript to browser
                         for part in server_content.get("modelTurn", {}).get("parts", []):
                             if "inlineData" in part:
@@ -504,7 +518,7 @@ async def gemini_voice_proxy(websocket: WebSocket):
                                     "data":      inline.get("data", ""),
                                     "mime_type": inline.get("mimeType", "audio/pcm;rate=24000"),
                                 }))
-                            elif "text" in part:
+                            elif "text" in part and not output_text:
                                 await websocket.send_text(json.dumps({
                                     "type": "transcript",
                                     "role": "model",
@@ -517,6 +531,17 @@ async def gemini_voice_proxy(websocket: WebSocket):
                                 "type": "transcript",
                                 "role": "user",
                                 "text": input_text,
+                            }))
+
+                        # Native-audio sessions emit spoken output through
+                        # outputTranscription rather than modelTurn text. Send
+                        # it through the same browser transcript path so Luma
+                        # receives real response text while PCM is playing.
+                        if output_text:
+                            await websocket.send_text(json.dumps({
+                                "type": "transcript",
+                                "role": "model",
+                                "text": output_text,
                             }))
 
                         if server_content.get("turnComplete"):

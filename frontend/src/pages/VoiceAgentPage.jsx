@@ -32,6 +32,8 @@ import ListeningWave  from '../components/voice_agent/ListeningWave';
 import TranscriptPanel from '../components/voice_agent/TranscriptPanel';
 import CallControls   from '../components/voice_agent/CallControls';
 import UserMenu       from '../components/voice_agent/UserMenu';
+// Load the renderer and model only when the separate avatar page is opened.
+const LumaAvatarStage = React.lazy(() => import('../components/voice_agent/LumaAvatarStage'));
 
 // Capture microphone audio off the main thread. Keeping the worklet prevents
 // UI/rendering pauses from bursting queued audio at Gemini faster than real time.
@@ -50,7 +52,7 @@ registerProcessor('mic-processor', MicProcessor);
 const MIC_CHUNK_SAMPLES = 4096;
 
 //  Main component
-const VoiceAgentPage = () => {
+const VoiceAgentPage = ({ avatarExperience = false }) => {
     const { accounts, instance } = useMsal();
     const navigate  = useNavigate();
     const { theme, toggleTheme } = useTheme();
@@ -66,6 +68,10 @@ const VoiceAgentPage = () => {
     const [statusText,    setStatusText]    = useState('Ready to connect');
     const [errorMessage,  setErrorMessage]  = useState('');
     const [showUserMenu,  setShowUserMenu]  = useState(false);
+    const [lumaLoaded,    setLumaLoaded]    = useState(false);
+    const [lumaSpeech,    setLumaSpeech]    = useState(() => ({
+        revision: 0, text: '', duration: 0, active: false, getTime: () => 0,
+    }));
 
     // Refs
     const pcRef              = useRef(null);
@@ -80,6 +86,25 @@ const VoiceAgentPage = () => {
     const apiIdTokenRef      = useRef(null);
     const graphTokenRef = useRef(null);
     const voiceThreadRef     = useRef(null);
+    const assistantResponseRef = useRef('');
+    const assistantTurnActiveRef = useRef(false);
+    const lumaSpeechRef      = useRef(null);
+    const openAiSpeechFinishedRef = useRef(false);
+    const geminiTurnCompleteRef = useRef(false);
+    const geminiSpeechEndTimerRef = useRef(null);
+
+    const publishLumaSpeech = useCallback((patch) => {
+        const previous = lumaSpeechRef.current || {
+            revision: 0, text: '', duration: 0, active: false, getTime: () => 0,
+        };
+        const next = { ...previous, ...patch, revision: previous.revision + 1 };
+        lumaSpeechRef.current = next;
+        setLumaSpeech(next);
+    }, []);
+
+    const stopLumaSpeech = useCallback(() => {
+        publishLumaSpeech({ active: false, text: '', duration: 0, getTime: () => 0 });
+    }, [publishLumaSpeech]);
 
 
 
@@ -101,6 +126,11 @@ const VoiceAgentPage = () => {
     }, []);
 
     const cleanupGemini = useCallback(() => {
+        if (geminiSpeechEndTimerRef.current) {
+            clearTimeout(geminiSpeechEndTimerRef.current);
+            geminiSpeechEndTimerRef.current = null;
+        }
+        geminiTurnCompleteRef.current = false;
         if (micWorkletRef.current)      { micWorkletRef.current.disconnect(); micWorkletRef.current = null; }
         if (micStreamRef.current)       { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
         if (geminiWsRef.current)        { geminiWsRef.current.close();  geminiWsRef.current = null; }
@@ -111,7 +141,8 @@ const VoiceAgentPage = () => {
         if ('speechSynthesis' in window) window.speechSynthesis.cancel();
         if (audioContextRef.current)    { audioContextRef.current.close(); audioContextRef.current = null; }
         nextPlayTimeRef.current = 0;
-    }, []);
+        stopLumaSpeech();
+    }, [stopLumaSpeech]);
 
     const cleanupAll = useCallback(() => { cleanupOpenAI(); cleanupGemini(); }, [cleanupOpenAI, cleanupGemini]);
 
@@ -165,10 +196,39 @@ const VoiceAgentPage = () => {
                 setPhase(PHASE.CONNECTED);
                 break;
 
-            case 'response.audio.delta':       setIsSpeaking(true);  break;
-            case 'response.audio.done':        setIsSpeaking(false); break;
+            case 'response.audio.delta': {
+                const audio = openaiAudioRef.current;
+                const startTime = audio?.currentTime || 0;
+                if (!lumaSpeechRef.current?.active) {
+                    if (!assistantTurnActiveRef.current) {
+                        assistantResponseRef.current = '';
+                        assistantTurnActiveRef.current = true;
+                    }
+                    openAiSpeechFinishedRef.current = false;
+                    publishLumaSpeech({
+                        active: true,
+                        text: '',
+                        // OpenAI Realtime exposes a media playback clock but
+                        // not viseme timestamps. The clock remains exact; the
+                        // response-length timing below is a fallback estimate.
+                        duration: 0.5,
+                        getTime: () => Math.max(0, (openaiAudioRef.current?.currentTime || startTime) - startTime),
+                    });
+                }
+                setIsSpeaking(true);
+                break;
+            }
+            case 'response.audio.done':
+                setIsSpeaking(false);
+                // This signals that the server stopped sending packets; WebRTC
+                // may still have buffered audio that the user can hear. Keep
+                // the mouth driven by the media element's playback clock.
+                openAiSpeechFinishedRef.current = true;
+                break;
 
             case 'input_audio_buffer.speech_started':
+                assistantTurnActiveRef.current = false;
+                stopLumaSpeech();
                 setIsListening(true);  setStatusText('Listening...'); break;
             case 'input_audio_buffer.speech_stopped':
                 setIsListening(false); setStatusText('Processing...'); break;
@@ -181,6 +241,15 @@ const VoiceAgentPage = () => {
                 break;
 
             case 'response.audio_transcript.delta':
+                if (!assistantTurnActiveRef.current) {
+                    assistantResponseRef.current = '';
+                    assistantTurnActiveRef.current = true;
+                }
+                assistantResponseRef.current += msg.delta || '';
+                publishLumaSpeech({
+                    text: assistantResponseRef.current,
+                    duration: Math.max(0.5, assistantResponseRef.current.length / 12),
+                });
                 setTranscript(prev => {
                     const last = prev[prev.length - 1];
                     if (last?.role === 'assistant' && last?.partial)
@@ -269,7 +338,7 @@ const VoiceAgentPage = () => {
 
             default: break;
         }
-    }, [configureOpenAISession, sendOpenAIEvent, user.name, user.username]);
+    }, [configureOpenAISession, publishLumaSpeech, sendOpenAIEvent, stopLumaSpeech, user.name, user.username]);
 
     //  Gemini audio playback
     const playGeminiAudioChunk = useCallback((base64Data) => {
@@ -282,20 +351,43 @@ const VoiceAgentPage = () => {
     source.buffer = buffer;
     source.connect(ctx.destination);
     const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
+    // A new PCM packet means the provider is still extending this response.
+    // Never let an end timer from a previous packet cut its timeline short.
+    geminiTurnCompleteRef.current = false;
+    if (geminiSpeechEndTimerRef.current) {
+        clearTimeout(geminiSpeechEndTimerRef.current);
+        geminiSpeechEndTimerRef.current = null;
+    }
     source.start(startTime);
     nextPlayTimeRef.current = startTime + buffer.duration;
     setIsSpeaking(true);
+
+    const prior = lumaSpeechRef.current;
+    // A transcript can arrive before the first audio chunk. Do not clear it
+    // here, otherwise Luma receives audio with no words to animate against.
+    if (!prior?.active && !assistantTurnActiveRef.current) {
+        assistantResponseRef.current = '';
+        assistantTurnActiveRef.current = true;
+    }
+    const responseStart = prior?.active ? prior.startedAt : startTime;
+    const responseEnd = Math.max(prior?.endsAt || startTime, startTime + buffer.duration);
+    publishLumaSpeech({
+        active: true,
+        text: assistantResponseRef.current,
+        startedAt: responseStart,
+        endsAt: responseEnd,
+        duration: Math.max(0.001, responseEnd - responseStart),
+        // AudioContext time is the real playback/scheduling clock for Gemini
+        // PCM. Queued chunks are therefore kept in sync without timeouts.
+        getTime: () => Math.max(0, Math.min(responseEnd - responseStart, ctx.currentTime - responseStart)),
+    });
 
     // track this source so it can be stopped on interruption
     activeAudioSourcesRef.current.push(source);
     source.onended = () => {
         activeAudioSourcesRef.current = activeAudioSourcesRef.current.filter(s => s !== source);
-        if (activeAudioSourcesRef.current.length === 0 &&
-            nextPlayTimeRef.current <= ctx.currentTime) {
-            setIsSpeaking(false);
-        }
     };
-}, []);
+}, [publishLumaSpeech, stopLumaSpeech]);
 
 
 const stopAllAudio = useCallback(() => {
@@ -304,9 +396,33 @@ const stopAllAudio = useCallback(() => {
         try { source.stop(); } catch { /* already stopped */ }
     });
     activeAudioSourcesRef.current = [];
+    if (geminiSpeechEndTimerRef.current) {
+        clearTimeout(geminiSpeechEndTimerRef.current);
+        geminiSpeechEndTimerRef.current = null;
+    }
+    geminiTurnCompleteRef.current = false;
     nextPlayTimeRef.current = audioContextRef.current?.currentTime || 0;
     setIsSpeaking(false);
-}, []);
+    stopLumaSpeech();
+}, [stopLumaSpeech]);
+
+    const finishGeminiSpeechWhenPlaybackEnds = useCallback(() => {
+        if (geminiSpeechEndTimerRef.current) clearTimeout(geminiSpeechEndTimerRef.current);
+        const checkPlayback = () => {
+            if (!geminiTurnCompleteRef.current) return;
+            const ctx = audioContextRef.current;
+            const remaining = ctx ? nextPlayTimeRef.current - ctx.currentTime : 0;
+            if (remaining > 0.03) {
+                geminiSpeechEndTimerRef.current = setTimeout(checkPlayback, Math.max(25, Math.ceil(remaining * 1000) + 10));
+                return;
+            }
+            geminiSpeechEndTimerRef.current = null;
+            geminiTurnCompleteRef.current = false;
+            setIsSpeaking(false);
+            stopLumaSpeech();
+        };
+        checkPlayback();
+    }, [stopLumaSpeech]);
 
     //  Start conversation
     const startConversation = async () => {
@@ -425,9 +541,22 @@ const stopAllAudio = useCallback(() => {
                         break;
                     case 'transcript':
                         if (msg.role === 'user') {
+                            assistantTurnActiveRef.current = false;
                             setIsListening(false);
                             setTranscript(prev => [...prev, { role: 'user', text: msg.text }]);
                         } else {
+                            if (!assistantTurnActiveRef.current) {
+                                assistantResponseRef.current = '';
+                                assistantTurnActiveRef.current = true;
+                            }
+                            assistantResponseRef.current += msg.text || '';
+                            if (lumaSpeechRef.current?.active) {
+                                // Preserve the duration calculated from the
+                                // queued PCM. A text-length estimate here used
+                                // to shrink a 13-second response to its first
+                                // few seconds of visemes.
+                                publishLumaSpeech({ text: assistantResponseRef.current });
+                            }
                             setTranscript(prev => {
                                 const last = prev[prev.length - 1];
                                 if (last?.role === 'assistant' && last?.partial)
@@ -444,6 +573,12 @@ const stopAllAudio = useCallback(() => {
                                 return [...prev.slice(0, -1), { role: 'assistant', text: last.text }];
                             return prev;
                         });
+                        // WebSocket ordering guarantees every audio packet for
+                        // this turn was received before this marker. End Luma
+                        // against AudioContext's scheduled playback clock, not
+                        // when an individual short PCM buffer finishes.
+                        geminiTurnCompleteRef.current = true;
+                        finishGeminiSpeechWhenPlaybackEnds();
                         break;
                     case 'listening':
                         setIsListening(true); setStatusText('Listening...'); break;
@@ -624,7 +759,7 @@ const stopAllAudio = useCallback(() => {
 
                     {/* Greeting — only on idle */}
                     <AnimatePresence>
-                        {phase === PHASE.IDLE && (
+                        {phase === PHASE.IDLE && !avatarExperience && (
                             <Motion.div
                                 initial={{ opacity: 0, y: -8 }}
                                 animate={{ opacity: 1, y: 0 }}
@@ -638,8 +773,18 @@ const stopAllAudio = useCallback(() => {
                         )}
                     </AnimatePresence>
 
-                    {/* Orb */}
-                    <VoiceOrb phase={phase} isSpeaking={isSpeaking} isListening={isListening} theme={theme} />
+                    {/* The original /voice route keeps its orb. Luma is isolated to the agent route. */}
+                    {avatarExperience ? (
+                        <React.Suspense fallback={<p role="status">Loading avatar...</p>}>
+                            <LumaAvatarStage
+                                isSpeaking={isSpeaking}
+                                speech={lumaSpeech}
+                                onLoaded={setLumaLoaded}
+                            />
+                        </React.Suspense>
+                    ) : (
+                        <VoiceOrb phase={phase} isSpeaking={isSpeaking} isListening={isListening} theme={theme} />
+                    )}
 
                     {/* Wave */}
                     <div className="mt-4 h-6 flex items-center justify-center">
@@ -649,6 +794,10 @@ const stopAllAudio = useCallback(() => {
                             <div className="h-5" />
                         )}
                     </div>
+
+                    {avatarExperience && !lumaLoaded && (
+                        <p className="mt-2 text-xs text-amber-500 dark:text-amber-300">Using the avatar fallback while Luma loads.</p>
+                    )}
 
                     {/* Status text */}
                     <Motion.p

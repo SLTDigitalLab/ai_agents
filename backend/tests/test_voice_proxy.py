@@ -129,6 +129,20 @@ class VoiceProxyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.results()[0], {'id': 'one', 'name': 'ask_workmate_ai',
                                           'response': {'output': 'Your leave balance is 14 days.'}})
 
+    async def test_audio_transcript_is_forwarded_once_for_avatar(self):
+        setup = self.gemini.sent[0]['setup']
+        self.assertEqual(setup['generation_config']['response_modalities'], ['AUDIO'])
+        self.assertEqual(setup['output_audio_transcription'], {})
+        await self.gemini.incoming.put({'serverContent': {
+            'outputTranscription': {'text': 'Hello from Workmate'},
+            'modelTurn': {'parts': [{'text': 'duplicate fallback'}]},
+            'turnComplete': True,
+        }})
+        await self.until(lambda: any(m.get('type') == 'turn_complete' for m in self.browser.sent))
+        transcripts = [m['text'] for m in self.browser.sent
+                       if m.get('type') == 'transcript' and m.get('role') == 'model']
+        self.assertEqual(transcripts, ['Hello from Workmate'])
+
     async def test_empty_question_never_reaches_chat(self):
         await self.gemini.incoming.put(call('empty', '  '))
         await self.until(lambda: len(self.results()) == 1)
