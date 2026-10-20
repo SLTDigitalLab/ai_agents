@@ -23,10 +23,18 @@ VLM_TEMPERATURE = 0
 
 VISUAL_DETECTION_PROMPT = (
     "Analyze this document page/slide/chart image carefully.\n"
-    "If it contains a flowchart, diagram, process flow, organizational chart, or data chart:\n"
-    "1. Identify the title/heading of the visual.\n"
-    "2. Transcribe all text within the diagram nodes and labels.\n"
-    "3. Provide a step-by-step narrative of the process flow, decision logic, relationships, and outcomes.\n"
+    "If it contains a flowchart, diagram, process flow, organizational chart, or data chart, "
+    "reply in EXACTLY this format:\n"
+    "Title: <the visual's title or heading; if none, a short descriptive title>\n"
+    "Topic: <the business topic in plain words, e.g. 'performance management and appraisal'>\n"
+    "Type: <flowchart | process diagram | organizational chart | table | chart | other>\n"
+    "Keywords: <8-12 comma-separated words or phrases an employee might use when asking about this "
+    "visual; use only words that appear in the visual or are obviously implied by it>\n"
+    "Questions answered: <3-5 short example questions this visual helps answer>\n"
+    "Text in visual: <transcribe all text within the diagram nodes and labels>\n"
+    "Process description: <step-by-step narrative of the process flow, decision logic, "
+    "relationships, and outcomes>\n"
+    "Do not invent details that are not visible.\n"
     "If the image ONLY contains standard text paragraphs or basic formatting without meaningful visuals, reply ONLY with 'NO_VISUAL_CONTENT'."
 )
 
@@ -110,6 +118,18 @@ def save_visual_record(
     return record
 
 
+def build_visual_chunk_text(
+    source_file: str, page_number: int, visual_description: str
+) -> str:
+    """Prefix the description with document name and page so topic words match questions."""
+    document_name = Path(source_file).stem.replace("_", " ").strip() or source_file
+    return (
+        f"[VISUAL ANALYSIS - Page {page_number}]\n"
+        f"Document: {document_name} | Page: {page_number}\n"
+        f"{visual_description}"
+    )
+
+
 def create_vector_document(
     doc_id: str,
     source_file: str,
@@ -120,7 +140,7 @@ def create_vector_document(
 ) -> Document:
     """Create a LangChain Document from visual evidence."""
     return Document(
-        page_content=f"[VISUAL ANALYSIS - Page {page_number}]\n{visual_description}",
+        page_content=build_visual_chunk_text(source_file, page_number, visual_description),
         metadata={
             "doc_id": doc_id,
             "source": source_file,

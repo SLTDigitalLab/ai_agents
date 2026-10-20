@@ -133,6 +133,14 @@ class Settings(BaseSettings):
     EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
     EVIDENCE_RENDER_ZOOM: float = 1.75
     EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
+
+    # Minimum raw cosine similarity (query embedding vs a visual_description
+    # chunk's own dense embedding) required before that chunk's image is
+    # attached as evidence. Guards against unrelated images surfacing just
+    # because a chunk made it into the hybrid search's top-k — the RRF fusion
+    # score reflects rank among candidates, not absolute relevance to the
+    # query, so it can't be used for this check.
+    VISUAL_EVIDENCE_MIN_SCORE: float = 0.45
     VISUAL_AUDIT_ALL_PDF_PAGES: bool = False
 
     # ── Ask LifeStore cart + PayHere checkout ──────────────────────────────
