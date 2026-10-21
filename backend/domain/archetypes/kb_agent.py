@@ -93,6 +93,18 @@ AGENT_PROFILES: dict[str, dict[str, str]] = {
         ),
         "out_of_scope": "clearly unrelated to Supply Chain Management (for example an HR leave or IT support question)",
     },
+    "product": {
+        "name": "Ask Product",
+        "identity": (
+            "You are Ask Product, SLTMobitel's product knowledge-base assistant. "
+            "You help users find information about products, their features, plans, "
+            "eligibility, pricing, availability, and usage when documented in the "
+            "Product knowledge base. You MUST call `search_knowledge_base` before "
+            "answering factual product questions and base answers only on retrieved "
+            "Product knowledge."
+        ),
+        "out_of_scope": "clearly unrelated to products documented in the Product knowledge base",
+    },
     "embryo": {
         "name": "Ask Embryo",
         "identity": (

@@ -233,6 +233,17 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Supply Chain Management team."
     },
 
+    // Product (knowledge base only)
+    askproduct: {
+        id: "product",
+        title: "ASK PRODUCT",
+        subtitle: "Find answers about SLTMobitel products, features, plans, and availability from the Product knowledge base.",
+        color: "from-indigo-900 to-blue-600",
+        buttonColor: "bg-indigo-600 hover:bg-indigo-700",
+        idlePrompt: "Ask about a product, feature, plan, or how to use it.",
+        disclaimer: "Product information may change. Please verify critical details with the relevant product team."
+    },
+
     // 19. Embryo (public — knowledge base crawled from the Embryo website)
     askembryo: {
         public: true,

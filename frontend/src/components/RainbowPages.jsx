@@ -45,7 +45,8 @@ const AGENT_TAGS = {
   network: ["IP Routing", "WAN/LAN Setup", "NOC Alerts", "Fiber"],
   legal: ["Agreements", "Statutory Checks", "Court Files", "Contracts"],
   marketing: ["Brand Policy", "Campaigns", "Promotions", "Logo Rules"],
-  scm: ["Procurement", "Sourcing", "Vendors", "Inventory", "Logistics"]
+  scm: ["Procurement", "Sourcing", "Vendors", "Inventory", "Logistics"],
+  product: ["Products", "Features", "Plans", "Availability"]
 };
 
 // Map agent ID to Category Grouping
@@ -63,7 +64,8 @@ const AGENT_CATEGORIES = {
   network: "Technical Support",
   legal: "Finance & Legal",
   marketing: "General",
-  scm: "Finance & Legal"
+  scm: "Finance & Legal",
+  product: "General"
 };
 
 // Animation variants

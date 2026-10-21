@@ -1,0 +1,424 @@
+{
+  "git_revision": "78ca190f6376d66d4533599111b11da059a969de",
+  "working_tree_may_include_changes": true,
+  "dataset_sha256": "93456d00388373a88016223493ed61168bc72fc33dd4b9ed1b228d7adec3cc92",
+  "label_status": "Synthetic draft labels based on repository scopes; not department-reviewed or production-representative",
+  "split": "development",
+  "configuration": {
+    "ROUTING_EMBEDDING_PROVIDER": "openai",
+    "ROUTING_EMBEDDING_MODEL": "text-embedding-3-small",
+    "SUPERVISOR_DECISIONS_MODEL": "gpt-6-luna",
+    "SUPERVISOR_DECISIONS_THRESHOLD": 0.8,
+    "SUPERVISOR_DECISIONS_UNCERTAIN_THRESHOLD": 0.4
+  },
+  "records": [
+    {
+      "case_id": "hr-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "admin"
+        ],
+        "routing_reason": "multi_delegate:hr+admin",
+        "routing_scores": {
+          "hr": 0.337,
+          "admin": 0.306,
+          "it": 0.22,
+          "legal": 0.2135,
+          "marketing": 0.2125,
+          "finance": 0.2052,
+          "enterprise_business": 0.2007,
+          "consumer_business": 0.1727,
+          "cia": 0.1463,
+          "network": 0.1359
+        },
+        "delegation_query": "Which documents must an employee provide to add a new child to medical benefits?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 15134.56
+    },
+    {
+      "case_id": "hr-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.53,
+          "out_of_scope": 0.02,
+          "general_help": 0.0,
+          "unsupported_part": 0.24
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 4672.33,
+          "usage": {
+            "input_tokens": 4623,
+            "output_tokens": 0,
+            "total_tokens": 4623
+          },
+          "prompt_version": "workmate-departments-v1",
+          "prompt_hash": "e24a06c9948be954",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": true,
+        "clarification_options": [
+          "hr"
+        ],
+        "original_query": "Which documents must an employee provide to add a new child to medical benefits?",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "clarify",
+        "routing_reason": "decisions_uncertain"
+      },
+      "latency_ms": 4673.02
+    },
+    {
+      "case_id": "finance-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.98,
+          "admin": 0.01,
+          "it": 0.0,
+          "cia": 0.2,
+          "network": 0.0,
+          "legal": 0.04,
+          "marketing": 0.0,
+          "enterprise_business": 0.01,
+          "consumer_business": 0.01,
+          "needs_clarification": 0.59,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.04
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 2242.59,
+          "usage": {
+            "input_tokens": 4624,
+            "output_tokens": 0,
+            "total_tokens": 4624
+          },
+          "prompt_version": "workmate-departments-v1",
+          "prompt_hash": "e24a06c9948be954",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": true,
+        "clarification_options": [
+          "finance"
+        ],
+        "original_query": "A supplier invoice does not match the goods receipt. What is the approval procedure?",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "clarify",
+        "routing_reason": "decisions_uncertain"
+      },
+      "latency_ms": 2243.0
+    },
+    {
+      "case_id": "finance-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "finance",
+        "routing_reason": "vector_match:finance",
+        "routing_scores": {
+          "finance": 0.4305,
+          "admin": 0.3295,
+          "legal": 0.3084,
+          "marketing": 0.3029,
+          "enterprise_business": 0.2765,
+          "hr": 0.2617,
+          "cia": 0.2315,
+          "consumer_business": 0.2305,
+          "it": 0.221,
+          "network": 0.195
+        },
+        "delegation_query": "A supplier invoice does not match the goods receipt. What is the approval procedure?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 375.53
+    },
+    {
+      "case_id": "admin-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "it"
+        ],
+        "routing_reason": "multi_delegate:admin+it",
+        "routing_scores": {
+          "admin": 0.3077,
+          "it": 0.2962,
+          "finance": 0.2139,
+          "hr": 0.1823,
+          "legal": 0.1821,
+          "enterprise_business": 0.1806,
+          "network": 0.1638,
+          "marketing": 0.1632,
+          "consumer_business": 0.151,
+          "cia": 0.0923
+        },
+        "delegation_query": "Our office air conditioner has stopped cooling. How do we request repairs?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 252.78
+    },
+    {
+      "case_id": "admin-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.02,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.25,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.02
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 1606.3,
+          "usage": {
+            "input_tokens": 4622,
+            "output_tokens": 0,
+            "total_tokens": 4622
+          },
+          "prompt_version": "workmate-departments-v1",
+          "prompt_hash": "e24a06c9948be954",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "admin",
+        "routed_agent_ids": [
+          "admin"
+        ],
+        "delegation_query": "Our office air conditioner has stopped cooling. How do we request repairs?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 1606.71
+    }
+  ],
+  "summary": {
+    "legacy": {
+      "n": 3,
+      "exact_accuracy": 0.3333333333333333,
+      "action_accuracy": 0.3333333333333333,
+      "required_agent_recall": 1.0,
+      "agent_precision": 0.6,
+      "missed_agents": 0,
+      "unnecessary_agents": 2,
+      "errors": 0,
+      "fallbacks": 0,
+      "p50_ms": 375.53,
+      "p95_ms": 15134.56,
+      "by_language": {
+        "en": {
+          "n": 3,
+          "exact_accuracy": 0.3333333333333333,
+          "action_accuracy": 0.3333333333333333,
+          "required_agent_recall": 1.0,
+          "agent_precision": 0.6,
+          "missed_agents": 0,
+          "unnecessary_agents": 2,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 375.53,
+          "p95_ms": 15134.56
+        }
+      },
+      "multi_department": {
+        "n": 0,
+        "exact_accuracy": null,
+        "action_accuracy": null,
+        "required_agent_recall": null,
+        "agent_precision": null,
+        "missed_agents": 0,
+        "unnecessary_agents": 0,
+        "errors": 0,
+        "fallbacks": 0,
+        "p50_ms": null,
+        "p95_ms": null
+      }
+    },
+    "decisions": {
+      "n": 3,
+      "exact_accuracy": 0.3333333333333333,
+      "action_accuracy": 0.3333333333333333,
+      "required_agent_recall": 0.3333333333333333,
+      "agent_precision": 1.0,
+      "missed_agents": 2,
+      "unnecessary_agents": 0,
+      "errors": 0,
+      "fallbacks": 0,
+      "p50_ms": 2243.0,
+      "p95_ms": 4673.02,
+      "by_language": {
+        "en": {
+          "n": 3,
+          "exact_accuracy": 0.3333333333333333,
+          "action_accuracy": 0.3333333333333333,
+          "required_agent_recall": 0.3333333333333333,
+          "agent_precision": 1.0,
+          "missed_agents": 2,
+          "unnecessary_agents": 0,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 2243.0,
+          "p95_ms": 4673.02
+        }
+      },
+      "multi_department": {
+        "n": 0,
+        "exact_accuracy": null,
+        "action_accuracy": null,
+        "required_agent_recall": null,
+        "agent_precision": null,
+        "missed_agents": 0,
+        "unnecessary_agents": 0,
+        "errors": 0,
+        "fallbacks": 0,
+        "p50_ms": null,
+        "p95_ms": null
+      }
+    },
+    "paired": {
+      "wins": 1,
+      "losses": 1,
+      "ties": 1,
+      "exact_accuracy_delta": 0,
+      "case_bootstrap_95_interval": [
+        -1,
+        1
+      ],
+      "disagreements": [
+        {
+          "case_id": "admin-1",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "it"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "finance-1",
+          "repeat": 0,
+          "legacy": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [
+              "finance"
+            ],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          }
+        },
+        {
+          "case_id": "hr-1",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "admin"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [
+              "hr"
+            ],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          }
+        }
+      ]
+    },
+    "interpretation": "Routing-only results. Required-agent recall does not prove every subquestion was answered. Synthetic labels need department review; no production-improvement claim or automatic promotion."
+  }
+}

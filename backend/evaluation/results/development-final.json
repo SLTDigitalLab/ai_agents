@@ -1,0 +1,4976 @@
+{
+  "created_at_utc": "2026-10-15T17:02:56.564567+00:00",
+  "git_revision": "78ca190f6376d66d4533599111b11da059a969de",
+  "source_sha256": {
+    "domain/archetypes/supervisor_agent.py": "1aef0106e5133cc39f4884eeb695fa5b13d1564910e701e0f8dc4471dff2040c",
+    "domain/routing/decisions.py": "cc816e29f6d8dd3d0ab11165c32d893bb95ac1854ebb4b0a825b64245cdc1bd2",
+    "domain/config/supervisor_routing.py": "105ea9f3f82a10d38af758f2d721d18e275a1504bac114b2a4e83c2435304cd4",
+    "domain/routing/evaluation.py": "51aa852bc7e87b42fb2283bf4467b3f0a0200fca0b2a74c39262178642f1717d"
+  },
+  "working_tree_may_include_changes": true,
+  "dataset_sha256": "93456d00388373a88016223493ed61168bc72fc33dd4b9ed1b228d7adec3cc92",
+  "label_status": "Synthetic draft labels based on repository scopes; not department-reviewed or production-representative",
+  "split": "development",
+  "configuration": {
+    "ROUTING_EMBEDDING_PROVIDER": "openai",
+    "ROUTING_EMBEDDING_MODEL": "text-embedding-3-small",
+    "SUPERVISOR_DECISIONS_MODEL": "gpt-6-luna",
+    "SUPERVISOR_DECISIONS_THRESHOLD": 0.8,
+    "SUPERVISOR_DECISIONS_UNCERTAIN_THRESHOLD": 0.4,
+    "LLM_PROVIDER": "openai",
+    "LLM_MODEL": "gpt-5.6-luna"
+  },
+  "records": [
+    {
+      "case_id": "hr-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "admin"
+        ],
+        "routing_reason": "multi_delegate:hr+admin",
+        "routing_scores": {
+          "hr": 0.3369,
+          "admin": 0.306,
+          "it": 0.22,
+          "legal": 0.2136,
+          "marketing": 0.2125,
+          "finance": 0.2052,
+          "enterprise_business": 0.2006,
+          "consumer_business": 0.1727,
+          "cia": 0.1463,
+          "network": 0.1359
+        },
+        "delegation_query": "Which documents must an employee provide to add a new child to medical benefits?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 7204.98
+    },
+    {
+      "case_id": "hr-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 913.94,
+          "usage": {
+            "input_tokens": 5138,
+            "output_tokens": 0,
+            "total_tokens": 5138
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "Which documents must an employee provide to add a new child to medical benefits?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 914.8
+    },
+    {
+      "case_id": "finance-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 1.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 921.27,
+          "usage": {
+            "input_tokens": 5139,
+            "output_tokens": 0,
+            "total_tokens": 5139
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "finance",
+        "routed_agent_ids": [
+          "finance"
+        ],
+        "delegation_query": "A supplier invoice does not match the goods receipt. What is the approval procedure?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 922.03
+    },
+    {
+      "case_id": "finance-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "finance",
+        "routing_reason": "vector_match:finance",
+        "routing_scores": {
+          "finance": 0.4305,
+          "admin": 0.3295,
+          "legal": 0.3085,
+          "marketing": 0.3029,
+          "enterprise_business": 0.2765,
+          "hr": 0.2616,
+          "cia": 0.2315,
+          "consumer_business": 0.2305,
+          "it": 0.221,
+          "network": 0.195
+        },
+        "delegation_query": "A supplier invoice does not match the goods receipt. What is the approval procedure?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 592.05
+    },
+    {
+      "case_id": "admin-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "it"
+        ],
+        "routing_reason": "multi_delegate:admin+it",
+        "routing_scores": {
+          "admin": 0.3077,
+          "it": 0.2962,
+          "finance": 0.2139,
+          "legal": 0.1822,
+          "hr": 0.1822,
+          "enterprise_business": 0.1806,
+          "network": 0.1637,
+          "marketing": 0.1632,
+          "consumer_business": 0.151,
+          "cia": 0.0923
+        },
+        "delegation_query": "Our office air conditioner has stopped cooling. How do we request repairs?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 267.29
+    },
+    {
+      "case_id": "admin-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 916.79,
+          "usage": {
+            "input_tokens": 5137,
+            "output_tokens": 0,
+            "total_tokens": 5137
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "admin",
+        "routed_agent_ids": [
+          "admin"
+        ],
+        "delegation_query": "Our office air conditioner has stopped cooling. How do we request repairs?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 917.05
+    },
+    {
+      "case_id": "it-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 809.6,
+          "usage": {
+            "input_tokens": 5137,
+            "output_tokens": 0,
+            "total_tokens": 5137
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "it",
+        "routed_agent_ids": [
+          "it"
+        ],
+        "delegation_query": "My employee laptop login is locked. How can I get access restored?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 810.0
+    },
+    {
+      "case_id": "it-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "it",
+        "routing_reason": "vector_match:it",
+        "routing_scores": {
+          "it": 0.4507,
+          "hr": 0.3,
+          "admin": 0.2443,
+          "enterprise_business": 0.2224,
+          "legal": 0.1822,
+          "finance": 0.161,
+          "consumer_business": 0.155,
+          "network": 0.1465,
+          "cia": 0.1269,
+          "marketing": 0.1266
+        },
+        "delegation_query": "My employee laptop login is locked. How can I get access restored?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 278.36
+    },
+    {
+      "case_id": "cia-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "cia",
+        "routing_reason": "medium_confidence:cia",
+        "routing_scores": {
+          "cia": 0.3658,
+          "finance": 0.2212,
+          "admin": 0.2118,
+          "legal": 0.2085,
+          "marketing": 0.208,
+          "enterprise_business": 0.1922,
+          "it": 0.1606,
+          "hr": 0.1299,
+          "network": 0.1153,
+          "consumer_business": 0.0742
+        },
+        "delegation_query": "How is independence maintained when internal auditors review their own previous work?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 359.54
+    },
+    {
+      "case_id": "cia-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 1.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 822.56,
+          "usage": {
+            "input_tokens": 5136,
+            "output_tokens": 0,
+            "total_tokens": 5136
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "cia",
+        "routed_agent_ids": [
+          "cia"
+        ],
+        "delegation_query": "How is independence maintained when internal auditors review their own previous work?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 823.03
+    },
+    {
+      "case_id": "network-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 1.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 910.62,
+          "usage": {
+            "input_tokens": 5143,
+            "output_tokens": 0,
+            "total_tokens": 5143
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "network",
+        "routed_agent_ids": [
+          "network"
+        ],
+        "delegation_query": "What procedure should the NOC use to investigate an OSPF adjacency failure in the telecom core?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 911.08
+    },
+    {
+      "case_id": "network-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "network",
+        "routing_reason": "vector_match:network",
+        "routing_scores": {
+          "network": 0.6557,
+          "enterprise_business": 0.3545,
+          "it": 0.2944,
+          "consumer_business": 0.2841,
+          "marketing": 0.2565,
+          "admin": 0.2402,
+          "legal": 0.2287,
+          "finance": 0.227,
+          "cia": 0.2215,
+          "hr": 0.2038
+        },
+        "delegation_query": "What procedure should the NOC use to investigate an OSPF adjacency failure in the telecom core?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 258.01
+    },
+    {
+      "case_id": "legal-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "legal",
+        "routing_reason": "vector_match:legal",
+        "routing_scores": {
+          "legal": 0.4178,
+          "enterprise_business": 0.3281,
+          "admin": 0.2661,
+          "finance": 0.2567,
+          "marketing": 0.2458,
+          "hr": 0.2398,
+          "cia": 0.2378,
+          "it": 0.2123,
+          "network": 0.2058,
+          "consumer_business": 0.1706
+        },
+        "delegation_query": "What clauses are required in an NDA before sharing confidential material with a partner?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 342.43
+    },
+    {
+      "case_id": "legal-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 1.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.28
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 791.83,
+          "usage": {
+            "input_tokens": 5138,
+            "output_tokens": 0,
+            "total_tokens": 5138
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "legal",
+        "routed_agent_ids": [
+          "legal"
+        ],
+        "delegation_query": "What clauses are required in an NDA before sharing confidential material with a partner?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 792.27
+    },
+    {
+      "case_id": "marketing-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 1.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 866.1,
+          "usage": {
+            "input_tokens": 5134,
+            "output_tokens": 0,
+            "total_tokens": 5134
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "marketing",
+        "routed_agent_ids": [
+          "marketing"
+        ],
+        "delegation_query": "Which corporate logo rules apply to a sponsored event backdrop?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 866.63
+    },
+    {
+      "case_id": "marketing-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "marketing",
+        "routing_reason": "vector_match:marketing",
+        "routing_scores": {
+          "marketing": 0.4718,
+          "enterprise_business": 0.3441,
+          "legal": 0.3074,
+          "admin": 0.2699,
+          "finance": 0.2563,
+          "cia": 0.2469,
+          "consumer_business": 0.2442,
+          "network": 0.2364,
+          "hr": 0.2225,
+          "it": 0.1966
+        },
+        "delegation_query": "Which corporate logo rules apply to a sponsored event backdrop?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 303.81
+    },
+    {
+      "case_id": "enterprise-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "enterprise_business",
+          "network"
+        ],
+        "routing_reason": "both_strongly_scored:enterprise_business+network",
+        "routing_scores": {
+          "enterprise_business": 0.5317,
+          "network": 0.4432,
+          "it": 0.3908,
+          "consumer_business": 0.3719,
+          "admin": 0.3296,
+          "legal": 0.3238,
+          "cia": 0.3091,
+          "finance": 0.2899,
+          "marketing": 0.2891,
+          "hr": 0.2588
+        },
+        "delegation_query": "What dedicated connectivity and managed security options are offered to a corporate branch network?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 307.01
+    },
+    {
+      "case_id": "enterprise-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.36,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 1.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 842.68,
+          "usage": {
+            "input_tokens": 5138,
+            "output_tokens": 0,
+            "total_tokens": 5138
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "enterprise_business",
+        "routed_agent_ids": [
+          "enterprise_business"
+        ],
+        "delegation_query": "What dedicated connectivity and managed security options are offered to a corporate branch network?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 843.18
+    },
+    {
+      "case_id": "consumer-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 1.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.19
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 811.57,
+          "usage": {
+            "input_tokens": 5136,
+            "output_tokens": 0,
+            "total_tokens": 5136
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "consumer_business",
+        "routed_agent_ids": [
+          "consumer_business"
+        ],
+        "delegation_query": "Which home fibre package includes PEO TV for a residential customer?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 812.06
+    },
+    {
+      "case_id": "consumer-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "consumer_business",
+          "network"
+        ],
+        "routing_reason": "both_strongly_scored:consumer_business+network",
+        "routing_scores": {
+          "consumer_business": 0.5385,
+          "network": 0.4315,
+          "enterprise_business": 0.3464,
+          "hr": 0.2097,
+          "it": 0.1959,
+          "admin": 0.1861,
+          "marketing": 0.1823,
+          "finance": 0.171,
+          "legal": 0.1569,
+          "cia": 0.119
+        },
+        "delegation_query": "Which home fibre package includes PEO TV for a residential customer?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 296.0
+    },
+    {
+      "case_id": "multi-2a",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "hr"
+        ],
+        "routing_reason": "both_strongly_scored:admin+hr",
+        "routing_scores": {
+          "admin": 0.6089,
+          "hr": 0.6072,
+          "finance": 0.3186,
+          "it": 0.3164,
+          "enterprise_business": 0.2988,
+          "marketing": 0.2935,
+          "legal": 0.2841,
+          "consumer_business": 0.2335,
+          "network": 0.215,
+          "cia": 0.2057
+        },
+        "delegation_query": "Explain sick leave eligibility and the process for booking office transport.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 270.58
+    },
+    {
+      "case_id": "multi-2a",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 901.33,
+          "usage": {
+            "input_tokens": 5135,
+            "output_tokens": 0,
+            "total_tokens": 5135
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "admin"
+        ],
+        "delegation_query": "Explain sick leave eligibility and the process for booking office transport.",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 901.7
+    },
+    {
+      "case_id": "multi-3a",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.01,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 855.95,
+          "usage": {
+            "input_tokens": 5141,
+            "output_tokens": 0,
+            "total_tokens": 5141
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "admin",
+          "it"
+        ],
+        "delegation_query": "How do I request annual leave, book an office vehicle, and reset my laptop password?",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 856.42
+    },
+    {
+      "case_id": "multi-3a",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "it"
+        ],
+        "routing_reason": "both_strongly_scored:hr+it",
+        "routing_scores": {
+          "hr": 0.63,
+          "it": 0.5054,
+          "admin": 0.502,
+          "finance": 0.3466,
+          "enterprise_business": 0.336,
+          "legal": 0.3164,
+          "marketing": 0.2931,
+          "consumer_business": 0.2619,
+          "network": 0.2501,
+          "cia": 0.2224
+        },
+        "delegation_query": "How do I request annual leave, book an office vehicle, and reset my laptop password?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 277.6
+    },
+    {
+      "case_id": "multi-4a",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "it"
+        ],
+        "routing_reason": "both_strongly_scored:hr+it",
+        "routing_scores": {
+          "hr": 0.5806,
+          "it": 0.4908,
+          "admin": 0.4777,
+          "finance": 0.4762,
+          "legal": 0.4155,
+          "enterprise_business": 0.4034,
+          "marketing": 0.3823,
+          "consumer_business": 0.3397,
+          "network": 0.2895,
+          "cia": 0.2553
+        },
+        "delegation_query": "I need the medical claim procedure, supplier invoice approval process, office AC repair process, and employee account unlocking steps.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 270.23
+    },
+    {
+      "case_id": "multi-4a",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 1.0,
+          "admin": 1.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 799.83,
+          "usage": {
+            "input_tokens": 5146,
+            "output_tokens": 0,
+            "total_tokens": 5146
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "finance",
+          "admin",
+          "it"
+        ],
+        "delegation_query": "I need the medical claim procedure, supplier invoice approval process, office AC repair process, and employee account unlocking steps.",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 800.23
+    },
+    {
+      "case_id": "multi-legal-marketing",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 1.0,
+          "marketing": 1.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.01,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.01
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 873.87,
+          "usage": {
+            "input_tokens": 5140,
+            "output_tokens": 0,
+            "total_tokens": 5140
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "legal",
+          "marketing"
+        ],
+        "delegation_query": "What contract terms cover sponsorship liability, and what branding rules apply to our event banners?",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 874.31
+    },
+    {
+      "case_id": "multi-legal-marketing",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "marketing",
+          "legal"
+        ],
+        "routing_reason": "both_strongly_scored:marketing+legal",
+        "routing_scores": {
+          "marketing": 0.4813,
+          "legal": 0.4211,
+          "enterprise_business": 0.3436,
+          "consumer_business": 0.3027,
+          "cia": 0.2772,
+          "finance": 0.2771,
+          "admin": 0.2615,
+          "hr": 0.2553,
+          "network": 0.2487,
+          "it": 0.1458
+        },
+        "delegation_query": "What contract terms cover sponsorship liability, and what branding rules apply to our event banners?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 256.94
+    },
+    {
+      "case_id": "social-substantive",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "direct",
+        "routing_reason": "general_help_rule",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 0.14
+    },
+    {
+      "case_id": "social-substantive",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 900.36,
+          "usage": {
+            "input_tokens": 5137,
+            "output_tokens": 0,
+            "total_tokens": 5137
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "Thank you. What documents do I need for a staff medical reimbursement?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 900.76
+    },
+    {
+      "case_id": "negated-department",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 810.78,
+          "usage": {
+            "input_tokens": 5139,
+            "output_tokens": 0,
+            "total_tokens": 5139
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "it",
+        "routed_agent_ids": [
+          "it"
+        ],
+        "delegation_query": "Do not explain employee leave. I only need help unlocking my work laptop account.",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 811.28
+    },
+    {
+      "case_id": "negated-department",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "it",
+          "hr"
+        ],
+        "routing_reason": "both_strongly_scored:it+hr",
+        "routing_scores": {
+          "it": 0.4469,
+          "hr": 0.407,
+          "admin": 0.2795,
+          "enterprise_business": 0.2292,
+          "legal": 0.221,
+          "finance": 0.2051,
+          "consumer_business": 0.1738,
+          "network": 0.1619,
+          "marketing": 0.1526,
+          "cia": 0.1281
+        },
+        "delegation_query": "Do not explain employee leave. I only need help unlocking my work laptop account.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 291.36
+    },
+    {
+      "case_id": "loan-boundary",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "hr",
+        "routing_reason": "vector_match:hr",
+        "routing_scores": {
+          "hr": 0.4681,
+          "admin": 0.3063,
+          "it": 0.2536,
+          "finance": 0.2165,
+          "consumer_business": 0.1908,
+          "enterprise_business": 0.1848,
+          "marketing": 0.1811,
+          "legal": 0.1601,
+          "network": 0.1216,
+          "cia": 0.1162
+        },
+        "delegation_query": "How long must an employee have worked here to qualify for a staff vehicle loan?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 296.45
+    },
+    {
+      "case_id": "loan-boundary",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 812.7,
+          "usage": {
+            "input_tokens": 5139,
+            "output_tokens": 0,
+            "total_tokens": 5139
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "How long must an employee have worked here to qualify for a staff vehicle loan?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 813.0
+    },
+    {
+      "case_id": "vague-payment",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.11,
+          "finance": 0.49,
+          "admin": 0.02,
+          "it": 0.09,
+          "cia": 0.0,
+          "network": 0.01,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.33,
+          "needs_clarification": 0.81,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.01
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 819.84,
+          "usage": {
+            "input_tokens": 5129,
+            "output_tokens": 0,
+            "total_tokens": 5129
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": true,
+        "clarification_options": [
+          "finance"
+        ],
+        "original_query": "I have a payment issue.",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "clarify",
+        "routing_reason": "decisions_uncertain",
+        "routing_pending_agents": []
+      },
+      "latency_ms": 820.27
+    },
+    {
+      "case_id": "vague-payment",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "finance",
+          "consumer_business"
+        ],
+        "routing_reason": "multi_delegate:finance+consumer_business",
+        "routing_scores": {
+          "finance": 0.29,
+          "consumer_business": 0.2883,
+          "hr": 0.2599,
+          "it": 0.2239,
+          "admin": 0.2084,
+          "enterprise_business": 0.2068,
+          "legal": 0.1798,
+          "marketing": 0.1399,
+          "network": 0.1198,
+          "cia": 0.1075
+        },
+        "delegation_query": "I have a payment issue.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 255.29
+    },
+    {
+      "case_id": "vague-help",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "it",
+          "admin"
+        ],
+        "routing_reason": "multi_delegate:it+admin",
+        "routing_scores": {
+          "it": 0.2772,
+          "admin": 0.2748,
+          "hr": 0.2334,
+          "marketing": 0.2315,
+          "finance": 0.2168,
+          "consumer_business": 0.2121,
+          "enterprise_business": 0.2002,
+          "legal": 0.1984,
+          "network": 0.19,
+          "cia": 0.1284
+        },
+        "delegation_query": "I need assistance with something.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 271.84
+    },
+    {
+      "case_id": "vague-help",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 1.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.24,
+          "unsupported_part": 0.02
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 883.93,
+          "usage": {
+            "input_tokens": 5129,
+            "output_tokens": 0,
+            "total_tokens": 5129
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": true,
+        "clarification_options": [],
+        "original_query": "I need assistance with something.",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "clarify",
+        "routing_reason": "decisions_uncertain",
+        "routing_pending_agents": []
+      },
+      "latency_ms": 884.22
+    },
+    {
+      "case_id": "outside-weather",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.22,
+          "out_of_scope": 0.98,
+          "general_help": 0.0,
+          "unsupported_part": 1.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 834.99,
+          "usage": {
+            "input_tokens": 5131,
+            "output_tokens": 0,
+            "total_tokens": 5131
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "out_of_scope",
+        "routing_reason": "decisions_out_of_scope"
+      },
+      "latency_ms": 835.31
+    },
+    {
+      "case_id": "outside-weather",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "out_of_scope",
+        "routing_reason": "very_low_specialist_similarity",
+        "routing_scores": {
+          "network": 0.0679,
+          "admin": 0.0563,
+          "it": 0.0203,
+          "marketing": 0.0203,
+          "enterprise_business": 0.0174,
+          "finance": 0.014,
+          "consumer_business": 0.0071,
+          "hr": -0.0099,
+          "legal": -0.0132,
+          "cia": -0.0618
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 274.07
+    },
+    {
+      "case_id": "platform",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "it",
+        "routing_reason": "vector_match:it",
+        "routing_scores": {
+          "it": 0.4374,
+          "hr": 0.318,
+          "enterprise_business": 0.2811,
+          "admin": 0.2772,
+          "legal": 0.2473,
+          "finance": 0.2397,
+          "network": 0.2073,
+          "cia": 0.2058,
+          "marketing": 0.1986,
+          "consumer_business": 0.1729
+        },
+        "delegation_query": "What can Workmate AI help me with?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 251.32
+    },
+    {
+      "case_id": "platform",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.65,
+          "out_of_scope": 0.19,
+          "general_help": 1.0,
+          "unsupported_part": 0.53
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 1586.76,
+          "usage": {
+            "input_tokens": 5132,
+            "output_tokens": 0,
+            "total_tokens": 5132
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "direct",
+        "routing_reason": "decisions_general_help"
+      },
+      "latency_ms": 1587.32
+    },
+    {
+      "case_id": "greeting",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_action": "direct",
+        "routing_reason": "social_only",
+        "last_specialist_agent": null,
+        "last_specialist_agents": [],
+        "routing_metadata": {
+          "backend": "rules",
+          "fallback": false
+        }
+      },
+      "latency_ms": 0.12
+    },
+    {
+      "case_id": "greeting",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "direct",
+        "routing_reason": "general_help_rule",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 0.08
+    },
+    {
+      "case_id": "bare-department",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "department_overview",
+        "routed_agent_id": "marketing",
+        "routing_reason": "bare_department:marketing",
+        "routing_scores": {},
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 0.13
+    },
+    {
+      "case_id": "bare-department",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_action": "department_overview",
+        "routed_agent_id": "marketing",
+        "routing_reason": "bare_department",
+        "routing_metadata": {
+          "backend": "rules",
+          "fallback": false
+        }
+      },
+      "latency_ms": 0.12
+    },
+    {
+      "case_id": "hr-followup",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 1021.94,
+          "usage": {
+            "input_tokens": 5143,
+            "output_tokens": 0,
+            "total_tokens": 5143
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "What supporting documents are required?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 1022.16
+    },
+    {
+      "case_id": "hr-followup",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "marketing"
+        ],
+        "routing_reason": "multi_delegate:admin+marketing",
+        "routing_scores": {
+          "admin": 0.3875,
+          "marketing": 0.3243,
+          "legal": 0.3229,
+          "hr": 0.3223,
+          "finance": 0.3178,
+          "enterprise_business": 0.2986,
+          "it": 0.2693,
+          "consumer_business": 0.2674,
+          "network": 0.2518,
+          "cia": 0.2136
+        },
+        "delegation_query": "What supporting documents are required?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 278.39
+    },
+    {
+      "case_id": "clarification-choice",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "hr",
+        "routing_reason": "clarification_choice:hr",
+        "routing_scores": {},
+        "delegation_query": "I need to understand staff loan interest rules.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 0.89
+    },
+    {
+      "case_id": "clarification-choice",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "I need to understand staff loan interest rules.",
+        "routing_reason": "clarification_choice",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routing_metadata": {
+          "backend": "rules",
+          "fallback": false
+        }
+      },
+      "latency_ms": 0.09
+    },
+    {
+      "case_id": "si-leave",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 881.63,
+          "usage": {
+            "input_tokens": 5143,
+            "output_tokens": 0,
+            "total_tokens": 5143
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "වාර්ෂික නිවාඩු ඉල්ලුම් කරන්නේ කොහොමද?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 881.94
+    },
+    {
+      "case_id": "si-leave",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "hr"
+        ],
+        "routing_reason": "weak_ambiguous_fanout:admin+hr",
+        "routing_scores": {
+          "admin": 0.2278,
+          "hr": 0.2141,
+          "cia": 0.1889,
+          "legal": 0.1869,
+          "finance": 0.1605,
+          "enterprise_business": 0.1569,
+          "marketing": 0.1429,
+          "it": 0.1289,
+          "consumer_business": 0.1273,
+          "network": 0.1164
+        },
+        "delegation_query": "වාර්ෂික නිවාඩු ඉල්ලුම් කරන්නේ කොහොමද?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 291.16
+    },
+    {
+      "case_id": "ta-leave",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "out_of_scope",
+        "routing_reason": "very_low_specialist_similarity",
+        "routing_scores": {
+          "cia": 0.0553,
+          "hr": 0.0318,
+          "legal": 0.0317,
+          "finance": 0.0315,
+          "admin": 0.0232,
+          "enterprise_business": 0.0132,
+          "it": 0.0109,
+          "consumer_business": -0.0046,
+          "marketing": -0.0295,
+          "network": -0.0299
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 281.54
+    },
+    {
+      "case_id": "ta-leave",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 889.57,
+          "usage": {
+            "input_tokens": 5136,
+            "output_tokens": 0,
+            "total_tokens": 5136
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "வருடாந்த விடுப்புக்கு எப்படி விண்ணப்பிப்பது?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 889.98
+    },
+    {
+      "case_id": "singlish-leave",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 840.6,
+          "usage": {
+            "input_tokens": 5135,
+            "output_tokens": 0,
+            "total_tokens": 5135
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "Mage annual leave balance eka balaganne kohomada?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 841.15
+    },
+    {
+      "case_id": "singlish-leave",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "hr",
+        "routing_reason": "vector_match:hr",
+        "routing_scores": {
+          "hr": 0.6118,
+          "finance": 0.3113,
+          "admin": 0.3083,
+          "legal": 0.2432,
+          "enterprise_business": 0.224,
+          "marketing": 0.2089,
+          "it": 0.1866,
+          "consumer_business": 0.1834,
+          "cia": 0.1724,
+          "network": 0.1557
+        },
+        "delegation_query": "Mage annual leave balance eka balaganne kohomada?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 286.62
+    },
+    {
+      "case_id": "hr-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 837.89,
+          "usage": {
+            "input_tokens": 5138,
+            "output_tokens": 0,
+            "total_tokens": 5138
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "Which documents must an employee provide to add a new child to medical benefits?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 838.2
+    },
+    {
+      "case_id": "hr-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "admin"
+        ],
+        "routing_reason": "multi_delegate:hr+admin",
+        "routing_scores": {
+          "hr": 0.3369,
+          "admin": 0.306,
+          "it": 0.22,
+          "legal": 0.2136,
+          "marketing": 0.2125,
+          "finance": 0.2052,
+          "enterprise_business": 0.2006,
+          "consumer_business": 0.1727,
+          "cia": 0.1463,
+          "network": 0.1359
+        },
+        "delegation_query": "Which documents must an employee provide to add a new child to medical benefits?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 259.33
+    },
+    {
+      "case_id": "finance-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "finance",
+        "routing_reason": "vector_match:finance",
+        "routing_scores": {
+          "finance": 0.4305,
+          "admin": 0.3295,
+          "legal": 0.3085,
+          "marketing": 0.3029,
+          "enterprise_business": 0.2765,
+          "hr": 0.2616,
+          "cia": 0.2315,
+          "consumer_business": 0.2305,
+          "it": 0.221,
+          "network": 0.195
+        },
+        "delegation_query": "A supplier invoice does not match the goods receipt. What is the approval procedure?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 342.42
+    },
+    {
+      "case_id": "finance-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 1.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 787.56,
+          "usage": {
+            "input_tokens": 5139,
+            "output_tokens": 0,
+            "total_tokens": 5139
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "finance",
+        "routed_agent_ids": [
+          "finance"
+        ],
+        "delegation_query": "A supplier invoice does not match the goods receipt. What is the approval procedure?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 787.78
+    },
+    {
+      "case_id": "admin-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 892.81,
+          "usage": {
+            "input_tokens": 5137,
+            "output_tokens": 0,
+            "total_tokens": 5137
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "admin",
+        "routed_agent_ids": [
+          "admin"
+        ],
+        "delegation_query": "Our office air conditioner has stopped cooling. How do we request repairs?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 893.0
+    },
+    {
+      "case_id": "admin-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "it"
+        ],
+        "routing_reason": "multi_delegate:admin+it",
+        "routing_scores": {
+          "admin": 0.3077,
+          "it": 0.2962,
+          "finance": 0.2139,
+          "legal": 0.1822,
+          "hr": 0.1822,
+          "enterprise_business": 0.1806,
+          "network": 0.1637,
+          "marketing": 0.1632,
+          "consumer_business": 0.151,
+          "cia": 0.0923
+        },
+        "delegation_query": "Our office air conditioner has stopped cooling. How do we request repairs?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 263.83
+    },
+    {
+      "case_id": "it-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "it",
+        "routing_reason": "vector_match:it",
+        "routing_scores": {
+          "it": 0.4507,
+          "hr": 0.3,
+          "admin": 0.2443,
+          "enterprise_business": 0.2224,
+          "legal": 0.1822,
+          "finance": 0.161,
+          "consumer_business": 0.155,
+          "network": 0.1465,
+          "cia": 0.1269,
+          "marketing": 0.1266
+        },
+        "delegation_query": "My employee laptop login is locked. How can I get access restored?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 254.95
+    },
+    {
+      "case_id": "it-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 936.69,
+          "usage": {
+            "input_tokens": 5137,
+            "output_tokens": 0,
+            "total_tokens": 5137
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "it",
+        "routed_agent_ids": [
+          "it"
+        ],
+        "delegation_query": "My employee laptop login is locked. How can I get access restored?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 936.9
+    },
+    {
+      "case_id": "cia-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 1.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 916.02,
+          "usage": {
+            "input_tokens": 5136,
+            "output_tokens": 0,
+            "total_tokens": 5136
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "cia",
+        "routed_agent_ids": [
+          "cia"
+        ],
+        "delegation_query": "How is independence maintained when internal auditors review their own previous work?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 916.22
+    },
+    {
+      "case_id": "cia-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "cia",
+        "routing_reason": "medium_confidence:cia",
+        "routing_scores": {
+          "cia": 0.3658,
+          "finance": 0.2212,
+          "admin": 0.2118,
+          "legal": 0.2084,
+          "marketing": 0.208,
+          "enterprise_business": 0.1922,
+          "it": 0.1606,
+          "hr": 0.1299,
+          "network": 0.1153,
+          "consumer_business": 0.0741
+        },
+        "delegation_query": "How is independence maintained when internal auditors review their own previous work?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 407.95
+    },
+    {
+      "case_id": "network-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "network",
+        "routing_reason": "vector_match:network",
+        "routing_scores": {
+          "network": 0.6557,
+          "enterprise_business": 0.3545,
+          "it": 0.2944,
+          "consumer_business": 0.2841,
+          "marketing": 0.2565,
+          "admin": 0.2402,
+          "legal": 0.2287,
+          "finance": 0.227,
+          "cia": 0.2215,
+          "hr": 0.2038
+        },
+        "delegation_query": "What procedure should the NOC use to investigate an OSPF adjacency failure in the telecom core?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 270.05
+    },
+    {
+      "case_id": "network-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 1.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 964.62,
+          "usage": {
+            "input_tokens": 5143,
+            "output_tokens": 0,
+            "total_tokens": 5143
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "network",
+        "routed_agent_ids": [
+          "network"
+        ],
+        "delegation_query": "What procedure should the NOC use to investigate an OSPF adjacency failure in the telecom core?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 964.82
+    },
+    {
+      "case_id": "legal-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 1.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.28
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 909.2,
+          "usage": {
+            "input_tokens": 5138,
+            "output_tokens": 0,
+            "total_tokens": 5138
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "legal",
+        "routed_agent_ids": [
+          "legal"
+        ],
+        "delegation_query": "What clauses are required in an NDA before sharing confidential material with a partner?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 909.54
+    },
+    {
+      "case_id": "legal-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "legal",
+        "routing_reason": "vector_match:legal",
+        "routing_scores": {
+          "legal": 0.4178,
+          "enterprise_business": 0.3281,
+          "admin": 0.2661,
+          "finance": 0.2567,
+          "marketing": 0.2458,
+          "hr": 0.2398,
+          "cia": 0.2378,
+          "it": 0.2123,
+          "network": 0.2058,
+          "consumer_business": 0.1706
+        },
+        "delegation_query": "What clauses are required in an NDA before sharing confidential material with a partner?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 287.04
+    },
+    {
+      "case_id": "marketing-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "marketing",
+        "routing_reason": "vector_match:marketing",
+        "routing_scores": {
+          "marketing": 0.4718,
+          "enterprise_business": 0.3441,
+          "legal": 0.3074,
+          "admin": 0.2699,
+          "finance": 0.2563,
+          "cia": 0.2469,
+          "consumer_business": 0.2442,
+          "network": 0.2364,
+          "hr": 0.2225,
+          "it": 0.1966
+        },
+        "delegation_query": "Which corporate logo rules apply to a sponsored event backdrop?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 623.15
+    },
+    {
+      "case_id": "marketing-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 1.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 860.67,
+          "usage": {
+            "input_tokens": 5134,
+            "output_tokens": 0,
+            "total_tokens": 5134
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "marketing",
+        "routed_agent_ids": [
+          "marketing"
+        ],
+        "delegation_query": "Which corporate logo rules apply to a sponsored event backdrop?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 861.16
+    },
+    {
+      "case_id": "enterprise-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.36,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 1.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 1030.36,
+          "usage": {
+            "input_tokens": 5138,
+            "output_tokens": 0,
+            "total_tokens": 5138
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "enterprise_business",
+        "routed_agent_ids": [
+          "enterprise_business"
+        ],
+        "delegation_query": "What dedicated connectivity and managed security options are offered to a corporate branch network?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 1030.7
+    },
+    {
+      "case_id": "enterprise-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "enterprise_business",
+          "network"
+        ],
+        "routing_reason": "both_strongly_scored:enterprise_business+network",
+        "routing_scores": {
+          "enterprise_business": 0.5317,
+          "network": 0.4432,
+          "it": 0.3908,
+          "consumer_business": 0.3719,
+          "admin": 0.3296,
+          "legal": 0.3238,
+          "cia": 0.3091,
+          "finance": 0.2899,
+          "marketing": 0.2891,
+          "hr": 0.2588
+        },
+        "delegation_query": "What dedicated connectivity and managed security options are offered to a corporate branch network?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 701.8
+    },
+    {
+      "case_id": "consumer-1",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "consumer_business",
+          "network"
+        ],
+        "routing_reason": "both_strongly_scored:consumer_business+network",
+        "routing_scores": {
+          "consumer_business": 0.5385,
+          "network": 0.4315,
+          "enterprise_business": 0.3464,
+          "hr": 0.2097,
+          "it": 0.1959,
+          "admin": 0.1861,
+          "marketing": 0.1823,
+          "finance": 0.171,
+          "legal": 0.1569,
+          "cia": 0.119
+        },
+        "delegation_query": "Which home fibre package includes PEO TV for a residential customer?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 1214.21
+    },
+    {
+      "case_id": "consumer-1",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 1.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.19
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 801.44,
+          "usage": {
+            "input_tokens": 5136,
+            "output_tokens": 0,
+            "total_tokens": 5136
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "consumer_business",
+        "routed_agent_ids": [
+          "consumer_business"
+        ],
+        "delegation_query": "Which home fibre package includes PEO TV for a residential customer?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 801.82
+    },
+    {
+      "case_id": "multi-2a",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 851.02,
+          "usage": {
+            "input_tokens": 5135,
+            "output_tokens": 0,
+            "total_tokens": 5135
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "admin"
+        ],
+        "delegation_query": "Explain sick leave eligibility and the process for booking office transport.",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 851.35
+    },
+    {
+      "case_id": "multi-2a",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "hr"
+        ],
+        "routing_reason": "both_strongly_scored:admin+hr",
+        "routing_scores": {
+          "admin": 0.6089,
+          "hr": 0.6072,
+          "finance": 0.3186,
+          "it": 0.3164,
+          "enterprise_business": 0.2988,
+          "marketing": 0.2935,
+          "legal": 0.2841,
+          "consumer_business": 0.2335,
+          "network": 0.215,
+          "cia": 0.2057
+        },
+        "delegation_query": "Explain sick leave eligibility and the process for booking office transport.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 456.28
+    },
+    {
+      "case_id": "multi-3a",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "it"
+        ],
+        "routing_reason": "both_strongly_scored:hr+it",
+        "routing_scores": {
+          "hr": 0.63,
+          "it": 0.5054,
+          "admin": 0.502,
+          "finance": 0.3466,
+          "enterprise_business": 0.336,
+          "legal": 0.3164,
+          "marketing": 0.2931,
+          "consumer_business": 0.2619,
+          "network": 0.2501,
+          "cia": 0.2224
+        },
+        "delegation_query": "How do I request annual leave, book an office vehicle, and reset my laptop password?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 270.35
+    },
+    {
+      "case_id": "multi-3a",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.01,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 989.82,
+          "usage": {
+            "input_tokens": 5141,
+            "output_tokens": 0,
+            "total_tokens": 5141
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "admin",
+          "it"
+        ],
+        "delegation_query": "How do I request annual leave, book an office vehicle, and reset my laptop password?",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 990.21
+    },
+    {
+      "case_id": "multi-4a",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 1.0,
+          "admin": 1.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 1199.3,
+          "usage": {
+            "input_tokens": 5146,
+            "output_tokens": 0,
+            "total_tokens": 5146
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "finance",
+          "admin",
+          "it"
+        ],
+        "delegation_query": "I need the medical claim procedure, supplier invoice approval process, office AC repair process, and employee account unlocking steps.",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 1199.54
+    },
+    {
+      "case_id": "multi-4a",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "it"
+        ],
+        "routing_reason": "both_strongly_scored:hr+it",
+        "routing_scores": {
+          "hr": 0.5806,
+          "it": 0.4908,
+          "admin": 0.4777,
+          "finance": 0.4762,
+          "legal": 0.4155,
+          "enterprise_business": 0.4034,
+          "marketing": 0.3823,
+          "consumer_business": 0.3397,
+          "network": 0.2895,
+          "cia": 0.2553
+        },
+        "delegation_query": "I need the medical claim procedure, supplier invoice approval process, office AC repair process, and employee account unlocking steps.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 260.39
+    },
+    {
+      "case_id": "multi-legal-marketing",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "marketing",
+          "legal"
+        ],
+        "routing_reason": "both_strongly_scored:marketing+legal",
+        "routing_scores": {
+          "marketing": 0.4813,
+          "legal": 0.4211,
+          "enterprise_business": 0.3436,
+          "consumer_business": 0.3027,
+          "cia": 0.2772,
+          "finance": 0.2771,
+          "admin": 0.2615,
+          "hr": 0.2553,
+          "network": 0.2487,
+          "it": 0.1458
+        },
+        "delegation_query": "What contract terms cover sponsorship liability, and what branding rules apply to our event banners?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 282.15
+    },
+    {
+      "case_id": "multi-legal-marketing",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 1.0,
+          "marketing": 1.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.01,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.01
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 860.03,
+          "usage": {
+            "input_tokens": 5140,
+            "output_tokens": 0,
+            "total_tokens": 5140
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "legal",
+          "marketing"
+        ],
+        "delegation_query": "What contract terms cover sponsorship liability, and what branding rules apply to our event banners?",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 860.3
+    },
+    {
+      "case_id": "social-substantive",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 884.6,
+          "usage": {
+            "input_tokens": 5137,
+            "output_tokens": 0,
+            "total_tokens": 5137
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "Thank you. What documents do I need for a staff medical reimbursement?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 885.01
+    },
+    {
+      "case_id": "social-substantive",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "direct",
+        "routing_reason": "general_help_rule",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 0.15
+    },
+    {
+      "case_id": "negated-department",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "it",
+          "hr"
+        ],
+        "routing_reason": "both_strongly_scored:it+hr",
+        "routing_scores": {
+          "it": 0.4469,
+          "hr": 0.407,
+          "admin": 0.2795,
+          "enterprise_business": 0.2292,
+          "legal": 0.221,
+          "finance": 0.2051,
+          "consumer_business": 0.1738,
+          "network": 0.1619,
+          "marketing": 0.1526,
+          "cia": 0.1281
+        },
+        "delegation_query": "Do not explain employee leave. I only need help unlocking my work laptop account.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 316.26
+    },
+    {
+      "case_id": "negated-department",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 986.45,
+          "usage": {
+            "input_tokens": 5139,
+            "output_tokens": 0,
+            "total_tokens": 5139
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "it",
+        "routed_agent_ids": [
+          "it"
+        ],
+        "delegation_query": "Do not explain employee leave. I only need help unlocking my work laptop account.",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 986.9
+    },
+    {
+      "case_id": "loan-boundary",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 845.47,
+          "usage": {
+            "input_tokens": 5139,
+            "output_tokens": 0,
+            "total_tokens": 5139
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "How long must an employee have worked here to qualify for a staff vehicle loan?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 845.97
+    },
+    {
+      "case_id": "loan-boundary",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "hr",
+        "routing_reason": "vector_match:hr",
+        "routing_scores": {
+          "hr": 0.4681,
+          "admin": 0.3063,
+          "it": 0.2536,
+          "finance": 0.2165,
+          "consumer_business": 0.1908,
+          "enterprise_business": 0.1848,
+          "marketing": 0.1811,
+          "legal": 0.1601,
+          "network": 0.1216,
+          "cia": 0.1162
+        },
+        "delegation_query": "How long must an employee have worked here to qualify for a staff vehicle loan?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 260.85
+    },
+    {
+      "case_id": "vague-payment",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "finance",
+          "consumer_business"
+        ],
+        "routing_reason": "multi_delegate:finance+consumer_business",
+        "routing_scores": {
+          "finance": 0.29,
+          "consumer_business": 0.2883,
+          "hr": 0.2599,
+          "it": 0.2239,
+          "admin": 0.2084,
+          "enterprise_business": 0.2068,
+          "legal": 0.1798,
+          "marketing": 0.1399,
+          "network": 0.1198,
+          "cia": 0.1075
+        },
+        "delegation_query": "I have a payment issue.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 260.9
+    },
+    {
+      "case_id": "vague-payment",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.11,
+          "finance": 0.49,
+          "admin": 0.02,
+          "it": 0.09,
+          "cia": 0.0,
+          "network": 0.01,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.33,
+          "needs_clarification": 0.81,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.01
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 802.64,
+          "usage": {
+            "input_tokens": 5129,
+            "output_tokens": 0,
+            "total_tokens": 5129
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": true,
+        "clarification_options": [
+          "finance"
+        ],
+        "original_query": "I have a payment issue.",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "clarify",
+        "routing_reason": "decisions_uncertain",
+        "routing_pending_agents": []
+      },
+      "latency_ms": 803.06
+    },
+    {
+      "case_id": "vague-help",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 1.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.24,
+          "unsupported_part": 0.02
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 865.97,
+          "usage": {
+            "input_tokens": 5129,
+            "output_tokens": 0,
+            "total_tokens": 5129
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": true,
+        "clarification_options": [],
+        "original_query": "I need assistance with something.",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "clarify",
+        "routing_reason": "decisions_uncertain",
+        "routing_pending_agents": []
+      },
+      "latency_ms": 866.39
+    },
+    {
+      "case_id": "vague-help",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "it",
+          "admin"
+        ],
+        "routing_reason": "multi_delegate:it+admin",
+        "routing_scores": {
+          "it": 0.2772,
+          "admin": 0.2748,
+          "hr": 0.2334,
+          "marketing": 0.2315,
+          "finance": 0.2168,
+          "consumer_business": 0.2121,
+          "enterprise_business": 0.2002,
+          "legal": 0.1984,
+          "network": 0.19,
+          "cia": 0.1284
+        },
+        "delegation_query": "I need assistance with something.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 535.53
+    },
+    {
+      "case_id": "outside-weather",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "out_of_scope",
+        "routing_reason": "very_low_specialist_similarity",
+        "routing_scores": {
+          "network": 0.0679,
+          "admin": 0.0563,
+          "it": 0.0203,
+          "marketing": 0.0203,
+          "enterprise_business": 0.0174,
+          "finance": 0.014,
+          "consumer_business": 0.0071,
+          "hr": -0.0099,
+          "legal": -0.0132,
+          "cia": -0.0618
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 267.39
+    },
+    {
+      "case_id": "outside-weather",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.22,
+          "out_of_scope": 0.98,
+          "general_help": 0.0,
+          "unsupported_part": 1.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 784.5,
+          "usage": {
+            "input_tokens": 5131,
+            "output_tokens": 0,
+            "total_tokens": 5131
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "out_of_scope",
+        "routing_reason": "decisions_out_of_scope"
+      },
+      "latency_ms": 785.1
+    },
+    {
+      "case_id": "platform",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 0.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.65,
+          "out_of_scope": 0.19,
+          "general_help": 1.0,
+          "unsupported_part": 0.53
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 798.31,
+          "usage": {
+            "input_tokens": 5132,
+            "output_tokens": 0,
+            "total_tokens": 5132
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [],
+        "delegation_query": "",
+        "routing_action": "direct",
+        "routing_reason": "decisions_general_help"
+      },
+      "latency_ms": 798.72
+    },
+    {
+      "case_id": "platform",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "it",
+        "routing_reason": "vector_match:it",
+        "routing_scores": {
+          "it": 0.4374,
+          "hr": 0.318,
+          "enterprise_business": 0.2811,
+          "admin": 0.2772,
+          "legal": 0.2473,
+          "finance": 0.2397,
+          "network": 0.2073,
+          "cia": 0.2058,
+          "marketing": 0.1986,
+          "consumer_business": 0.1729
+        },
+        "delegation_query": "What can Workmate AI help me with?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 310.09
+    },
+    {
+      "case_id": "greeting",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "direct",
+        "routing_reason": "general_help_rule",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 0.09
+    },
+    {
+      "case_id": "greeting",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_action": "direct",
+        "routing_reason": "social_only",
+        "last_specialist_agent": null,
+        "last_specialist_agents": [],
+        "routing_metadata": {
+          "backend": "rules",
+          "fallback": false
+        }
+      },
+      "latency_ms": 0.05
+    },
+    {
+      "case_id": "bare-department",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_action": "department_overview",
+        "routed_agent_id": "marketing",
+        "routing_reason": "bare_department",
+        "routing_metadata": {
+          "backend": "rules",
+          "fallback": false
+        }
+      },
+      "latency_ms": 0.06
+    },
+    {
+      "case_id": "bare-department",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "department_overview",
+        "routed_agent_id": "marketing",
+        "routing_reason": "bare_department:marketing",
+        "routing_scores": {},
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 0.07
+    },
+    {
+      "case_id": "hr-followup",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "marketing"
+        ],
+        "routing_reason": "multi_delegate:admin+marketing",
+        "routing_scores": {
+          "admin": 0.3875,
+          "marketing": 0.3243,
+          "legal": 0.3229,
+          "hr": 0.3223,
+          "finance": 0.3178,
+          "enterprise_business": 0.2986,
+          "it": 0.2693,
+          "consumer_business": 0.2674,
+          "network": 0.2518,
+          "cia": 0.2136
+        },
+        "delegation_query": "What supporting documents are required?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 278.85
+    },
+    {
+      "case_id": "hr-followup",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 860.42,
+          "usage": {
+            "input_tokens": 5143,
+            "output_tokens": 0,
+            "total_tokens": 5143
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "What supporting documents are required?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 860.85
+    },
+    {
+      "case_id": "clarification-choice",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "I need to understand staff loan interest rules.",
+        "routing_reason": "clarification_choice",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routing_metadata": {
+          "backend": "rules",
+          "fallback": false
+        }
+      },
+      "latency_ms": 0.2
+    },
+    {
+      "case_id": "clarification-choice",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "hr",
+        "routing_reason": "clarification_choice:hr",
+        "routing_scores": {},
+        "delegation_query": "I need to understand staff loan interest rules.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 0.08
+    },
+    {
+      "case_id": "si-leave",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "hr"
+        ],
+        "routing_reason": "weak_ambiguous_fanout:admin+hr",
+        "routing_scores": {
+          "admin": 0.2278,
+          "hr": 0.2141,
+          "cia": 0.1889,
+          "legal": 0.1869,
+          "finance": 0.1605,
+          "enterprise_business": 0.1569,
+          "marketing": 0.1429,
+          "it": 0.1289,
+          "consumer_business": 0.1273,
+          "network": 0.1164
+        },
+        "delegation_query": "වාර්ෂික නිවාඩු ඉල්ලුම් කරන්නේ කොහොමද?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 300.6
+    },
+    {
+      "case_id": "si-leave",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 863.89,
+          "usage": {
+            "input_tokens": 5143,
+            "output_tokens": 0,
+            "total_tokens": 5143
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "වාර්ෂික නිවාඩු ඉල්ලුම් කරන්නේ කොහොමද?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 864.23
+    },
+    {
+      "case_id": "ta-leave",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 755.53,
+          "usage": {
+            "input_tokens": 5136,
+            "output_tokens": 0,
+            "total_tokens": 5136
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "வருடாந்த விடுப்புக்கு எப்படி விண்ணப்பிப்பது?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 756.13
+    },
+    {
+      "case_id": "ta-leave",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "out_of_scope",
+        "routing_reason": "very_low_specialist_similarity",
+        "routing_scores": {
+          "cia": 0.0553,
+          "hr": 0.0318,
+          "legal": 0.0317,
+          "finance": 0.0315,
+          "admin": 0.0232,
+          "enterprise_business": 0.0132,
+          "it": 0.0109,
+          "consumer_business": -0.0046,
+          "marketing": -0.0295,
+          "network": -0.0299
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 280.08
+    },
+    {
+      "case_id": "singlish-leave",
+      "repeat": 1,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "delegate",
+        "routed_agent_id": "hr",
+        "routing_reason": "vector_match:hr",
+        "routing_scores": {
+          "hr": 0.6118,
+          "finance": 0.3113,
+          "admin": 0.3083,
+          "legal": 0.2432,
+          "enterprise_business": 0.224,
+          "marketing": 0.2089,
+          "it": 0.1866,
+          "consumer_business": 0.1834,
+          "cia": 0.1724,
+          "network": 0.1557
+        },
+        "delegation_query": "Mage annual leave balance eka balaganne kohomada?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 278.89
+    },
+    {
+      "case_id": "singlish-leave",
+      "repeat": 1,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 762.14,
+          "usage": {
+            "input_tokens": 5135,
+            "output_tokens": 0,
+            "total_tokens": 5135
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "Mage annual leave balance eka balaganne kohomada?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 762.64
+    }
+  ],
+  "summary": {
+    "legacy": {
+      "n": 56,
+      "exact_accuracy": 0.5,
+      "action_accuracy": 0.5714285714285714,
+      "required_agent_recall": 0.8,
+      "agent_precision": 0.6486486486486487,
+      "missed_agents": 12,
+      "unnecessary_agents": 26,
+      "errors": 0,
+      "fallbacks": 0,
+      "p50_ms": 278.36,
+      "p95_ms": 701.8,
+      "by_language": {
+        "en": {
+          "n": 50,
+          "exact_accuracy": 0.52,
+          "action_accuracy": 0.6,
+          "required_agent_recall": 0.8148148148148148,
+          "agent_precision": 0.6470588235294118,
+          "missed_agents": 10,
+          "unnecessary_agents": 24,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 271.84,
+          "p95_ms": 701.8
+        },
+        "mixed": {
+          "n": 2,
+          "exact_accuracy": 1,
+          "action_accuracy": 1,
+          "required_agent_recall": 1.0,
+          "agent_precision": 1.0,
+          "missed_agents": 0,
+          "unnecessary_agents": 0,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 278.89,
+          "p95_ms": 286.62
+        },
+        "si": {
+          "n": 2,
+          "exact_accuracy": 0,
+          "action_accuracy": 0,
+          "required_agent_recall": 1.0,
+          "agent_precision": 0.5,
+          "missed_agents": 0,
+          "unnecessary_agents": 2,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 291.16,
+          "p95_ms": 300.6
+        },
+        "ta": {
+          "n": 2,
+          "exact_accuracy": 0,
+          "action_accuracy": 0,
+          "required_agent_recall": 0.0,
+          "agent_precision": null,
+          "missed_agents": 2,
+          "unnecessary_agents": 0,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 280.08,
+          "p95_ms": 281.54
+        }
+      },
+      "multi_department": {
+        "n": 8,
+        "exact_accuracy": 0.5,
+        "action_accuracy": 1,
+        "required_agent_recall": 0.7272727272727273,
+        "agent_precision": 1.0,
+        "missed_agents": 6,
+        "unnecessary_agents": 0,
+        "errors": 0,
+        "fallbacks": 0,
+        "p50_ms": 270.35,
+        "p95_ms": 456.28
+      }
+    },
+    "decisions": {
+      "n": 56,
+      "exact_accuracy": 1,
+      "action_accuracy": 1,
+      "required_agent_recall": 1.0,
+      "agent_precision": 1.0,
+      "missed_agents": 0,
+      "unnecessary_agents": 0,
+      "errors": 0,
+      "fallbacks": 0,
+      "p50_ms": 856.42,
+      "p95_ms": 1030.7,
+      "by_language": {
+        "en": {
+          "n": 50,
+          "exact_accuracy": 1,
+          "action_accuracy": 1,
+          "required_agent_recall": 1.0,
+          "agent_precision": 1.0,
+          "missed_agents": 0,
+          "unnecessary_agents": 0,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 856.42,
+          "p95_ms": 1030.7
+        },
+        "mixed": {
+          "n": 2,
+          "exact_accuracy": 1,
+          "action_accuracy": 1,
+          "required_agent_recall": 1.0,
+          "agent_precision": 1.0,
+          "missed_agents": 0,
+          "unnecessary_agents": 0,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 762.64,
+          "p95_ms": 841.15
+        },
+        "si": {
+          "n": 2,
+          "exact_accuracy": 1,
+          "action_accuracy": 1,
+          "required_agent_recall": 1.0,
+          "agent_precision": 1.0,
+          "missed_agents": 0,
+          "unnecessary_agents": 0,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 864.23,
+          "p95_ms": 881.94
+        },
+        "ta": {
+          "n": 2,
+          "exact_accuracy": 1,
+          "action_accuracy": 1,
+          "required_agent_recall": 1.0,
+          "agent_precision": 1.0,
+          "missed_agents": 0,
+          "unnecessary_agents": 0,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 756.13,
+          "p95_ms": 889.98
+        }
+      },
+      "multi_department": {
+        "n": 8,
+        "exact_accuracy": 1,
+        "action_accuracy": 1,
+        "required_agent_recall": 1.0,
+        "agent_precision": 1.0,
+        "missed_agents": 0,
+        "unnecessary_agents": 0,
+        "errors": 0,
+        "fallbacks": 0,
+        "p50_ms": 860.3,
+        "p95_ms": 1199.54
+      }
+    },
+    "paired": {
+      "wins": 28,
+      "losses": 0,
+      "ties": 28,
+      "exact_accuracy_delta": 0.5,
+      "case_bootstrap_95_interval": [
+        0.32142857142857145,
+        0.6785714285714286
+      ],
+      "disagreements": [
+        {
+          "case_id": "admin-1",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "it"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "admin-1",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "it"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "consumer-1",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "network"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "consumer-1",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "network"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "enterprise-1",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "network"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "enterprise-1",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "network"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "hr-1",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "admin"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "hr-1",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "admin"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "hr-followup",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [
+              "hr"
+            ],
+            "extra": [
+              "admin",
+              "marketing"
+            ],
+            "tp": 0,
+            "fp": 2,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "hr-followup",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [
+              "hr"
+            ],
+            "extra": [
+              "admin",
+              "marketing"
+            ],
+            "tp": 0,
+            "fp": 2,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "multi-3a",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": true,
+            "missing": [
+              "admin"
+            ],
+            "extra": [],
+            "tp": 2,
+            "fp": 0,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 3,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "multi-3a",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": true,
+            "missing": [
+              "admin"
+            ],
+            "extra": [],
+            "tp": 2,
+            "fp": 0,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 3,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "multi-4a",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": true,
+            "missing": [
+              "admin",
+              "finance"
+            ],
+            "extra": [],
+            "tp": 2,
+            "fp": 0,
+            "fn": 2
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 4,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "multi-4a",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": true,
+            "missing": [
+              "admin",
+              "finance"
+            ],
+            "extra": [],
+            "tp": 2,
+            "fp": 0,
+            "fn": 2
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 4,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "negated-department",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "hr"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "negated-department",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "hr"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "platform",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "it"
+            ],
+            "tp": 0,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "platform",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "it"
+            ],
+            "tp": 0,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "si-leave",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "admin"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "si-leave",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "admin"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "social-substantive",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [
+              "hr"
+            ],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "social-substantive",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [
+              "hr"
+            ],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "ta-leave",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [
+              "hr"
+            ],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "ta-leave",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [
+              "hr"
+            ],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "vague-help",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "admin",
+              "it"
+            ],
+            "tp": 0,
+            "fp": 2,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "vague-help",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "admin",
+              "it"
+            ],
+            "tp": 0,
+            "fp": 2,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "vague-payment",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "consumer_business",
+              "finance"
+            ],
+            "tp": 0,
+            "fp": 2,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "vague-payment",
+          "repeat": 1,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "consumer_business",
+              "finance"
+            ],
+            "tp": 0,
+            "fp": 2,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 0,
+            "fp": 0,
+            "fn": 0
+          }
+        }
+      ]
+    },
+    "interpretation": "Routing-only results. Required-agent recall does not prove every subquestion was answered. Synthetic labels need department review; no production-improvement claim or automatic promotion."
+  }
+}

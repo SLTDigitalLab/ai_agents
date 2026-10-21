@@ -1,0 +1,619 @@
+{
+  "created_at_utc": "2026-10-15T17:02:53.534968+00:00",
+  "git_revision": "78ca190f6376d66d4533599111b11da059a969de",
+  "source_sha256": {
+    "domain/archetypes/supervisor_agent.py": "1aef0106e5133cc39f4884eeb695fa5b13d1564910e701e0f8dc4471dff2040c",
+    "domain/routing/decisions.py": "cc816e29f6d8dd3d0ab11165c32d893bb95ac1854ebb4b0a825b64245cdc1bd2",
+    "domain/config/supervisor_routing.py": "105ea9f3f82a10d38af758f2d721d18e275a1504bac114b2a4e83c2435304cd4",
+    "domain/routing/evaluation.py": "51aa852bc7e87b42fb2283bf4467b3f0a0200fca0b2a74c39262178642f1717d"
+  },
+  "working_tree_may_include_changes": true,
+  "dataset_sha256": "8f2d285009865cfcdff8017b3ed72990e50fc254a1437a4e68154ad456964736",
+  "label_status": "Synthetic draft labels based on repository scopes; not department-reviewed or production-representative",
+  "split": "all",
+  "configuration": {
+    "ROUTING_EMBEDDING_PROVIDER": "openai",
+    "ROUTING_EMBEDDING_MODEL": "text-embedding-3-small",
+    "SUPERVISOR_DECISIONS_MODEL": "gpt-6-luna",
+    "SUPERVISOR_DECISIONS_THRESHOLD": 0.8,
+    "SUPERVISOR_DECISIONS_UNCERTAIN_THRESHOLD": 0.4,
+    "LLM_PROVIDER": "openai",
+    "LLM_MODEL": "gpt-5.6-luna"
+  },
+  "records": [
+    {
+      "case_id": "hr-1",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "admin"
+        ],
+        "routing_reason": "multi_delegate:hr+admin",
+        "routing_scores": {
+          "hr": 0.337,
+          "admin": 0.306,
+          "it": 0.22,
+          "legal": 0.2135,
+          "marketing": 0.2125,
+          "finance": 0.2052,
+          "enterprise_business": 0.2007,
+          "consumer_business": 0.1727,
+          "cia": 0.1463,
+          "network": 0.1359
+        },
+        "delegation_query": "Which documents must an employee provide to add a new child to medical benefits?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 6693.42
+    },
+    {
+      "case_id": "hr-1",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 0.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 1044.27,
+          "usage": {
+            "input_tokens": 5138,
+            "output_tokens": 0,
+            "total_tokens": 5138
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "hr",
+        "routed_agent_ids": [
+          "hr"
+        ],
+        "delegation_query": "Which documents must an employee provide to add a new child to medical benefits?",
+        "routing_action": "delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 1044.72,
+      "plan": {
+        "routing_tasks": [
+          {
+            "task_id": "q1",
+            "specialist_id": "hr",
+            "question": "Which documents must an employee provide to add a new child to medical benefits?",
+            "depends_on": []
+          }
+        ],
+        "specialist_queries": {
+          "hr": "Which documents must an employee provide to add a new child to medical benefits?"
+        },
+        "routing_unassigned_questions": []
+      }
+    },
+    {
+      "case_id": "multi-2a",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 0.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 1150.89,
+          "usage": {
+            "input_tokens": 5135,
+            "output_tokens": 0,
+            "total_tokens": 5135
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "admin"
+        ],
+        "delegation_query": "Explain sick leave eligibility and the process for booking office transport.",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 1151.11,
+      "plan": {
+        "routing_tasks": [
+          {
+            "task_id": "q1",
+            "specialist_id": "hr",
+            "question": "Explain sick leave eligibility for employees at SLTMobitel, including any applicable conditions or requirements.",
+            "depends_on": []
+          },
+          {
+            "task_id": "q2",
+            "specialist_id": "admin",
+            "question": "Explain the process for booking office transport, including how to request or reserve office/company vehicles and any applicable eligibility or approval requirements.",
+            "depends_on": []
+          }
+        ],
+        "specialist_queries": {
+          "hr": "Explain sick leave eligibility for employees at SLTMobitel, including any applicable conditions or requirements.",
+          "admin": "Explain the process for booking office transport, including how to request or reserve office/company vehicles and any applicable eligibility or approval requirements."
+        },
+        "routing_unassigned_questions": []
+      }
+    },
+    {
+      "case_id": "multi-2a",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "admin",
+          "hr"
+        ],
+        "routing_reason": "both_strongly_scored:admin+hr",
+        "routing_scores": {
+          "admin": 0.6089,
+          "hr": 0.6074,
+          "finance": 0.3185,
+          "it": 0.3164,
+          "enterprise_business": 0.2988,
+          "marketing": 0.2935,
+          "legal": 0.2841,
+          "consumer_business": 0.2335,
+          "network": 0.215,
+          "cia": 0.2057
+        },
+        "delegation_query": "Explain sick leave eligibility and the process for booking office transport.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 420.34
+    },
+    {
+      "case_id": "multi-3a",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "it"
+        ],
+        "routing_reason": "both_strongly_scored:hr+it",
+        "routing_scores": {
+          "hr": 0.63,
+          "it": 0.5054,
+          "admin": 0.502,
+          "finance": 0.3466,
+          "enterprise_business": 0.336,
+          "legal": 0.3164,
+          "marketing": 0.2931,
+          "consumer_business": 0.2619,
+          "network": 0.2502,
+          "cia": 0.2224
+        },
+        "delegation_query": "How do I request annual leave, book an office vehicle, and reset my laptop password?",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 269.19
+    },
+    {
+      "case_id": "multi-3a",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 0.0,
+          "admin": 1.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.01,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 1154.54,
+          "usage": {
+            "input_tokens": 5141,
+            "output_tokens": 0,
+            "total_tokens": 5141
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "admin",
+          "it"
+        ],
+        "delegation_query": "How do I request annual leave, book an office vehicle, and reset my laptop password?",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 1154.89,
+      "plan": {
+        "routing_tasks": [
+          {
+            "task_id": "q1",
+            "specialist_id": "hr",
+            "question": "How do I request annual leave at SLTMobitel?",
+            "depends_on": []
+          },
+          {
+            "task_id": "q2",
+            "specialist_id": "admin",
+            "question": "How do I book an office vehicle at SLTMobitel?",
+            "depends_on": []
+          },
+          {
+            "task_id": "q3",
+            "specialist_id": "it",
+            "question": "How do I reset my laptop password at SLTMobitel?",
+            "depends_on": []
+          }
+        ],
+        "specialist_queries": {
+          "hr": "How do I request annual leave at SLTMobitel?",
+          "admin": "How do I book an office vehicle at SLTMobitel?",
+          "it": "How do I reset my laptop password at SLTMobitel?"
+        },
+        "routing_unassigned_questions": []
+      }
+    },
+    {
+      "case_id": "multi-4a",
+      "repeat": 0,
+      "backend": "decisions",
+      "result": {
+        "routing_scores": {},
+        "routing_probabilities": {
+          "hr": 1.0,
+          "finance": 1.0,
+          "admin": 1.0,
+          "it": 1.0,
+          "cia": 0.0,
+          "network": 0.0,
+          "legal": 0.0,
+          "marketing": 0.0,
+          "enterprise_business": 0.0,
+          "consumer_business": 0.0,
+          "needs_clarification": 0.0,
+          "out_of_scope": 0.0,
+          "general_help": 0.0,
+          "unsupported_part": 0.0
+        },
+        "routing_metadata": {
+          "backend": "decisions",
+          "model": "gpt-6-luna",
+          "latency_ms": 878.76,
+          "usage": {
+            "input_tokens": 5146,
+            "output_tokens": 0,
+            "total_tokens": 5146
+          },
+          "prompt_version": "workmate-departments-v3",
+          "prompt_hash": "4d136bdfcb0de3fe",
+          "threshold": 0.8,
+          "uncertain_threshold": 0.4,
+          "fallback": false
+        },
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": "",
+        "routed_agent_id": "",
+        "routed_agent_ids": [
+          "hr",
+          "finance",
+          "admin",
+          "it"
+        ],
+        "delegation_query": "I need the medical claim procedure, supplier invoice approval process, office AC repair process, and employee account unlocking steps.",
+        "routing_action": "multi_delegate",
+        "routing_reason": "decisions_department_relevance"
+      },
+      "latency_ms": 879.02,
+      "plan": {
+        "routing_tasks": [
+          {
+            "task_id": "q1",
+            "specialist_id": "hr",
+            "question": "What is the medical claim procedure for employees, including Agrahara claims if applicable?",
+            "depends_on": []
+          },
+          {
+            "task_id": "q2",
+            "specialist_id": "finance",
+            "question": "What is the supplier invoice approval process, including the relevant corporate AP and payment approval steps?",
+            "depends_on": []
+          },
+          {
+            "task_id": "q3",
+            "specialist_id": "admin",
+            "question": "What is the office AC repair process, including how to report the issue and how facilities maintenance handles it?",
+            "depends_on": []
+          },
+          {
+            "task_id": "q4",
+            "specialist_id": "it",
+            "question": "What are the steps for unlocking an employee account, including the applicable IT service desk or identity-verification process?",
+            "depends_on": []
+          }
+        ],
+        "specialist_queries": {
+          "hr": "What is the medical claim procedure for employees, including Agrahara claims if applicable?",
+          "finance": "What is the supplier invoice approval process, including the relevant corporate AP and payment approval steps?",
+          "admin": "What is the office AC repair process, including how to report the issue and how facilities maintenance handles it?",
+          "it": "What are the steps for unlocking an employee account, including the applicable IT service desk or identity-verification process?"
+        },
+        "routing_unassigned_questions": []
+      }
+    },
+    {
+      "case_id": "multi-4a",
+      "repeat": 0,
+      "backend": "legacy",
+      "result": {
+        "routing_action": "multi_delegate",
+        "routed_agent_ids": [
+          "hr",
+          "it"
+        ],
+        "routing_reason": "both_strongly_scored:hr+it",
+        "routing_scores": {
+          "hr": 0.5805,
+          "it": 0.4908,
+          "admin": 0.4777,
+          "finance": 0.4762,
+          "legal": 0.4155,
+          "enterprise_business": 0.4034,
+          "marketing": 0.3823,
+          "consumer_business": 0.3397,
+          "network": 0.2896,
+          "cia": 0.2553
+        },
+        "delegation_query": "I need the medical claim procedure, supplier invoice approval process, office AC repair process, and employee account unlocking steps.",
+        "pending_clarification": false,
+        "clarification_options": [],
+        "original_query": ""
+      },
+      "latency_ms": 487.24
+    }
+  ],
+  "summary": {
+    "legacy": {
+      "n": 4,
+      "exact_accuracy": 0.25,
+      "action_accuracy": 0.75,
+      "required_agent_recall": 0.7,
+      "agent_precision": 0.875,
+      "missed_agents": 3,
+      "unnecessary_agents": 1,
+      "errors": 0,
+      "fallbacks": 0,
+      "p50_ms": 420.34,
+      "p95_ms": 6693.42,
+      "by_language": {
+        "en": {
+          "n": 4,
+          "exact_accuracy": 0.25,
+          "action_accuracy": 0.75,
+          "required_agent_recall": 0.7,
+          "agent_precision": 0.875,
+          "missed_agents": 3,
+          "unnecessary_agents": 1,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 420.34,
+          "p95_ms": 6693.42
+        }
+      },
+      "multi_department": {
+        "n": 3,
+        "exact_accuracy": 0.3333333333333333,
+        "action_accuracy": 1,
+        "required_agent_recall": 0.6666666666666666,
+        "agent_precision": 1.0,
+        "missed_agents": 3,
+        "unnecessary_agents": 0,
+        "errors": 0,
+        "fallbacks": 0,
+        "p50_ms": 420.34,
+        "p95_ms": 487.24
+      }
+    },
+    "decisions": {
+      "n": 4,
+      "exact_accuracy": 1,
+      "action_accuracy": 1,
+      "required_agent_recall": 1.0,
+      "agent_precision": 1.0,
+      "missed_agents": 0,
+      "unnecessary_agents": 0,
+      "errors": 0,
+      "fallbacks": 0,
+      "p50_ms": 1044.72,
+      "p95_ms": 1154.89,
+      "by_language": {
+        "en": {
+          "n": 4,
+          "exact_accuracy": 1,
+          "action_accuracy": 1,
+          "required_agent_recall": 1.0,
+          "agent_precision": 1.0,
+          "missed_agents": 0,
+          "unnecessary_agents": 0,
+          "errors": 0,
+          "fallbacks": 0,
+          "p50_ms": 1044.72,
+          "p95_ms": 1154.89
+        }
+      },
+      "multi_department": {
+        "n": 3,
+        "exact_accuracy": 1,
+        "action_accuracy": 1,
+        "required_agent_recall": 1.0,
+        "agent_precision": 1.0,
+        "missed_agents": 0,
+        "unnecessary_agents": 0,
+        "errors": 0,
+        "fallbacks": 0,
+        "p50_ms": 1151.11,
+        "p95_ms": 1154.89
+      }
+    },
+    "paired": {
+      "wins": 3,
+      "losses": 0,
+      "ties": 1,
+      "exact_accuracy_delta": 0.75,
+      "case_bootstrap_95_interval": [
+        0.25,
+        1
+      ],
+      "disagreements": [
+        {
+          "case_id": "hr-1",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": false,
+            "missing": [],
+            "extra": [
+              "admin"
+            ],
+            "tp": 1,
+            "fp": 1,
+            "fn": 0
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 1,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "multi-3a",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": true,
+            "missing": [
+              "admin"
+            ],
+            "extra": [],
+            "tp": 2,
+            "fp": 0,
+            "fn": 1
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 3,
+            "fp": 0,
+            "fn": 0
+          }
+        },
+        {
+          "case_id": "multi-4a",
+          "repeat": 0,
+          "legacy": {
+            "correct": false,
+            "action_correct": true,
+            "missing": [
+              "admin",
+              "finance"
+            ],
+            "extra": [],
+            "tp": 2,
+            "fp": 0,
+            "fn": 2
+          },
+          "decisions": {
+            "correct": true,
+            "action_correct": true,
+            "missing": [],
+            "extra": [],
+            "tp": 4,
+            "fp": 0,
+            "fn": 0
+          }
+        }
+      ]
+    },
+    "interpretation": "Routing-only results. Required-agent recall does not prove every subquestion was answered. Synthetic labels need department review; no production-improvement claim or automatic promotion."
+  }
+}

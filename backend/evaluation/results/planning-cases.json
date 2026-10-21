@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "label_status": "Synthetic draft labels based on repository scopes; not department-reviewed or production-representative",
+  "purpose": "Paired routing comparison. Holdout labels are reserved for final evaluation, not threshold tuning. These are user utterances, not the independent predicate questions sent to the API.",
+  "cases": [
+    {
+      "id": "hr-1",
+      "split": "development",
+      "language": "en",
+      "query": "Which documents must an employee provide to add a new child to medical benefits?",
+      "expected_action": "delegate",
+      "expected_agents": [
+        "hr"
+      ]
+    },
+    {
+      "id": "multi-2a",
+      "split": "development",
+      "language": "en",
+      "query": "Explain sick leave eligibility and the process for booking office transport.",
+      "expected_action": "multi_delegate",
+      "expected_agents": [
+        "hr",
+        "admin"
+      ]
+    },
+    {
+      "id": "multi-3a",
+      "split": "development",
+      "language": "en",
+      "query": "How do I request annual leave, book an office vehicle, and reset my laptop password?",
+      "expected_action": "multi_delegate",
+      "expected_agents": [
+        "hr",
+        "admin",
+        "it"
+      ]
+    },
+    {
+      "id": "multi-4a",
+      "split": "development",
+      "language": "en",
+      "query": "I need the medical claim procedure, supplier invoice approval process, office AC repair process, and employee account unlocking steps.",
+      "expected_action": "multi_delegate",
+      "expected_agents": [
+        "hr",
+        "finance",
+        "admin",
+        "it"
+      ]
+    }
+  ]
+}
