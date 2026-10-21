@@ -285,7 +285,7 @@ const AgentWrapper = () => {
     <AuthenticatedTemplate>
       <motion.button
         type="button"
-        onClick={() => { window.location.href = '/voice'; }}
+        onClick={() => { window.location.href = '/workmateai/voice/agent'; }}
         whileHover={{ scale: 1.04 }}
         whileTap={{ scale: 0.97 }}
         title="Voice Agent"
@@ -299,7 +299,7 @@ const AgentWrapper = () => {
       </motion.button>
       <motion.button
         type="button"
-        onClick={() => { window.location.href = '/voice'; }}
+        onClick={() => { window.location.href = '/workmateai/voice/agent'; }}
         whileHover={{ scale: 1.04 }}
         whileTap={{ scale: 0.95 }}
         title="Voice Agent"
