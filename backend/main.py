@@ -124,3 +124,8 @@ app.include_router(realtime.router)  # Workmate live voice agent (/api/v1/realti
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Ask SLT API"}
+
+
+# Opt-in metrics; independent of AI providers and user authentication.
+from core.telemetry import install_http_metrics
+install_http_metrics(app)

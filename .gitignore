@@ -50,3 +50,4 @@ backend/storage
 # LifeStore MCP runtime image cache (regenerated at runtime)
 mcp_lifestore/cache/
 mcp_lifestore/orders/
+backend/evaluation/results/

@@ -84,13 +84,22 @@ class AgentState(TypedDict):
     routing_reason: NotRequired[str]
     routed_agent_id: NotRequired[str]
     routing_scores: NotRequired[dict[str, float]]
+    # Probabilities have different semantics from the legacy cosine scores.
+    routing_probabilities: NotRequired[dict[str, float]]
+    routing_metadata: NotRequired[dict]
+    routing_pending_agents: NotRequired[list[str]]
+    last_specialist_agents: NotRequired[list[str]]
+    routing_tasks: NotRequired[list[dict]]
+    routing_task_answers: NotRequired[dict[str, str]]
+    routing_task_status: NotRequired[dict[str, str]]
+    routing_unassigned_questions: NotRequired[list[str]]
     last_specialist_agent: NotRequired[str]
     pending_clarification: NotRequired[bool]
     clarification_options: NotRequired[list[str]]
     original_query: NotRequired[str]
     delegation_query: NotRequired[str]
 
-    # Multi-specialist fan-out (set when routing is ambiguous between two specialists).
+    # Selected specialists. Decisions routing can select more than two.
     routed_agent_ids: NotRequired[list[str]]
     specialist_answers: NotRequired[dict[str, str]]
     # Per-specialist focused sub-queries produced by decompose_query. Each routed
