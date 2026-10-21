@@ -674,14 +674,8 @@ function InvalidIframeRoute() {
             <div className="iframe-chat__bubble">
               <div className="iframe-chat__content">
                 <p className="iframe-chat__md-p">
-                  This iframe link is not available. Please use one of these:
+                  This chat is no longer available.
                 </p>
-
-                <ul className="iframe-chat__md-ul">
-                  <li className="iframe-chat__md-li">/asklifestore/iframe</li>
-                  <li className="iframe-chat__md-li">/askenterprise/iframe</li>
-                  <li className="iframe-chat__md-li">/askrainbowpages/iframe</li>
-                </ul>
               </div>
             </div>
           </article>
