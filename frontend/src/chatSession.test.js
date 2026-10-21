@@ -11,7 +11,7 @@ test('guest credential persists independently of thread IDs', async () => {
     const first = getGuestChatHeaders()['X-Chat-Session'];
     assert.match(first, /^[0-9a-f]{64}$/);
     assert.equal(getGuestChatHeaders()['X-Chat-Session'], first);
-    values.set('thread_aiexpo', 'a-public-thread-id');
+    values.set('thread_embryo', 'a-public-thread-id');
     assert.equal(getGuestChatHeaders()['X-Chat-Session'], first);
     // A page reload reuses the stored credential.
     const reloaded = await import('./chatSession.js?reload');

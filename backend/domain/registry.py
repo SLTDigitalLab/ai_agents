@@ -50,7 +50,6 @@ AGENT_BUILDERS: dict[str, callable] = {
     "consumer_business": build_kb_workflow,
     "backoffice_email": build_kb_workflow,
     "rainbowpages": build_kb_workflow,
-    "aiexpo": build_kb_workflow,
     "mintcrm": build_kb_workflow,
     "scm": build_kb_workflow,
     "product": build_kb_workflow,

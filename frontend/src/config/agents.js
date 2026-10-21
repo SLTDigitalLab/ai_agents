@@ -199,18 +199,6 @@ export const AGENTS = {
         disclaimer: "If you need any further clarifications, please reach out to the Rainbow Pages team."
     },
 
-    // 16. AI Expo (public — knowledge base from aiexpo.lk)
-    aiexpo: {
-        public: true,
-        id: "aiexpo",
-        title: "ASK AI EXPO",
-        subtitle: "Your guide to National AI Expo & Conference — speakers, agenda, partners, schedule, and event highlights.",
-        color: "from-cyan-900 to-cyan-600",
-        buttonColor: "bg-cyan-600 hover:bg-cyan-700",
-        idlePrompt: "Ask about speakers, the agenda, partners, or event dates.",
-        disclaimer: "Event information is sourced from aiexpo.lk and may change. Please verify critical details on the official website."
-    },
-
     // 17. MintCRM (knowledge base only)
     askmintcrm: {
         id: "mintcrm",

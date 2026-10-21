@@ -47,7 +47,7 @@ class ChatSecurityTests(unittest.TestCase):
             'langchain_core.messages': module('langchain_core.messages',
                 HumanMessage=lambda content: SimpleNamespace(type='human', content=content),
                 AIMessage=lambda content: SimpleNamespace(type='ai', content=content)),
-            'domain.registry': module('domain.registry', AGENT_BUILDERS={'hr': None, 'aiexpo': None},
+            'domain.registry': module('domain.registry', AGENT_BUILDERS={'hr': None, 'embryo': None},
                 get_agent_builder=Mock(), get_compiled_sync_graph=Mock(return_value=self.graph),
                 get_compiled_async_graph=AsyncMock(return_value=self.graph)),
             'domain.guardrails': module('domain.guardrails', classify_intent=self.classifier),
@@ -147,11 +147,11 @@ class ChatSecurityTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/v1/chat/hr/' + owner_key, headers=self.other).json()['messages'], [])
 
     def test_guest_sessions_are_separate_and_preserve_own_history(self):
-        body = {**self.body, 'agent_id': 'aiexpo'}
+        body = {**self.body, 'agent_id': 'embryo'}
         self.assertEqual(self.client.post('/api/v1/chat', json=body).status_code, 401)
         self.assertEqual(self.client.post('/api/v1/chat', json=body, headers=self.guest).status_code, 200)
-        self.assertTrue(self.client.get('/api/v1/chat/aiexpo/known-thread', headers=self.guest).json()['messages'])
-        self.assertEqual(self.client.get('/api/v1/chat/aiexpo/known-thread', headers={'X-Chat-Session': 'b' * 64}).json()['messages'], [])
+        self.assertTrue(self.client.get('/api/v1/chat/embryo/known-thread', headers=self.guest).json()['messages'])
+        self.assertEqual(self.client.get('/api/v1/chat/embryo/known-thread', headers={'X-Chat-Session': 'b' * 64}).json()['messages'], [])
         stored = next(iter(self.state.values()))
         self.assertTrue(stored['user_id'].startswith('guest:'))
         self.assertNotIn('a' * 64, stored['user_id'])
@@ -173,7 +173,7 @@ class ChatSecurityTests(unittest.TestCase):
         first = chat_identity({'tid': 'tenantA', 'oid': 'same', 'email': 'same@example.test'}, None)
         second = chat_identity({'tid': 'tenantB', 'oid': 'same', 'email': 'same@example.test'}, None)
         self.assertNotEqual(scoped_thread_id('hr', 'same', first), scoped_thread_id('hr', 'same', second))
-        self.assertNotEqual(scoped_thread_id('hr', 'same', first), scoped_thread_id('aiexpo', 'same', first))
+        self.assertNotEqual(scoped_thread_id('hr', 'same', first), scoped_thread_id('embryo', 'same', first))
 
     def test_feedback_requires_identity_and_uses_same_conversation_namespace(self):
         body = {'agent_id': 'hr', 'thread_id': 'known-thread', 'message_index': 0,

@@ -3,7 +3,7 @@
 This repository brings together SLT Digital Lab’s Workmate AI and enterprise AI assistant solutions, built on a shared frontend and backend.
 
 - **Workmate AI:** An internal workplace assistant with a supervisor and 10 specialist subagents: HR, Finance, Admin, IT, CIA, Network, Legal, Marketing, Enterprise Business, and Consumer Business.
-- **Enterprise AI assistant solutions:** Separate assistants for LifeStore, Enterprise, Rainbow Pages, AI Expo, MintCRM, and Embryo, tailored to their respective products, services, and audiences.
+- **Enterprise AI assistant solutions:** Separate assistants for LifeStore, Enterprise, Rainbow Pages, MintCRM, and Embryo, tailored to their respective products, services, and audiences.
 
 See the [supervisor routing configuration](backend/domain/config/supervisor_routing.py) for Workmate AI’s specialists and the [frontend agent configuration](frontend/src/config/agents.js) for assistant definitions. Ask Enterprise is a separate solution from Workmate AI’s Enterprise Business subagent.
 

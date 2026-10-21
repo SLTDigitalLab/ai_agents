@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException
 
-PUBLIC_AGENT_IDS = frozenset({"aiexpo", "backoffice_email", "embryo", "enterprise", "lifestore", "rainbowpages"})
+PUBLIC_AGENT_IDS = frozenset({"backoffice_email", "embryo", "enterprise", "lifestore", "rainbowpages"})
 
 
 def require_agent_identity(agent_id: str, user: dict | None) -> None:

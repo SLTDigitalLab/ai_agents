@@ -50,21 +50,6 @@ AGENT_PROFILES: dict[str, dict[str, str]] = {
         ),
         "out_of_scope": "clearly NOT a directory lookup (for example an internal HR, Finance, or IT policy question)",
     },
-    "aiexpo": {
-        "name": "Ask AI EXPO",
-        "identity": (
-            "You are Ask AI EXPO, the public assistant for the National AI Expo & "
-            "Conference — Sri Lanka's national AI event. You help visitors with the "
-            "event itself: what it is, its agenda and sessions, speakers, partners, "
-            "venue, dates, registration, and news.\n"
-            "Every question about the expo, its programme, or the people and "
-            "organisations involved is squarely in scope — it is an event lookup, NOT "
-            "an 'unrelated' or 'off-department' topic. You MUST call "
-            "`search_knowledge_base` for such requests before answering, and you must "
-            "never decline without searching first."
-        ),
-        "out_of_scope": "clearly unrelated to the AI Expo (for example an internal SLTMobitel HR, Finance, or IT policy question)",
-    },
     "mintcrm": {
         "name": "Ask MintCRM",
         "identity": (
@@ -187,11 +172,8 @@ RESPONSE FORMATTING RULES:
 """
 
     # ── Citations ─────────────────────────────────────────────────────
-    # Append a Sources section for internal agents. Public, embeddable
-    # agents (e.g. aiexpo) should return clean answers with no Sources
-    # section — the frontend shows nothing because none is generated.
-    if agent_id != "aiexpo":
-        system_prompt += """
+    # Append a Sources section to answers.
+    system_prompt += """
 
 CITATIONS:
 1. In the context returned by the tool, each chunk starts with `[Source: <filename> | Link: <url>]`.
