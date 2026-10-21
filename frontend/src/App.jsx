@@ -281,7 +281,7 @@ const AgentWrapper = () => {
   const effectiveTheme =
     !isPublicAgent && isAuthed && theme === "dark" ? "dark" : "light";
 
-  const voiceAgentButton = !isPublicAgent && (
+  const voiceAgentButton = agentType === 'workmateai' && (
     <AuthenticatedTemplate>
       <motion.button
         type="button"
