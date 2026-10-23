@@ -101,7 +101,7 @@ const IngestionPanel = () => {
     const [urlLoading, setUrlLoading] = useState(false);
 
     // OneDrive Ingestion state
-    const [odForm, setOdForm] = useState({ folder_id: '', token: '', agent_name: AGENT_LIST[0]?.id || '' });
+    const [odForm, setOdForm] = useState({ folder_id: '', token: '', agent_name: AGENT_LIST[0]?.id || '', force: false });
     const [odLoading, setOdLoading] = useState(false);
 
     // Server-tracked ingestion status (survives page refresh)
@@ -212,7 +212,7 @@ const IngestionPanel = () => {
                     title: 'Ingestion Started',
                     message: 'Running in the background — see progress banner.',
                 });
-                setOdForm(prev => ({ ...prev, folder_id: '', token: '' }));
+                setOdForm(prev => ({ ...prev, folder_id: '', token: '', force: false }));
             } else {
                 setStatus({
                     type: data.status === 'success' ? 'success' : data.status === 'warning' ? 'warning' : 'error',
@@ -453,6 +453,23 @@ const IngestionPanel = () => {
                                         A valid Microsoft Graph API Bearer token with Files.Read permissions
                                     </p>
                                 </div>
+
+                                {/* Force re-ingest */}
+                                <label className="flex items-start gap-2.5 cursor-pointer">
+                                    <input
+                                        id="od-force"
+                                        type="checkbox"
+                                        checked={odForm.force}
+                                        onChange={(e) => setOdForm(prev => ({ ...prev, force: e.target.checked }))}
+                                        className="mt-0.5 accent-cyan-500"
+                                    />
+                                    <span className="text-white/50 text-xs">
+                                        Force re-ingest unchanged files
+                                        <span className="block text-white/20 text-[11px]">
+                                            Replaces the existing data for every file in the folder. Slower and uses more model calls.
+                                        </span>
+                                    </span>
+                                </label>
 
                                 {/* Supported Files Info */}
                                 <div className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3">
