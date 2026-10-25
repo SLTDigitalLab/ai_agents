@@ -84,6 +84,10 @@ class Settings(BaseSettings):
     EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
     EVIDENCE_RENDER_ZOOM: float = 1.75
     EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
+    # Retrieval-time filter for PDF evidence images. Set to false for an
+    # immediate behavior rollback without changing the indexed documents.
+    VISUAL_EVIDENCE_RELEVANCE_ENABLED: bool = True
+    VISUAL_EVIDENCE_MIN_SCORE: float = 0.45
 
     # API key for external clients (e.g. voice assistant) hitting the Finance retrieval endpoint
     VOICE_ASSISTANT_API_KEY: Optional[str] = None

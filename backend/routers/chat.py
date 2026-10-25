@@ -419,12 +419,12 @@ def _filter_evidence_for_answer(answer_text: str, evidence_items: list[dict]) ->
 
 def _build_evidence_stream_chunk(answer_text: str, thread_id: str) -> str:
     """Build hidden evidence JSON for the frontend, if relevant evidence exists."""
-    evidence_items = consume_thread_evidence(
-        thread_id,
-        max_items=settings.EVIDENCE_MAX_ITEMS_PER_ANSWER,
-    )
+    # Select cited/relevant evidence before applying the display limit. A
+    # relevant crop may otherwise be lost behind earlier, uncited candidates.
+    evidence_items = consume_thread_evidence(thread_id)
 
     evidence_items = _filter_evidence_for_answer(answer_text, evidence_items)
+    evidence_items = evidence_items[:settings.EVIDENCE_MAX_ITEMS_PER_ANSWER]
     evidence_items = [_sanitize_evidence_item(item) for item in evidence_items]
 
     if not evidence_items:

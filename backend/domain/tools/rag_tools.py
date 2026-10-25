@@ -25,6 +25,7 @@ from qdrant_client import QdrantClient
 
 from core.config import settings, agent_collection_name, collection_suffix
 from core.llm import get_embedding_model
+from domain.tools.visual_evidence import select_relevant_images
 
 log = logging.getLogger(__name__)
 
@@ -354,6 +355,7 @@ async def _search_qdrant_knowledge_base(
             return "No relevant vector documents found."
 
         context_parts = []
+        image_candidates: list[dict[str, Any]] = []
 
         for doc in results:
             source = (
@@ -372,31 +374,56 @@ async def _search_qdrant_knowledge_base(
             # the filename so citations never read "Untitled".
             title = doc.metadata.get("title") or source or "Untitled"
 
-            # Collect any visual/table evidence attached to this chunk at
-            # ingestion time so chat.py can stream it to the frontend.
-            _add_thread_evidence(
-                thread_id=thread_id,
-                evidence_items=doc.metadata.get("evidence") or [],
-                source=source,
-                link=link,
-            )
-
             evidence_items = (
                 doc.metadata.get("evidence")
                 or doc.metadata.get("evidence_items")
                 or []
             )
-
-            _add_thread_evidence(
-                thread_id=thread_id,
-                evidence_items=evidence_items,
-                source=source,
-                link=link,
-            )
+            if settings.VISUAL_EVIDENCE_RELEVANCE_ENABLED and thread_id:
+                if isinstance(evidence_items, list):
+                    _add_thread_evidence(
+                        thread_id=thread_id,
+                        evidence_items=[
+                            item for item in evidence_items
+                            if isinstance(item, dict) and item.get("type") != "image"
+                        ],
+                        source=source,
+                        link=link,
+                    )
+                    for item in evidence_items:
+                        if not isinstance(item, dict) or item.get("type") != "image" or not item.get("url"):
+                            continue
+                        image_candidates.append({
+                            "point_id": doc.metadata.get("_id") or getattr(doc, "id", None),
+                            "description": doc.page_content,
+                            "item": {
+                                **item,
+                                "source": item.get("source") or source,
+                                "link": item.get("link") or link,
+                            },
+                        })
+            else:
+                _add_thread_evidence(
+                    thread_id=thread_id,
+                    evidence_items=evidence_items,
+                    source=source,
+                    link=link,
+                )
 
             context_parts.append(
                 f"[Vector Source: {source} | Link: {link} | Title: {title}]\n"
                 f"{doc.page_content}"
+            )
+
+        if image_candidates:
+            relevant_images = await select_relevant_images(
+                query, image_candidates, collection_name, client, embeddings
+            )
+            _add_thread_evidence(
+                thread_id=thread_id,
+                evidence_items=relevant_images,
+                source="Unknown Source",
+                link="#",
             )
 
         log.info(
