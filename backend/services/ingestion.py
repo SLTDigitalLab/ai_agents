@@ -1291,6 +1291,33 @@ class IngestionService:
         finally:
             src.close()
 
+    def _extract_visual_documents(self, file_path: Path, file_id: str) -> list[Document]:
+        """Index the replacement pipeline's vision descriptions alongside text."""
+        if not settings.VISUAL_RAG_ENABLED:
+            return []
+        if file_path.suffix.lower() not in {
+            ".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls",
+            ".png", ".jpg", ".jpeg", ".eml",
+        }:
+            return []
+        if not settings.OPENAI_API_KEY:
+            log.warning("Visual extraction skipped for %s: OPENAI_API_KEY is missing", file_path.name)
+            return []
+        try:
+            from services.visual_extractor import process_document_visuals
+
+            # Graph item IDs are untrusted strings and must not become paths.
+            visual_id = hashlib.sha256(file_id.encode("utf-8")).hexdigest()[:24]
+            _, visual_docs = process_document_visuals(str(file_path), visual_id)
+            for doc in visual_docs:
+                # The image is served from disk; embedding its base64 bytes in
+                # every Qdrant point would needlessly bloat the collection.
+                doc.metadata.pop("image_base64", None)
+            return visual_docs
+        except Exception:
+            log.exception("Visual extraction failed for %s", file_path.name)
+            return []
+
     def _file_already_ingested(self, collection_name: str, onedrive_id: str, last_modified: str) -> bool:
         """Check if a file with this onedrive_id and lastModified timestamp
         already has vectors in the collection. Returns True if up-to-date."""
@@ -1886,6 +1913,7 @@ class IngestionService:
 
                     # Chunk using semantic logic
                     chunks = self._load_and_chunk_file(dest_path)
+                    chunks += self._extract_visual_documents(dest_path, onedrive_id)
                     if not chunks:
                         # Empty output usually means a scanned/image-only PDF
                         # with no text layer. Surface it so admins can re-run
@@ -1918,13 +1946,15 @@ class IngestionService:
                         if table_evidence:
                             evidence_items.append(table_evidence)
 
-                        image_evidence_items = self._build_image_evidence(
-                            doc=doc,
-                            file_path=dest_path,
-                            file_name=file_name,
-                            link=source_link,
-                            render_cache=evidence_cache,
-                        )
+                        image_evidence_items = None
+                        if not settings.VISUAL_RAG_ENABLED:
+                            image_evidence_items = self._build_image_evidence(
+                                doc=doc,
+                                file_path=dest_path,
+                                file_name=file_name,
+                                link=source_link,
+                                render_cache=evidence_cache,
+                            )
                         if image_evidence_items:
                             evidence_items.extend(image_evidence_items)
 
@@ -2159,6 +2189,7 @@ class IngestionService:
                         f.write(file_resp.content)
 
                     chunks = self._load_and_chunk_file(dest_path)
+                    chunks += self._extract_visual_documents(dest_path, sharepoint_item_id)
 
                     if not chunks:
                         log.error(
@@ -2198,13 +2229,15 @@ class IngestionService:
                         if table_evidence:
                             evidence_items.append(table_evidence)
 
-                        image_evidence_items = self._build_image_evidence(
-                            doc=doc,
-                            file_path=dest_path,
-                            file_name=file_name,
-                            link=source_link,
-                            render_cache=evidence_cache,
-                        )
+                        image_evidence_items = None
+                        if not settings.VISUAL_RAG_ENABLED:
+                            image_evidence_items = self._build_image_evidence(
+                                doc=doc,
+                                file_path=dest_path,
+                                file_name=file_name,
+                                link=source_link,
+                                render_cache=evidence_cache,
+                            )
                         if image_evidence_items:
                             evidence_items.extend(image_evidence_items)
 

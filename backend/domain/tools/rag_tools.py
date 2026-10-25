@@ -15,6 +15,8 @@ Neo4j:
 
 import json
 import logging
+import re
+from pathlib import Path
 from typing import Annotated, Any, Optional
 
 import httpx
@@ -22,6 +24,7 @@ from langchain_core.tools import tool
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langgraph.prebuilt import InjectedState
 from qdrant_client import QdrantClient
+from qdrant_client import models as qdrant_models
 
 from core.config import settings, agent_collection_name, collection_suffix
 from core.llm import get_embedding_model
@@ -37,11 +40,15 @@ except Exception:
     GraphDatabase = None
 
 # — Per-thread evidence cache -------------------------------------------------
-# search_knowledge_base collects image/table evidence from retrieved Qdrant
-# chunks (attached at ingestion time as doc.metadata["evidence"]). chat.py
-# consumes this cache after the final answer is generated and streams the
-# best matching evidence to the frontend.
+# search_knowledge_base collects approved visual-description images. chat.py
+# consumes this cache after the final answer and sends the selected image to
+# the frontend. The previous text-chunk PDF crops remain a fallback only when
+# VISUAL_RAG_ENABLED is disabled.
 _THREAD_EVIDENCE_CACHE: dict[str, list[dict[str, Any]]] = {}
+_DIAGRAM_REQUEST_RE = re.compile(
+    r"\b(flow\s?-?charts?|diagrams?|workflows?|process\s+maps?|charts?|figures?|illustrations?|visuals?)\b",
+    re.IGNORECASE,
+)
 
 
 def clear_thread_evidence(thread_id: str | None) -> None:
@@ -345,7 +352,30 @@ async def _search_qdrant_knowledge_base(
 
         results = await vector_store.asimilarity_search(query=query, k=k)
 
-        if not results:
+        # A dedicated visual search keeps diagrams discoverable even when
+        # text chunks fill the normal hybrid top-k.
+        extra_visual_docs = []
+        if settings.VISUAL_RAG_ENABLED and thread_id and _DIAGRAM_REQUEST_RE.search(query):
+            try:
+                visual_hits = await vector_store.asimilarity_search(
+                    query=query,
+                    k=5,
+                    filter=qdrant_models.Filter(must=[
+                        qdrant_models.FieldCondition(
+                            key="metadata.type",
+                            match=qdrant_models.MatchValue(value="visual_description"),
+                        )
+                    ]),
+                )
+                seen_ids = {doc.metadata.get("_id") for doc in results}
+                extra_visual_docs = [
+                    doc for doc in visual_hits if doc.metadata.get("_id") not in seen_ids
+                ]
+            except Exception:
+                log.exception("Visual-only search failed; continuing with normal results")
+
+        all_docs = results + extra_visual_docs
+        if not all_docs:
             log.info(
                 "Qdrant search returned 0 results for agent='%s' collection='%s' query='%s'",
                 agent_id,
@@ -357,7 +387,7 @@ async def _search_qdrant_knowledge_base(
         context_parts = []
         image_candidates: list[dict[str, Any]] = []
 
-        for doc in results:
+        for doc in all_docs:
             source = (
                 doc.metadata.get("source")
                 or doc.metadata.get("source_url")
@@ -374,38 +404,30 @@ async def _search_qdrant_knowledge_base(
             # the filename so citations never read "Untitled".
             title = doc.metadata.get("title") or source or "Untitled"
 
-            evidence_items = (
-                doc.metadata.get("evidence")
-                or doc.metadata.get("evidence_items")
-                or []
-            )
-            if settings.VISUAL_EVIDENCE_RELEVANCE_ENABLED and thread_id:
-                if isinstance(evidence_items, list):
-                    _add_thread_evidence(
-                        thread_id=thread_id,
-                        evidence_items=[
-                            item for item in evidence_items
-                            if isinstance(item, dict) and item.get("type") != "image"
-                        ],
-                        source=source,
-                        link=link,
-                    )
-                    for item in evidence_items:
-                        if not isinstance(item, dict) or item.get("type") != "image" or not item.get("url"):
-                            continue
+            if settings.VISUAL_RAG_ENABLED:
+                # Legacy PDF crops are attached to text chunks. Ignore those;
+                # only searchable VLM descriptions from the new pipeline may
+                # supply images.
+                if thread_id and doc.metadata.get("type") == "visual_description":
+                    image_path = doc.metadata.get("image_path")
+                    if image_path and Path(image_path).is_file():
                         image_candidates.append({
-                            "point_id": doc.metadata.get("_id") or getattr(doc, "id", None),
+                            "point_id": doc.metadata.get("_id"),
                             "description": doc.page_content,
                             "item": {
-                                **item,
-                                "source": item.get("source") or source,
-                                "link": item.get("link") or link,
+                                "type": "image",
+                                "url": f"{settings.EVIDENCE_URL_PREFIX}/{Path(image_path).name}",
+                                "source": source,
+                                "link": link,
+                                "page": doc.metadata.get("page_number") or doc.metadata.get("page"),
+                                "title": title,
                             },
                         })
             else:
+                # Operational fallback to the previous evidence behavior.
                 _add_thread_evidence(
                     thread_id=thread_id,
-                    evidence_items=evidence_items,
+                    evidence_items=doc.metadata.get("evidence") or doc.metadata.get("evidence_items") or [],
                     source=source,
                     link=link,
                 )
@@ -416,8 +438,12 @@ async def _search_qdrant_knowledge_base(
             )
 
         if image_candidates:
-            relevant_images = await select_relevant_images(
-                query, image_candidates, collection_name, client, embeddings
+            relevant_images = (
+                await select_relevant_images(
+                    query, image_candidates, collection_name, client, embeddings
+                )
+                if settings.VISUAL_EVIDENCE_RELEVANCE_ENABLED
+                else [candidate["item"] for candidate in image_candidates]
             )
             _add_thread_evidence(
                 thread_id=thread_id,

@@ -84,8 +84,10 @@ class Settings(BaseSettings):
     EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
     EVIDENCE_RENDER_ZOOM: float = 1.75
     EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
-    # Retrieval-time filter for PDF evidence images. Set to false for an
-    # immediate behavior rollback without changing the indexed documents.
+    # Visual descriptions are created during ingestion and searched separately
+    # for diagram questions. Disable to omit visual evidence during rollback.
+    VISUAL_RAG_ENABLED: bool = True
+    VISUAL_AUDIT_ALL_PDF_PAGES: bool = False
     VISUAL_EVIDENCE_RELEVANCE_ENABLED: bool = True
     VISUAL_EVIDENCE_MIN_SCORE: float = 0.45
 
@@ -139,6 +141,12 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def evidence_storage_dir() -> Path:
+    """Return the directory exposed by the evidence-image endpoint."""
+    configured = Path(settings.EVIDENCE_STORAGE_DIR)
+    return configured if configured.is_absolute() else ROOT_DIR / "backend" / configured
 
 
 # Make the Vertex service-account credentials discoverable by the Google SDK.
