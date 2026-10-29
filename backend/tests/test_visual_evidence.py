@@ -1,6 +1,7 @@
 """Checks for the production Visual RAG relevance gate."""
 
 import json
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 from tempfile import TemporaryDirectory
@@ -9,6 +10,11 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from langchain_core.documents import Document
 import fitz
+from PIL import Image
+from openpyxl import Workbook
+from openpyxl.drawing.image import Image as WorkbookImage
+from pptx import Presentation
+from pptx.util import Inches
 
 from domain.tools import rag_tools
 from domain.tools import visual_evidence
@@ -34,7 +40,9 @@ class CosineTests(unittest.TestCase):
             pdf_path = temp_dir / "policy.pdf"
             pdf = fitz.open()
             page = pdf.new_page()
-            page.insert_text((72, 72), "Leave approval flow")
+            page.insert_text((72, 72), "Leave approval flowchart")
+            for offset in (0, 120, 240):
+                page.draw_rect(fitz.Rect(72 + offset, 110, 160 + offset, 150))
             pdf.save(pdf_path)
             pdf.close()
             storage = temp_dir / "evidence"
@@ -44,7 +52,7 @@ class CosineTests(unittest.TestCase):
             with patch.object(visual_extractor, "STORAGE_DIR", storage), patch.object(
                 visual_extractor, "AUDIT_DIR", audit
             ), patch.object(
-                visual_extractor.settings, "VISUAL_AUDIT_ALL_PDF_PAGES", True
+                visual_extractor.settings, "VISUAL_AUDIT_ALL_PDF_PAGES", False
             ), patch.object(
                 visual_extractor, "analyze_image_with_gpt4o", return_value="Title: Leave approval flow\nTopic: leave applications"
             ):
@@ -52,8 +60,70 @@ class CosineTests(unittest.TestCase):
 
             self.assertEqual(len(documents), 1)
             self.assertEqual(documents[0].metadata["type"], "visual_description")
+            self.assertNotIn("image_base64", documents[0].metadata)
             self.assertIn("Leave approval flow", documents[0].page_content)
             self.assertTrue(Path(documents[0].metadata["image_path"]).is_file())
+
+    def test_powerpoint_keeps_two_images_on_the_same_slide(self):
+        with TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            storage = root / "evidence"
+            storage.mkdir()
+            image_paths = []
+            for index, color in enumerate(("red", "blue"), 1):
+                image_path = root / f"image-{index}.png"
+                Image.new("RGB", (200, 100), color).save(image_path)
+                image_paths.append(image_path)
+            deck = Presentation()
+            slide = deck.slides.add_slide(deck.slide_layouts[6])
+            for index, image_path in enumerate(image_paths):
+                slide.shapes.add_picture(str(image_path), Inches(index * 3), Inches(1))
+            deck_path = root / "diagrams.pptx"
+            deck.save(deck_path)
+
+            with patch.object(visual_extractor, "STORAGE_DIR", storage), patch.object(
+                visual_extractor, "analyze_image_with_gpt4o", return_value="Title: Useful chart"
+            ):
+                _, documents = visual_extractor.process_pptx_visuals(str(deck_path), "safe-id")
+
+            self.assertEqual(len(documents), 2)
+            paths = [Path(doc.metadata["image_path"]) for doc in documents]
+            self.assertNotEqual(paths[0], paths[1])
+            self.assertTrue(all(path.is_file() for path in paths))
+            self.assertTrue(all(path.with_suffix(".json").is_file() for path in paths))
+
+    def test_excel_extracts_embedded_image(self):
+        with TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            storage = root / "evidence"
+            storage.mkdir()
+            image_path = root / "flow.png"
+            Image.new("RGB", (200, 100), "green").save(image_path)
+            workbook = Workbook()
+            workbook.active.add_image(WorkbookImage(str(image_path)), "A1")
+            workbook_path = root / "diagrams.xlsx"
+            workbook.save(workbook_path)
+
+            with patch.object(visual_extractor, "STORAGE_DIR", storage), patch.object(
+                visual_extractor, "analyze_image_with_gpt4o", return_value="Title: Useful chart"
+            ):
+                _, documents = visual_extractor.process_xlsx_visuals(str(workbook_path), "safe-id")
+
+            self.assertEqual(len(documents), 1)
+            self.assertTrue(Path(documents[0].metadata["image_path"]).is_file())
+
+    def test_vision_failure_is_not_treated_as_no_visual_content(self):
+        with TemporaryDirectory() as temp_name:
+            root = Path(temp_name)
+            image_path = root / "flow.png"
+            Image.new("RGB", (200, 100), "green").save(image_path)
+            storage = root / "evidence"
+            storage.mkdir()
+            with patch.object(visual_extractor, "STORAGE_DIR", storage), patch.object(
+                visual_extractor, "analyze_image_with_gpt4o", side_effect=RuntimeError("vision unavailable")
+            ):
+                with self.assertRaisesRegex(RuntimeError, "vision unavailable"):
+                    visual_extractor.process_image_visuals(str(image_path), "safe-id")
 
 
 class VisualEvidenceTests(unittest.IsolatedAsyncioTestCase):
@@ -144,6 +214,24 @@ class VisualEvidenceTests(unittest.IsolatedAsyncioTestCase):
         model = SimpleNamespace(ainvoke=AsyncMock(side_effect=RuntimeError("provider unavailable")))
 
         with patch.object(visual_evidence, "_model", return_value=model):
+            selected = await visual_evidence.select_relevant_images(
+                "leave", [candidate("a", "/api/v1/evidence/images/a.png", "Leave flow")],
+                "hr_docs", client, embeddings,
+            )
+
+        self.assertEqual(selected, [])
+
+    async def test_slow_model_times_out_and_omits_image(self):
+        embeddings = Mock(embed_query=Mock(return_value=[1.0, 0.0]))
+        client = Mock(retrieve=Mock(return_value=[SimpleNamespace(id="a", vector=[1.0, 0.0])]))
+        async def slow_review(_messages):
+            await asyncio.sleep(1)
+
+        model = SimpleNamespace(ainvoke=AsyncMock(side_effect=slow_review))
+
+        with patch.object(visual_evidence, "_model", return_value=model), patch.object(
+            visual_evidence.settings, "VISUAL_EVIDENCE_REVIEW_TIMEOUT_SECONDS", 0.01
+        ):
             selected = await visual_evidence.select_relevant_images(
                 "leave", [candidate("a", "/api/v1/evidence/images/a.png", "Leave flow")],
                 "hr_docs", client, embeddings,

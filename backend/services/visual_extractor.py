@@ -3,6 +3,8 @@ import json
 import base64
 import logging
 import tempfile
+import re
+from io import BytesIO
 from pathlib import Path
 from typing import Tuple, List
 import fitz  # PyMuPDF
@@ -67,6 +69,14 @@ def encode_image(image_path: str) -> str:
         return base64.b64encode(image_file.read()).decode("utf-8")
 
 
+def save_embedded_png(image_data: bytes, image_path: Path) -> None:
+    """Normalize embedded JPEG/other raster bytes to the PNG MIME we send."""
+    from PIL import Image
+
+    with Image.open(BytesIO(image_data)) as image:
+        image.convert("RGB").save(image_path, format="PNG")
+
+
 def analyze_image_with_gpt4o(image_path: str, prompt: str = VISUAL_DETECTION_PROMPT) -> str:
     """Send an image to GPT-4o for visual analysis."""
     try:
@@ -87,7 +97,7 @@ def analyze_image_with_gpt4o(image_path: str, prompt: str = VISUAL_DETECTION_PRO
         return response.content.strip()
     except Exception as e:
         log.error(f"GPT-4o analysis failed for {image_path}: {e}")
-        return "NO_VISUAL_CONTENT"
+        raise
 
 
 def save_visual_record(
@@ -98,20 +108,17 @@ def save_visual_record(
     visual_description: str
 ) -> dict:
     """Save visual record as JSON and return the record dict."""
-    base64_img = encode_image(str(image_path))
-    
     record = {
         "doc_id": doc_id,
         "source_file": source_file,
         "page_number": page_number,
         "image_path": str(image_path),
-        "base64_image": base64_img,
         "visual_description": visual_description,
         "type": "visual_description"
     }
     
     # Save JSON metadata alongside visual assets
-    json_path = STORAGE_DIR / f"{doc_id}_page_{page_number}.json"
+    json_path = image_path.with_suffix(".json")
     with open(json_path, "w") as f:
         json.dump(record, f, indent=2)
     
@@ -136,7 +143,6 @@ def create_vector_document(
     page_number: int,
     image_path: str,
     visual_description: str,
-    base64_img: str
 ) -> Document:
     """Create a LangChain Document from visual evidence."""
     return Document(
@@ -149,7 +155,6 @@ def create_vector_document(
             "type": "visual_description",
             "has_image": True,
             "image_path": image_path,
-            "image_base64": base64_img,
             "source_type": "visual_evidence"
         }
     )
@@ -183,7 +188,7 @@ def process_pdf_visuals(pdf_path: str, doc_id: str) -> Tuple[List[dict], List[Do
             doc = fitz.open(cleaned_path)
         except Exception as repair_exc:
             # Rendering a damaged original can crash the whole backend in
-            # native PyMuPDF code; keep text ingestion alive instead.
+            # native PyMuPDF code; fail this file instead.
             raise RuntimeError(f"PDF repair failed; visual extraction skipped: {repair_exc}") from repair_exc
 
         source_file = os.path.basename(pdf_path)
@@ -193,8 +198,14 @@ def process_pdf_visuals(pdf_path: str, doc_id: str) -> Tuple[List[dict], List[Do
             images = page.get_images(full=True)
             drawings = page.get_drawings()
 
-            # Check for raster images or visual vector components
-            has_visual_signal = bool(images) or len(drawings) > 10
+            # Include simpler vector flowcharts as well as raster diagrams.
+            # The vision model rejects text-only pages after this cheap pass.
+            page_text = page.get_text("text")
+            has_visual_signal = (
+                bool(images)
+                or len(drawings) >= 6
+                or bool(re.search(r"\b(flow\s?chart|diagram|workflow|process\s+flow|chart|figure)\b", page_text, re.I))
+            )
             if not has_visual_signal and not settings.VISUAL_AUDIT_ALL_PDF_PAGES:
                 _write_audit_record(
                     doc_id,
@@ -233,9 +244,8 @@ def process_pdf_visuals(pdf_path: str, doc_id: str) -> Tuple[List[dict], List[Do
                 continue
 
             # 3. Save record and create vector document
-            base64_img = encode_image(str(image_path))
             record = save_visual_record(doc_id, source_file, page_num + 1, image_path, visual_description)
-            vector_doc = create_vector_document(doc_id, source_file, page_num + 1, str(image_path), visual_description, base64_img)
+            vector_doc = create_vector_document(doc_id, source_file, page_num + 1, str(image_path), visual_description)
             
             visual_records.append(record)
             vector_documents.append(vector_doc)
@@ -253,6 +263,7 @@ def process_pdf_visuals(pdf_path: str, doc_id: str) -> Tuple[List[dict], List[Do
         log.info(f"PDF visual extraction: extracted {len(vector_documents)} visuals from {pdf_path}")
     except Exception as e:
         log.error(f"PDF visual extraction failed for {pdf_path}: {e}")
+        raise
     finally:
         if doc is not None:
             doc.close()
@@ -271,7 +282,6 @@ def process_docx_visuals(docx_path: str, doc_id: str) -> Tuple[List[dict], List[
     
     try:
         from docx import Document as DocxDocument
-        from docx.oxml import parse_xml
         
         doc = DocxDocument(docx_path)
         source_file = os.path.basename(docx_path)
@@ -288,8 +298,7 @@ def process_docx_visuals(docx_path: str, doc_id: str) -> Tuple[List[dict], List[
                     image_filename = f"{doc_id}_page_{page_counter}.png"
                     image_path = STORAGE_DIR / image_filename
                     
-                    with open(image_path, "wb") as f:
-                        f.write(image_data)
+                    save_embedded_png(image_data, image_path)
                     
                     # Analyze with GPT-4o
                     visual_description = analyze_image_with_gpt4o(str(image_path))
@@ -299,20 +308,22 @@ def process_docx_visuals(docx_path: str, doc_id: str) -> Tuple[List[dict], List[
                             os.remove(image_path)
                         continue
                     
-                    base64_img = encode_image(str(image_path))
                     record = save_visual_record(doc_id, source_file, page_counter, image_path, visual_description)
-                    vector_doc = create_vector_document(doc_id, source_file, page_counter, str(image_path), visual_description, base64_img)
+                    vector_doc = create_vector_document(doc_id, source_file, page_counter, str(image_path), visual_description)
                     
                     visual_records.append(record)
                     vector_documents.append(vector_doc)
                 except Exception as e:
                     log.warning(f"Failed to extract image from DOCX: {e}")
+                    raise
         
         log.info(f"DOCX visual extraction: extracted {len(vector_documents)} visuals from {docx_path}")
     except ImportError:
-        log.warning("python-docx not installed, skipping DOCX visual extraction")
+        log.exception("python-docx is required for DOCX visual extraction")
+        raise
     except Exception as e:
         log.error(f"DOCX visual extraction failed for {docx_path}: {e}")
+        raise
     
     return visual_records, vector_documents
 
@@ -326,34 +337,22 @@ def process_pptx_visuals(pptx_path: str, doc_id: str) -> Tuple[List[dict], List[
     
     try:
         from pptx import Presentation
-        from pptx.util import Inches
         
         prs = Presentation(pptx_path)
         source_file = os.path.basename(pptx_path)
         
         for slide_num, slide in enumerate(prs.slides, 1):
             try:
-                # Convert slide to image using python-pptx
-                # First, save slide as temporary PDF using LibreOffice if available
-                # Or use PIL to render the slide
-                
-                # Alternative approach: extract shapes and text
-                slide_text = []
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        slide_text.append(shape.text)
-                
-                # If slide has images, extract them
-                image_found = False
+                image_index = 0
                 for shape in slide.shapes:
                     if shape.shape_type == 13:  # Picture shape
                         try:
+                            image_index += 1
                             image = shape.image
-                            image_filename = f"{doc_id}_slide_{slide_num}.png"
+                            image_filename = f"{doc_id}_slide_{slide_num}_img_{image_index}.png"
                             image_path = STORAGE_DIR / image_filename
-                            
-                            with open(image_path, "wb") as f:
-                                f.write(image.blob)
+
+                            save_embedded_png(image.blob, image_path)
                             
                             visual_description = analyze_image_with_gpt4o(str(image_path))
                             
@@ -362,44 +361,25 @@ def process_pptx_visuals(pptx_path: str, doc_id: str) -> Tuple[List[dict], List[
                                     os.remove(image_path)
                                 continue
                             
-                            image_found = True
-                            base64_img = encode_image(str(image_path))
                             record = save_visual_record(doc_id, source_file, slide_num, image_path, visual_description)
-                            vector_doc = create_vector_document(doc_id, source_file, slide_num, str(image_path), visual_description, base64_img)
+                            vector_doc = create_vector_document(doc_id, source_file, slide_num, str(image_path), visual_description)
                             
                             visual_records.append(record)
                             vector_documents.append(vector_doc)
                         except Exception as e:
                             log.warning(f"Failed to extract image from PPTX slide: {e}")
-                
-                if not image_found and slide_text:
-                    # Try rendering slide to image if has content
-                    try:
-                        import subprocess
-                        temp_pptx = STORAGE_DIR / f"temp_{doc_id}_slide_{slide_num}.pptx"
-                        temp_pptx.parent.mkdir(parents=True, exist_ok=True)
-                        
-                        # Render using LibreOffice if available
-                        result = subprocess.run(
-                            [
-                                "libreoffice", "--headless", "--convert-to", "pdf",
-                                "--outdir", str(STORAGE_DIR), str(pptx_path)
-                            ],
-                            capture_output=True,
-                            timeout=30
-                        )
-                        # This is advanced; for now just log
-                        log.debug(f"PPTX slide {slide_num} rendering attempted")
-                    except Exception as e:
-                        log.debug(f"Could not render PPTX slide: {e}")
+                            raise
             except Exception as e:
                 log.warning(f"Failed to process PPTX slide {slide_num}: {e}")
+                raise
         
         log.info(f"PPTX visual extraction: extracted {len(vector_documents)} visuals from {pptx_path}")
     except ImportError:
-        log.warning("python-pptx not installed, skipping PPTX visual extraction")
+        log.exception("python-pptx is required for PPTX visual extraction")
+        raise
     except Exception as e:
         log.error(f"PPTX visual extraction failed for {pptx_path}: {e}")
+        raise
     
     return visual_records, vector_documents
 
@@ -413,7 +393,6 @@ def process_xlsx_visuals(xlsx_path: str, doc_id: str) -> Tuple[List[dict], List[
     
     try:
         from openpyxl import load_workbook
-        from openpyxl.drawing.image import Image as XlsxImage
         
         workbook = load_workbook(xlsx_path)
         source_file = os.path.basename(xlsx_path)
@@ -423,57 +402,40 @@ def process_xlsx_visuals(xlsx_path: str, doc_id: str) -> Tuple[List[dict], List[
             try:
                 sheet = workbook[sheet_name]
                 
-                # Extract images/charts from sheet
-                for drawing in sheet._drawing_list:
+                # openpyxl stores embedded pictures in _images. Its _charts
+                # objects are not raster images and need a separate renderer.
+                for drawing in sheet._images:
                     try:
-                        if hasattr(drawing, 'image'):
-                            page_counter += 1
-                            image_data = drawing.image.blob
-                            image_filename = f"{doc_id}_sheet_{sheet_name}_img_{page_counter}.png"
-                            image_path = STORAGE_DIR / image_filename
-                            
-                            with open(image_path, "wb") as f:
-                                f.write(image_data)
-                            
-                            visual_description = analyze_image_with_gpt4o(str(image_path))
-                            
-                            if "NO_VISUAL_CONTENT" in visual_description:
-                                if image_path.exists():
-                                    os.remove(image_path)
-                                continue
-                            
-                            base64_img = encode_image(str(image_path))
-                            record = save_visual_record(doc_id, source_file, page_counter, image_path, visual_description)
-                            vector_doc = create_vector_document(doc_id, source_file, page_counter, str(image_path), visual_description, base64_img)
-                            
-                            visual_records.append(record)
-                            vector_documents.append(vector_doc)
+                        page_counter += 1
+                        image_filename = f"{doc_id}_sheet_img_{page_counter}.png"
+                        image_path = STORAGE_DIR / image_filename
+                        save_embedded_png(drawing._data(), image_path)
+
+                        visual_description = analyze_image_with_gpt4o(str(image_path))
+
+                        if "NO_VISUAL_CONTENT" in visual_description:
+                            image_path.unlink(missing_ok=True)
+                            continue
+
+                        record = save_visual_record(doc_id, source_file, page_counter, image_path, visual_description)
+                        vector_doc = create_vector_document(doc_id, source_file, page_counter, str(image_path), visual_description)
+
+                        visual_records.append(record)
+                        vector_documents.append(vector_doc)
                     except Exception as e:
-                        log.warning(f"Failed to extract chart from XLSX: {e}")
-                
-                # Optionally: render sheet as image for complex layouts
-                try:
-                    import subprocess
-                    temp_pdf = STORAGE_DIR / f"temp_{doc_id}_{sheet_name}.pdf"
-                    result = subprocess.run(
-                        [
-                            "libreoffice", "--headless", "--convert-to", "pdf",
-                            "--outdir", str(STORAGE_DIR), str(xlsx_path)
-                        ],
-                        capture_output=True,
-                        timeout=30
-                    )
-                    log.debug(f"XLSX sheet {sheet_name} rendering attempted")
-                except Exception as e:
-                    log.debug(f"Could not render XLSX sheet: {e}")
+                        log.warning(f"Failed to extract embedded image from XLSX: {e}")
+                        raise
             except Exception as e:
                 log.warning(f"Failed to process XLSX sheet '{sheet_name}': {e}")
+                raise
         
         log.info(f"XLSX visual extraction: extracted {len(vector_documents)} visuals from {xlsx_path}")
     except ImportError:
-        log.warning("openpyxl not installed, skipping XLSX visual extraction")
+        log.exception("openpyxl is required for XLSX visual extraction")
+        raise
     except Exception as e:
         log.error(f"XLSX visual extraction failed for {xlsx_path}: {e}")
+        raise
     
     return visual_records, vector_documents
 
@@ -493,14 +455,9 @@ def process_image_visuals(image_path: str, doc_id: str) -> Tuple[List[dict], Lis
         image_filename = f"{doc_id}_image_1.png"
         dest_path = STORAGE_DIR / image_filename
 
-        try:
-            from PIL import Image
-            img = Image.open(image_path)
-            img.save(str(dest_path), "PNG")
-        except Exception:
-            # Fallback: just copy the file
-            import shutil
-            shutil.copy(image_path, dest_path)
+        from PIL import Image
+        with Image.open(image_path) as img:
+            img.convert("RGB").save(dest_path, format="PNG")
 
         # Analyze with GPT-4o
         visual_description = analyze_image_with_gpt4o(str(dest_path))
@@ -511,9 +468,8 @@ def process_image_visuals(image_path: str, doc_id: str) -> Tuple[List[dict], Lis
             log.info(f"Image file {source_file} contained no meaningful visual content")
             return [], []
 
-        base64_img = encode_image(str(dest_path))
         record = save_visual_record(doc_id, source_file, page_counter, dest_path, visual_description)
-        vector_doc = create_vector_document(doc_id, source_file, page_counter, str(dest_path), visual_description, base64_img)
+        vector_doc = create_vector_document(doc_id, source_file, page_counter, str(dest_path), visual_description)
 
         visual_records.append(record)
         vector_documents.append(vector_doc)
@@ -521,6 +477,7 @@ def process_image_visuals(image_path: str, doc_id: str) -> Tuple[List[dict], Lis
         log.info(f"Image visual extraction: extracted 1 visual from {image_path}")
     except Exception as e:
         log.error(f"Image visual extraction failed for {image_path}: {e}")
+        raise
 
     return visual_records, vector_documents
 
@@ -535,7 +492,6 @@ def process_eml_visuals(eml_path: str, doc_id: str) -> Tuple[List[dict], List[Do
     try:
         import email
         from email import policy
-        from email.mime.multipart import MIMEMultipart
 
         source_file = os.path.basename(eml_path)
         page_counter = 0
@@ -544,7 +500,7 @@ def process_eml_visuals(eml_path: str, doc_id: str) -> Tuple[List[dict], List[Do
             msg = email.message_from_bytes(f.read(), policy=policy.default)
 
         # Extract images from multipart message
-        for part in msg.iter_parts():
+        for part in msg.walk():
             if part.get_content_maintype() == "image":
                 try:
                     page_counter += 1
@@ -552,8 +508,7 @@ def process_eml_visuals(eml_path: str, doc_id: str) -> Tuple[List[dict], List[Do
                     image_filename = f"{doc_id}_email_img_{page_counter}.png"
                     image_path = STORAGE_DIR / image_filename
 
-                    with open(image_path, "wb") as f:
-                        f.write(image_data)
+                    save_embedded_png(image_data, image_path)
 
                     visual_description = analyze_image_with_gpt4o(str(image_path))
 
@@ -562,18 +517,19 @@ def process_eml_visuals(eml_path: str, doc_id: str) -> Tuple[List[dict], List[Do
                             os.remove(image_path)
                         continue
 
-                    base64_img = encode_image(str(image_path))
                     record = save_visual_record(doc_id, source_file, page_counter, image_path, visual_description)
-                    vector_doc = create_vector_document(doc_id, source_file, page_counter, str(image_path), visual_description, base64_img)
+                    vector_doc = create_vector_document(doc_id, source_file, page_counter, str(image_path), visual_description)
 
                     visual_records.append(record)
                     vector_documents.append(vector_doc)
                 except Exception as e:
                     log.warning(f"Failed to extract image from EML: {e}")
+                    raise
 
         log.info(f"EML visual extraction: extracted {len(vector_documents)} visuals from {eml_path}")
     except Exception as e:
         log.error(f"EML visual extraction failed for {eml_path}: {e}")
+        raise
 
     return visual_records, vector_documents
 

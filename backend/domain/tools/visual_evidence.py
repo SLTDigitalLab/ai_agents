@@ -1,5 +1,6 @@
 """Select the replacement pipeline's indexed visual descriptions."""
 
+import asyncio
 import json
 import logging
 import math
@@ -104,10 +105,13 @@ async def select_relevant_images(
             }
             for index, candidate in enumerate(review_candidates)
         ]
-        result = await _model().ainvoke([
-            ("system", _REVIEW_PROMPT),
-            ("human", json.dumps({"question": query, "candidates": payload}, ensure_ascii=True)),
-        ])
+        result = await asyncio.wait_for(
+            _model().ainvoke([
+                ("system", _REVIEW_PROMPT),
+                ("human", json.dumps({"question": query, "candidates": payload}, ensure_ascii=True)),
+            ]),
+            timeout=settings.VISUAL_EVIDENCE_REVIEW_TIMEOUT_SECONDS,
+        )
 
         reviews_by_index: dict[int, list[bool]] = {}
         for review in result.reviews:
@@ -121,6 +125,12 @@ async def select_relevant_images(
             for index, candidate in enumerate(review_candidates)
             if reviews_by_index.get(index) == [True]
         ]
+    except asyncio.TimeoutError:
+        log.warning(
+            "Visual evidence review timed out after %s seconds; omitting images",
+            settings.VISUAL_EVIDENCE_REVIEW_TIMEOUT_SECONDS,
+        )
+        return []
     except Exception:
         log.exception("Visual evidence relevance review failed; omitting images")
         return []

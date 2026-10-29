@@ -5,6 +5,7 @@ import logging
 import asyncio
 import hashlib
 import re
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile
@@ -1301,13 +1302,17 @@ class IngestionService:
         }:
             return []
         if not settings.OPENAI_API_KEY:
-            log.warning("Visual extraction skipped for %s: OPENAI_API_KEY is missing", file_path.name)
-            return []
+            raise RuntimeError("OPENAI_API_KEY is required for visual ingestion")
         try:
             from services.visual_extractor import process_document_visuals
 
             # Graph item IDs are untrusted strings and must not become paths.
-            visual_id = hashlib.sha256(file_id.encode("utf-8")).hexdigest()[:24]
+            # Give each ingestion unique asset names so an unsuccessful
+            # replacement cannot overwrite the previous live image files.
+            visual_id = (
+                hashlib.sha256(file_id.encode("utf-8")).hexdigest()[:24]
+                + "-" + uuid.uuid4().hex[:8]
+            )
             _, visual_docs = process_document_visuals(str(file_path), visual_id)
             for doc in visual_docs:
                 # The image is served from disk; embedding its base64 bytes in
@@ -1316,7 +1321,7 @@ class IngestionService:
             return visual_docs
         except Exception:
             log.exception("Visual extraction failed for %s", file_path.name)
-            return []
+            raise
 
     def _file_already_ingested(self, collection_name: str, onedrive_id: str, last_modified: str) -> bool:
         """Check if a file with this onedrive_id and lastModified timestamp
@@ -1342,25 +1347,52 @@ class IngestionService:
         except Exception:
             return False
 
-    def _delete_file_vectors(self, collection_name: str, onedrive_id: str, file_name: str):
-        """Delete all existing vectors for a given onedrive_id."""
+    def _replace_file_vectors(self, vector_store, collection_name: str, file_id: str,
+                              file_name: str, chunks: list[Document]) -> None:
+        """Write replacement points before removing the previous file version.
+
+        A failed embedding/upsert must not erase the working knowledge base.
+        The run ID distinguishes the new points even when a forced re-ingest
+        uses the same Graph last-modified timestamp as the old points.
+        """
+        run_id = uuid.uuid4().hex
+        for doc in chunks:
+            doc.metadata["ingestion_run_id"] = run_id
+
+        file_condition = models.FieldCondition(
+            key="metadata.onedrive_id", match=models.MatchValue(value=file_id)
+        )
+        run_condition = models.FieldCondition(
+            key="metadata.ingestion_run_id", match=models.MatchValue(value=run_id)
+        )
         try:
-            self.client.delete(
-                collection_name=collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="metadata.onedrive_id",
-                                match=models.MatchValue(value=onedrive_id),
-                            )
-                        ]
-                    )
-                ),
-            )
-            log.info(f"Deleted old vectors for {file_name} (onedrive_id={onedrive_id})")
-        except Exception as e:
-            log.warning(f"Could not delete old vectors for {file_name}: {e}")
+            vector_store.add_documents(chunks)
+        except Exception:
+            # add_documents may have written a partial batch. Remove only
+            # this failed run, leaving the previous points intact.
+            try:
+                self.client.delete(
+                    collection_name=collection_name,
+                    points_selector=models.FilterSelector(filter=models.Filter(
+                        must=[file_condition, run_condition]
+                    )),
+                    wait=True,
+                )
+            except Exception:
+                log.exception("Could not clean partial ingestion for %s", file_name)
+            raise
+
+        # Missing run_id on legacy points also matches must_not. If this
+        # cleanup fails, the new points remain available and the file is
+        # reported as failed for operator follow-up.
+        self.client.delete(
+            collection_name=collection_name,
+            points_selector=models.FilterSelector(filter=models.Filter(
+                must=[file_condition], must_not=[run_condition]
+            )),
+            wait=True,
+        )
+        log.info("Replaced vectors for %s (onedrive_id=%s)", file_name, file_id)
 
     def _agent_collection_name(self, agent_name: str) -> str:
         """Return Qdrant collection name for an agent."""
@@ -1961,10 +1993,9 @@ class IngestionService:
                         if evidence_items:
                             doc.metadata["evidence"] = evidence_items
 
-                    # Now that we have valid replacement chunks, remove the
-                    # stale vectors and write the new ones.
-                    self._delete_file_vectors(collection_name, onedrive_id, file_name)
-                    vector_store.add_documents(chunks)
+                    self._replace_file_vectors(
+                        vector_store, collection_name, onedrive_id, file_name, chunks
+                    )
                     total_chunks += len(chunks)
                     processed_files.append(file_name)
                 except Exception as e:
@@ -2244,9 +2275,9 @@ class IngestionService:
                         if evidence_items:
                             doc.metadata["evidence"] = evidence_items
 
-                    self._delete_file_vectors(collection_name, sharepoint_item_id, file_name)
-
-                    vector_store.add_documents(chunks)
+                    self._replace_file_vectors(
+                        vector_store, collection_name, sharepoint_item_id, file_name, chunks
+                    )
                     total_chunks += len(chunks)
                     processed_files.append(file_name)
 

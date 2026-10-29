@@ -17,6 +17,11 @@ Images are stored under `EVIDENCE_STORAGE_DIR`, which is already mounted by the
 production Compose backend. The frontend can force re-ingestion of unchanged
 OneDrive files; SharePoint already has that control.
 
+The extractor handles PDF page visuals and embedded raster pictures in DOCX,
+PPTX, XLSX, image files, and email. PowerPoint diagrams made only from native
+shapes and native Excel chart objects are not rendered by this pipeline.
+Convert those documents to PDF before ingestion if those visuals are needed.
+
 Retrieval searches those descriptions, including a dedicated search for
 explicit diagram requests. It checks raw dense cosine similarity and asks the
 configured chat model whether each description directly answers the question.
@@ -41,6 +46,11 @@ document before a full folder.
 3. Before forcing any re-ingestion, take a restorable snapshot of the affected
    Qdrant collection and preserve the evidence directory. Re-ingestion replaces
    existing points for each file, so Git alone cannot restore the old index.
+   Replacements now write the new points before deleting the old ones and use
+   unique image filenames; old images remain on disk for recovery. Monitor
+   evidence volume space during a large re-ingestion.
+   A missing vision key or failed visual extraction reports that file as failed
+   and leaves its previous Qdrant points in place.
 4. Merge the reviewed integration into the production branch only if its
    production base still matches. Keep the VM's actual previous commit SHA.
 

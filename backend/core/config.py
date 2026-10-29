@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     VISUAL_AUDIT_ALL_PDF_PAGES: bool = False
     VISUAL_EVIDENCE_RELEVANCE_ENABLED: bool = True
     VISUAL_EVIDENCE_MIN_SCORE: float = 0.45
+    VISUAL_EVIDENCE_REVIEW_TIMEOUT_SECONDS: float = 20.0
 
     # API key for external clients (e.g. voice assistant) hitting the Finance retrieval endpoint
     VOICE_ASSISTANT_API_KEY: Optional[str] = None
