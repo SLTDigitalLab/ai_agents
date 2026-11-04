@@ -126,6 +126,27 @@ class CosineTests(unittest.TestCase):
                     visual_extractor.process_image_visuals(str(image_path), "safe-id")
 
 
+class VisionModelSettingTests(unittest.TestCase):
+    def _chat_openai_kwargs(self, model: str) -> dict:
+        with TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "page.png"
+            Image.new("RGB", (20, 20), "white").save(image_path)
+            with patch.object(visual_extractor.settings, "VISUAL_VLM_MODEL", model), patch.object(
+                visual_extractor, "ChatOpenAI"
+            ) as chat_openai:
+                chat_openai.return_value.invoke.return_value = SimpleNamespace(content=" Title: Flow ")
+                result = visual_extractor.analyze_image_with_gpt4o(str(image_path))
+        self.assertEqual(result, "Title: Flow")
+        return chat_openai.call_args.kwargs
+
+    def test_gpt4o_keeps_zero_temperature(self):
+        self.assertEqual(self._chat_openai_kwargs("gpt-4o"), {"model": "gpt-4o", "temperature": 0})
+
+    def test_luna_is_called_without_temperature(self):
+        # gpt-6-luna rejects temperature=0 with a 400 error.
+        self.assertEqual(self._chat_openai_kwargs("gpt-6-luna"), {"model": "gpt-6-luna"})
+
+
 class VisualEvidenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_diagram_request_searches_visuals_when_text_search_is_empty(self):
         doc = Document(

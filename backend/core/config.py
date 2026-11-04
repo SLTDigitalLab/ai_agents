@@ -88,6 +88,8 @@ class Settings(BaseSettings):
     # for diagram questions. Disable to omit visual evidence during rollback.
     VISUAL_RAG_ENABLED: bool = True
     VISUAL_AUDIT_ALL_PDF_PAGES: bool = False
+    # Vision model that describes document pages during ingestion.
+    VISUAL_VLM_MODEL: str = "gpt-4o"
     VISUAL_EVIDENCE_RELEVANCE_ENABLED: bool = True
     VISUAL_EVIDENCE_MIN_SCORE: float = 0.45
     VISUAL_EVIDENCE_REVIEW_TIMEOUT_SECONDS: float = 20.0

@@ -20,7 +20,6 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 AUDIT_DIR = STORAGE_DIR / "audits"
 AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
-VLM_MODEL = "gpt-4o"
 VLM_TEMPERATURE = 0
 
 VISUAL_DETECTION_PROMPT = (
@@ -78,10 +77,13 @@ def save_embedded_png(image_data: bytes, image_path: Path) -> None:
 
 
 def analyze_image_with_gpt4o(image_path: str, prompt: str = VISUAL_DETECTION_PROMPT) -> str:
-    """Send an image to GPT-4o for visual analysis."""
+    """Send an image to the configured vision model for visual analysis."""
     try:
         base64_img = encode_image(image_path)
-        llm = ChatOpenAI(model=VLM_MODEL, temperature=VLM_TEMPERATURE)
+        model = settings.VISUAL_VLM_MODEL
+        # Newer models such as gpt-6-luna reject temperature=0 with a 400 error.
+        llm_kwargs = {"temperature": VLM_TEMPERATURE} if model.startswith("gpt-4") else {}
+        llm = ChatOpenAI(model=model, **llm_kwargs)
         
         message = HumanMessage(
             content=[
@@ -96,7 +98,7 @@ def analyze_image_with_gpt4o(image_path: str, prompt: str = VISUAL_DETECTION_PRO
         response = llm.invoke([message])
         return response.content.strip()
     except Exception as e:
-        log.error(f"GPT-4o analysis failed for {image_path}: {e}")
+        log.error(f"{settings.VISUAL_VLM_MODEL} analysis failed for {image_path}: {e}")
         raise
 
 
