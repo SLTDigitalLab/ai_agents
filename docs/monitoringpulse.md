@@ -1,7 +1,8 @@
 # MonitoringPulse HTTP telemetry
 
-Implementation status: implemented locally, not deployed or scraped by production
-Prometheus. No production connectivity or live traffic claims are made here.
+Implementation status: implemented in the repository, not yet enabled or verified
+against production Prometheus. No production connectivity or live traffic claims
+are made here.
 
 ## Scope and request path
 
@@ -28,12 +29,15 @@ The backend serves GET `/metrics` with bearer authentication, no-store caching,
 and no OpenAPI listing. Missing/wrong credentials return 401. Invalid enabled
 configuration fails startup. Existing API authentication is unchanged.
 
-Apply the Nginx public denies for `/metrics` and `/api/metrics` and their subpaths.
-The scrape endpoint is at backend `/metrics`, NOT `/api/v1/metrics`.
-No new host port is published. The endpoint does not itself enforce a source-IP
-allowlist: network isolation/firewall policy must restrict access, in addition to
-the dedicated token. Shared-network peers can reach backend port 8000, so do not
-join untrusted containers to that network.
+The backend scrape endpoint is `/metrics`, NOT `/api/v1/metrics`. Backend port 8100
+remains bound to host loopback and no new host port is published. For the hosted
+MonitoringPulse server, Nginx exposes only the exact TLS path
+`https://aiagents.sltdigitallab.lk/internal/metrics`, allowlisted to source IP
+`124.43.145.146/32`, and proxies it to backend `/metrics`. Nginx continues to deny
+the native `/metrics`, `/api/metrics`, and all corresponding subpaths. Both the
+source-IP restriction and dedicated bearer token are required. If the monitoring
+egress IP changes, update the allowlist before scraping. Shared-network peers can
+reach backend port 8000, so do not join untrusted containers to that network.
 
 Use exactly one Uvicorn worker, as in the existing production Compose command.
 The code rejects configured WEB_CONCURRENCY other than 1 and multiprocess mode;
@@ -89,20 +93,20 @@ origin. Internal calls and direct external API calls are included. No request-ID
 trace-context propagation is added in this change. Browser-supplied headers would
 not prove origin. Request IDs, if added later for correlation, must not be metric labels.
 
-## Prometheus configuration (conditional on network approval)
+## Prometheus configuration for hosted MonitoringPulse
 
 ```yaml
 scrape_configs:
   - job_name: ask-slt-backend
     scrape_interval: 15s
     scrape_timeout: 10s
-    metrics_path: /metrics
-    scheme: http
+    metrics_path: /internal/metrics
+    scheme: https
     authorization:
       type: Bearer
       credentials_file: /run/secrets/ask_slt_metrics_token
     static_configs:
-      - targets: ["backend:8000"]
+      - targets: ["aiagents.sltdigitallab.lk:443"]
         labels:
           application: ask_slt
           environment: production
@@ -110,12 +114,10 @@ scrape_configs:
 ```
 
 The secret file contains only the token and must be mounted read-only into
-Prometheus. The internal HTTP example is only for an approved isolated same-host
-network. For cross-host/untrusted traffic use a private TLS proxy, verified CA,
-`scheme: https`, and an appropriate target/tls_config. Never disable certificate
-verification. `localhost` in Prometheus is not the application host. Confirm the
-container name, Docker daemon and network with the monitoring team before wiring it.
-Avoid ambiguous `backend` aliases on a shared network; use a unique alias if needed.
+Prometheus. Use the normal verified public certificate; do not disable certificate
+verification. The Nginx allowlist assumes Prometheus reaches the application from
+`124.43.145.146`. Confirm that egress address from the hosted monitoring server.
+`localhost` in Prometheus is not the application host.
 
 Example PromQL (for the selected time window):
 
@@ -161,7 +163,9 @@ Before deployment:
    up the active proxy configuration and retain the previous backend image.
 3. Build the backend image with the pinned prometheus-client dependency. Check
    available disk space before building; do not delete volumes to free space.
-4. Apply the public Nginx denies, validate with `nginx -t`, and reload Nginx.
+4. Apply the restricted `/internal/metrics` Nginx location and the public native-path
+   denies, validate with `nginx -t`, and reload Nginx. Confirm the monitoring source
+   address is still `124.43.145.146` first.
 5. Set the protected telemetry environment variables and recreate ONLY the backend
    service using the production Compose file. A restart alone does not apply changed
    container environment variables. Keep one worker. No frontend build is needed.
@@ -171,9 +175,10 @@ Before deployment:
    browser and one unauthenticated protected GET expecting 401, then compare metrics.
    Account for concurrent production traffic; the matching series should increase
    by at least one. Do not trigger an intentional 500 on production or publish tokens.
-8. Confirm public `/metrics` is denied, private unauthenticated `/metrics` is 401,
-   authenticated scraping works from MonitoringPulse, and its target shows `up=1`.
-   Verify real API series and timestamps separately from target health.
+8. Confirm public `/metrics` is denied, `/internal/metrics` is denied from other
+   source IPs, an unauthenticated request from MonitoringPulse receives 401, and an
+   authenticated scrape succeeds with target `up=1`. Verify real API series and
+   timestamps separately from target health.
 
 If needed, disable METRICS_ENABLED and recreate the backend; retain public denies.
 Actual server deployment and successful Prometheus reachability remain pending.

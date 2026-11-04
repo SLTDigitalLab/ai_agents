@@ -17,7 +17,26 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
-    # Metrics are private: scrape the backend directly on an approved network.
+    # Restricted application metrics endpoint for the hosted MonitoringPulse
+    # Prometheus server. The backend also requires its dedicated bearer token.
+    # Keep the exact source IP synchronized with the monitoring host's egress IP.
+    location = /internal/metrics {
+        allow 124.43.145.146/32;
+        deny all;
+
+        proxy_pass http://127.0.0.1:8100/metrics;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 10s;
+    }
+    location ^~ /internal/metrics/ { return 404; }
+
+    # Never expose the backend's native scrape paths through the public proxy.
     location = /metrics { return 404; }
     location ^~ /metrics/ { return 404; }
     location = /api/metrics { return 404; }
