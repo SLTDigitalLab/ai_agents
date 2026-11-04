@@ -31,7 +31,31 @@ def product_price(product: dict[str, Any]) -> float | None:
     number = parse_price(product.get("price_value"))
     return number if number is not None else parse_price(product.get("price"))
 
+def historical_price_facts(memory: dict[str, Any], *, category_filter: str = "",
+                           price_intent: str = "none") -> dict[str, Any]:
+    if price_intent not in {"none", "cheapest", "most_expensive"}:
+        raise ValueError("unsupported historical price intent")
 
+    def words(value):
+        return {w[:-1] if w.endswith('s') and not w.endswith('ss') else w
+                for w in re.findall(r"\w+", str(value or '').casefold())}
+
+    category = words(category_filter) - {'the', 'of', 'among', 'product', 'one'}
+    state = memory.get('state') or {}
+    candidates = list(state.get('last_products_shown') or [])
+    selected = state.get('last_selected_product')
+    if selected:
+        candidates.append(selected)
+    candidates = [p for p in candidates if p.get('name') and category <= words(
+        ' '.join(str(p.get(k) or '') for k in ('name', 'product_type', 'category')))]
+    priced = [p for p in candidates if product_price(p) is not None]
+    target = None
+    winners = list(priced)
+    if priced and price_intent != 'none':
+        target = (min if price_intent == 'cheapest' else max)(product_price(p) for p in priced)
+        winners = [p for p in priced if product_price(p) == target]
+    return {'matching_products': candidates, 'priced_products': priced,
+            'selected_products': winners, 'target_price': target}
 def historical_price_reference(message: str, memory: dict[str, Any]) -> dict[str, Any] | None:
     """Resolve explicit recall questions, never current catalog requests.
 

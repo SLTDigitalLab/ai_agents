@@ -130,6 +130,9 @@ const normalizeProductCard = (raw) => {
         price_value: raw.price_value ?? raw.unit_price_value ?? null,
         currency: cleanProductText(raw.currency || 'LKR'),
         stock_status: cleanProductText(raw.stock_status || raw.availability || raw.status),
+        availability_verified: raw.availability_verified,
+        catalog_stock_status: raw.catalog_stock_status,
+        availability_label: raw.availability_label,
         category: cleanProductText(raw.category || raw.category_name),
         product_type: cleanProductText(raw.product_type || raw.productType || raw.type),
         brand: cleanProductText(raw.brand),
@@ -428,7 +431,6 @@ const ProductImage = ({ src, name }) => {
 const ProductCard = ({ product, color, compact = false }) => {
     const availability = product.stock_status || '';
     const isInStock = availability.toLowerCase().includes('in_stock') || availability.toLowerCase().includes('in stock');
-
     return (
         <motion.div
             initial={{ opacity: 0, y: 8 }}
@@ -453,13 +455,13 @@ const ProductCard = ({ product, color, compact = false }) => {
                     )}
 
                     {availability && (
-                        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${isInStock
+                       <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${isInStock
                                 ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
                                 : 'bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300'
                             }`}>
                             {availability.replaceAll('_', ' ')}
-                        </span>
-                    )}
+                       </span>
+)}
                 </div>
 
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400">

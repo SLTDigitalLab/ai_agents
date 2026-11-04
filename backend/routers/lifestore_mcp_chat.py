@@ -8,7 +8,7 @@ import sys
 import traceback
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
@@ -28,6 +28,10 @@ from services.lifestore_memory import (
     set_pending_action,
     get_summarization_payload,
     apply_conversation_summary,
+)
+from services.lifestore_query_intent import (
+    broad_category_query, category_price_bound, category_price_intent,
+    remembered_ordinal_query, implicit_price_plan,
 )
 
 router = APIRouter(prefix="/api/v1/lifestore", tags=["LifeStore MCP"])
@@ -73,6 +77,13 @@ def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
         parsed = default
     return max(min(parsed, maximum), minimum)
 
+_LOW_SIGNAL_QUERY = re.compile(
+    r"^(?:[\d,.\s]+|rs\.?|lkr|one|it|that|this|them|these|those|"
+    r"cheap(?:est)?|expensive|most|least|lowest|highest|price|cost)"
+    r"(?:\s+(?:[\d,.\s]+|one|it|that|this))*$",
+    re.IGNORECASE,
+)
+
 
 @lru_cache(maxsize=1)
 def _get_lifestore_openai_llm():
@@ -96,6 +107,62 @@ def _get_lifestore_openai_llm():
         api_key=api_key,
         temperature=0,
     )
+
+class LifestorePlan(BaseModel):
+    """Schema the planner LLM must return. Enforced via structured output —
+    the model cannot emit an invalid answer_mode/price_intent or skip a
+    field, so this replaces free-text JSON parsing for the planning call."""
+
+    answer_mode: Literal[
+        "greeting", "single_product", "availability", "category_browse",
+        "comparison", "purchase", "general",
+    ] = Field(..., description="The single best-matching intent for the latest message.")
+    product_query: str = Field(default="", description=(
+        "Clean retrieval phrase: product name, product ID, category, or "
+        "search phrase. Empty string if nothing should be searched yet "
+        "(e.g. a bare price constraint that Python will fill in from memory)."
+    ))
+    comparison_queries: list[str] = Field(default_factory=list, description=(
+        "Exact product names for comparison/availability-of-several-named-products. Max 6."
+    ))
+    desired_product_count: int = Field(default=5, ge=0, le=8)
+    show_product_cards: bool = Field(default=True)
+    open_lifestore_form: bool = Field(default=False, description=(
+        "True only when the user clearly wants to buy/order/purchase/place an order."
+    ))
+    needs_comparison_table: bool = Field(default=False)
+    price_intent: Literal[
+        "none", "cheapest", "most_expensive", "under", "over", "between",
+        "cheaper_than", "more_expensive_than",
+    ] = Field(default="none")
+    min_price: float | None = Field(default=None)
+    max_price: float | None = Field(default=None)
+    reference_price: float | None = Field(default=None, description=(
+        "Always null. Python resolves this from stored facts — never compute it yourself."
+    ))
+
+
+@lru_cache(maxsize=1)
+def _get_lifestore_planner_llm():
+    """Schema-bound LLM for the planning step only (pure classification,
+    no user-facing prose — optionally a different/stronger model than the
+    conversational answer-writer without affecting its cost/latency)."""
+    api_key = os.getenv("LIFESTORE_OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        try:
+            from core.config import settings
+            api_key = settings.OPENAI_API_KEY
+        except Exception:
+            api_key = None
+    if not api_key:
+        return None
+    from langchain_openai import ChatOpenAI
+    base = ChatOpenAI(
+        model=os.getenv("LIFESTORE_PLANNER_MODEL", "gpt-4.1-mini"),
+        api_key=api_key,
+        temperature=0,
+    )
+    return base.with_structured_output(LifestorePlan)    
 def _maybe_summarize_conversation(
     thread_id: str | None,
 ) -> None:
@@ -263,6 +330,42 @@ def _fallback_plan(message: str, requested_limit: int) -> dict[str, Any]:
     accidentally return 5+ cards.
     """
     count = _bounded_int(requested_limit, 1, 1, 8)
+    implicit = implicit_price_plan(message)
+    if implicit:
+        return _normalize_plan({
+            "answer_mode": "category_browse",
+            "product_query": "",
+            "desired_product_count": implicit.get("desired_product_count", 5),
+            **implicit,
+        }, message, requested_limit)
+    category_query = broad_category_query(message)
+    ranked_category = category_price_intent(message)
+    bounded_category = category_price_bound(message)
+    if category_query or ranked_category or bounded_category:
+        product_query = (ranked_category[0] if ranked_category else
+                         bounded_category[0] if bounded_category else category_query)
+        price_intent = ranked_category[1] if ranked_category else "none"
+        min_price = None
+        max_price = None
+        if bounded_category:
+            product_query, price_intent, amount = bounded_category
+            if price_intent == "under":
+                max_price = amount
+            else:
+                min_price = amount
+        return {
+            "answer_mode": "category_browse",
+            "product_query": product_query,
+            "comparison_queries": [],
+            "desired_product_count": 1 if ranked_category else count,
+            "show_product_cards": True,
+            "open_lifestore_form": False,
+            "needs_comparison_table": False,
+            "price_intent": price_intent,
+            "min_price": min_price,
+            "max_price": max_price,
+            "reference_price": None,
+        }
     return {
         "answer_mode": "availability" if re.search(
             r"\b(available|availability|in stock|out of stock)\b|\bdo you have\b|\bcan i buy\b.*\bnow\b",
@@ -279,7 +382,6 @@ def _fallback_plan(message: str, requested_limit: int) -> dict[str, Any]:
         "reference_price": None,
     }
 
-
 def _normalize_plan(parsed: dict[str, Any], message: str, requested_limit: int) -> dict[str, Any]:
     allowed_modes = {
         "greeting",
@@ -295,6 +397,12 @@ def _normalize_plan(parsed: dict[str, Any], message: str, requested_limit: int) 
     if mode not in allowed_modes:
         mode = "single_product"
 
+    category_query = broad_category_query(message)
+    ranked_category = category_price_intent(message)
+    bounded_category = category_price_bound(message)
+    if mode == "single_product" and (category_query or ranked_category or bounded_category):
+        mode = "category_browse"
+
     comparison_queries = parsed.get("comparison_queries") or []
     if not isinstance(comparison_queries, list):
         comparison_queries = []
@@ -306,7 +414,10 @@ def _normalize_plan(parsed: dict[str, Any], message: str, requested_limit: int) 
     ][:6]
 
     product_query = _safe_text(parsed.get("product_query"))
-    if not product_query:
+    if mode == "category_browse" and (category_query or ranked_category or bounded_category):
+        product_query = (ranked_category[0] if ranked_category else
+                         bounded_category[0] if bounded_category else category_query)
+    elif not product_query:
         product_query = message
 
     desired_default = {
@@ -341,12 +452,30 @@ def _normalize_plan(parsed: dict[str, Any], message: str, requested_limit: int) 
     price_intent = _safe_text(parsed.get("price_intent")).lower()
     if price_intent not in PRICE_INTENTS:
         price_intent = "none"
+    if ranked_category:
+        price_intent = ranked_category[1]
+        desired_count = 1
+    if bounded_category:
+        _, price_intent, bound = bounded_category
     if price_intent != "none" and not _safe_text(parsed.get("product_query")):
         product_query = ""
+
+    # a list request must never collapse to 1 product
+    LIST_PRICE_INTENTS = {"under", "over", "between", "cheaper_than", "more_expensive_than"}
+    if mode == "category_browse" and price_intent in LIST_PRICE_INTENTS:
+        desired_count = max(desired_count, 5)
+    if mode == "category_browse":
+        show_product_cards = True
+
     min_price = parse_price(parsed.get("min_price"))
     max_price = parse_price(parsed.get("max_price"))
     if min_price is not None and max_price is not None and min_price > max_price:
         min_price, max_price = max_price, min_price
+    if bounded_category:
+        if price_intent == "under":
+            min_price, max_price = None, bound
+        else:
+            min_price, max_price = bound, None
 
     return {
         "price_intent": price_intent,
@@ -369,15 +498,22 @@ def _plan_lifestore_answer(
     conversation_memory: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
 
-    llm = _get_lifestore_openai_llm()
-
-    if llm is None:
-        return _fallback_plan(
-            message,
-            requested_limit,
-        )
-
     memory = conversation_memory or {}
+    ordinal_query = remembered_ordinal_query(message, memory)
+    if ordinal_query:
+        return _normalize_plan({
+            "answer_mode": "single_product",
+            "product_query": ordinal_query,
+            "desired_product_count": 1,
+        }, message, requested_limit)
+
+ 
+
+    
+    planner = _get_lifestore_planner_llm()
+
+    if planner is None:
+        return _fallback_plan(message, requested_limit)
 
     history = memory.get("messages") or []
     summary = str(memory.get("summary") or "")
@@ -415,105 +551,192 @@ def _plan_lifestore_answer(
         )
         if last_selected_product
         else "None"
+
     )
 
+    LIFESTORE_PLANNER_SYSTEM_PROMPT = """
+You are the intent and retrieval planner for Ask LifeStore.
+
+You do not answer the user and you do not retrieve products yourself. You
+produce only the structured plan defined by the schema — never invent
+product names, prices, stock status, product IDs, or catalogue information
+that is not present in the supplied conversation memory or retrieval
+context. Read the user's intent semantically; do not use keyword-only
+pattern matching.
+
+## 1. Core rules
+
+1. Understand the user's intent before selecting an answer_mode.
+2. Distinguish between: browsing a category, searching for a named
+   product, filtering by price, asking for the cheapest/most expensive
+   match, referring to a product mentioned or shown earlier, and asking a
+   follow-up about a previously displayed product.
+3. Do not classify every message containing a product-related word as a
+   single_product lookup.
+4. Do not treat words such as "cheapest", "budget", "under", "second one",
+   or "the deal with" as part of a literal product name — they express an
+   intent or a reference, never a name.
+5. Preserve the user's intended category and constraints in the plan.
+6. Use only the supplied conversation history, current context, and
+   memory. Never invent missing context.
+
+## 2. answer_mode classification
+
+Classify the latest message into exactly one of: greeting, single_product,
+availability, category_browse, comparison, purchase, general.
+
+**greeting** — a greeting, thanks, farewell, small talk, or a question
+about who you are or what you can do. Never recommend a product for
+greeting: desired_product_count=0, show_product_cards=false.
+
+**category_browse** — the user wants products from a category without
+identifying one exact product, OR wants a price-filtered/ranked
+(cheapest, most expensive, under/over/between) set from a category.
+Examples: "show me routers", "suggest a budget router", "routers under
+5000", "show me the cheapest one", "find the cheapest phone under 10000".
+  - product_query is the normalized category/search phrase, never the
+    full sentence and never a price word or amount.
+  - For a pure superlative/bounded request ("the cheapest router",
+    "the most expensive speaker"), desired_product_count is 1.
+  - Never choose or calculate the cheapest/most-expensive product
+    yourself — Python applies all numeric constraints against real
+    retrieved prices.
+  - If the category cannot be determined from the message or from
+    current_category / last_products_shown, leave product_query empty
+    rather than inventing a category; do not silently guess.
+
+**single_product** — the user identifies one particular product by name,
+ID, or a resolvable reference (ordinal, "it", "that one", a clear
+follow-up about an already-identified product). Remove filler wording
+such as "is", "available", "do you have", "tell me about" from
+product_query. Never route a category search, a price-filtered search, a
+superlative search, or an unresolved positional reference here — those
+are category_browse.
+
+**availability** — ONLY explicit current stock/availability questions,
+including "do you have this product" and "can I buy this now?". Ordinary
+browsing, features, price, and recommendations are NOT availability. For
+availability of several specific named products, put ONLY their exact
+names in comparison_queries (max 6). For "are these available", use the
+names from last_products_shown. Never expand this to the whole category.
+
+**comparison** — the user is comparing named products or asks to compare.
+Include comparison_queries only when the user clearly names specific
+products. desired_product_count is 2-6. needs_comparison_table=true.
+show_product_cards=false unless the user explicitly asks to see product
+cards/images (a comparison answer is a table, not a pile of cards).
+
+**purchase** — open_lifestore_form=true ONLY when the user clearly wants
+to buy/order/purchase/place an order. desired_product_count=1.
+
+**general** — anything else that doesn't fit the above.
+
+## 3. Resolving references to previously displayed products
+
+- The structured memory lists products previously shown, in order.
+  Treat that numeric order as authoritative for "first one", "second
+  one", "third one", "last one", and similar.
+- If the user refers to a specific previous product, resolve it to that
+  product's EXACT name and use that exact name as product_query — never
+  the literal phrase "second one". Example: last_products_shown contains
+  "1. Router A, 2. Router B" and the user says "tell me about the second
+  one" -> product_query="Router B", answer_mode=single_product.
+- Use last_selected_product when the user says "it", "that product", or
+  "that one" and clearly means the currently discussed product.
+- Use current_category to understand "other ones", "more like these",
+  "cheaper ones", or a bare superlative/price request with no category
+  named in the current message.
+- Prefer the most recent relevant product list; do not resolve a
+  reference against an older, unrelated list when a newer one exists.
+- If the reference is ambiguous or the needed memory is missing, leave
+  product_query empty rather than guessing — do not silently pick a
+  product.
+
+## 4. Price interpretation
+
+Recognize: "under/below/less than", "over/above/more than",
+"between X and Y", "cheapest/lowest price", "most expensive/highest
+price", and "budget"/"affordable" when a constraint can be established
+from context (even with no number attached).
+
+Extract price_intent: none, cheapest, most_expensive, under, over,
+between, cheaper_than, or more_expensive_than.
+  - Set max_price for under, min_price for over, both for between;
+    unused bounds stay null.
+  - Use category_browse for any price-based request and strip price
+    words/amounts out of product_query.
+  - For "cheaper ones" / "anything cheaper", resolve the PRODUCT TYPE
+    from memory (not an exact model name) and use cheaper_than. For
+    "more expensive ones", use more_expensive_than.
+  - Leave reference_price null for contextual comparisons ("cheaper than
+    this", "cheaper ones") — the backend derives it from last_selected_
+    product or last_products_shown. If the user states a numeric
+    comparison price explicitly ("under 8000"), use under/over with that
+    bound instead of cheaper_than/more_expensive_than.
+  - Do not invent a numeric budget when the user only says "budget" or
+    "affordable" with no number — that is still price_intent=cheapest or
+    a bare category request, never a fabricated max_price.
+  - Never confuse a price constraint with a product identity.
+    - desired_product_count: use 1 ONLY for a singular superlative ("the cheapest
+    router", "which is the most expensive one"). For under/over/between/
+    cheaper_than/more_expensive_than, or any plural request ("routers cheaper
+    than this", "show me routers over 5000"), use 5. Always set
+    show_product_cards=true for category_browse.
+
+## 5. Worked examples
+
+1. current_category: "router". Message: "tell me about the cheapest one"
+   -> answer_mode=category_browse, product_query="router" (inherited
+   from current_category, not invented), price_intent=cheapest,
+   desired_product_count=1.
+2. current_category: "router". Message: "gimme the budget one" -> same as
+   above — "budget" is a synonym for cheapest, not a literal keyword.
+3. last_products_shown: "1. TP-Link Archer C6, 2. Netgear R6700".
+   Message: "whats the deal with the second one here" ->
+   answer_mode=single_product, product_query="Netgear R6700" (the exact
+   name, resolved by position).
+4. current_category: "router". Message: "anything below 8k" ->
+   answer_mode=category_browse, product_query="router" (inherited),
+   price_intent=under, max_price=8000.
+5. last_selected_product: "Netgear R6700". Message: "is there anything
+   cheaper than this" -> product_query="" (Python resolves the reference
+   price and category from last_selected_product), price_intent=
+   cheaper_than, reference_price=null.
+6. No current_category, no last_products_shown. Message: "show me the
+   cheapest one" -> product_query="" (nothing to inherit; do not guess a
+   category), price_intent=cheapest.
+7. Message: "routers between 5000 and 15000" -> answer_mode=
+   category_browse, product_query="router", price_intent=between,
+   min_price=5000, max_price=15000.
+8. last_products_shown has 2 routers. Message: "are these available" ->
+   answer_mode=availability, comparison_queries=[exact names of both].
+
+## 6. Final check before returning the plan
+
+1. Is answer_mode consistent with what the user actually asked, not just
+   a keyword in the message?
+2. Is a category/price/superlative request being wrongly classified as
+   single_product?
+3. Have price words and numeric bounds been fully separated out of
+   product_query?
+4. Has every previous-product reference been resolved to an exact name
+   (or left empty if it can't be resolved), never left as the literal
+   reference phrase?
+5. Are price_intent and min_price/max_price/reference_price internally
+   consistent (right bounds set, unused ones null)?
+6. Does the plan match the schema's allowed answer_mode and price_intent
+   values exactly?
+7. Is anything required actually missing or ambiguous? If so, prefer an
+   empty product_query over an invented one.
+
+Correct the plan against these checks before returning it.
+"""
+    
+
     try:
-        response = llm.invoke(
+        plan_obj = planner.invoke(
             [
-                (
-                    "system",
-                    (
-                        "You are the intent and retrieval planner for Ask LifeStore. "
-                        "Return JSON only. Do not answer the user. "
-                        "Do not use keyword-only rules. Read the user's intent semantically. "
-
-                        "Classify the latest message into exactly one answer_mode: "
-                        "greeting, single_product, availability, category_browse, "
-                        "comparison, purchase, or general. "
-                        "Use availability ONLY for explicit current stock/availability questions, "
-                        "including 'do you have this product' and 'can I buy this now?'. "
-                        "Ordinary browsing, features, price and recommendations are not availability. "
-                        "For availability of several specific products, put ONLY their exact names "
-                        "in comparison_queries (up to 6). For 'are these available', use the names "
-                        "in last_products_shown. Never expand this to the whole category. "
-
-                        "Use greeting when the message is a greeting, thanks, farewell, "
-                        "small talk, or a question about who you are or what you can do. "
-
-                        "For greeting, do NOT recommend any product: set "
-                        "desired_product_count to 0 and show_product_cards false. "
-
-                        "Extract product_query as the clean product name, product ID, "
-                        "category, or search phrase that should be sent to retrieval. "
-
-                        "For a named product or direct availability check, remove wording "
-                        "such as 'is', 'available', 'do you have', and 'tell me about'. "
-
-                        "For category browsing, product_query should be the "
-                        "category/search phrase. "
-
-                        "For comparison, include comparison_queries only when the user "
-                        "clearly names specific products. "
-
-                        "Set desired_product_count to 1 for single_product, "
-                        "availability, and purchase. "
-
-                        "Set desired_product_count to 2-6 for comparison. "
-
-                        "Set desired_product_count to 3-8 for broad category/list/"
-                        "recommendation questions. "
-
-                        "Set open_lifestore_form true only when the user clearly wants "
-                        "to buy/order/purchase/place an order. "
-
-                        "Set needs_comparison_table true for comparison. "
-
-                        "Set show_product_cards false for comparison unless the user "
-                        "explicitly asks to see product cards/images. "
-
-                        # -------------------------------
-                        # MEMORY INSTRUCTIONS
-                        # -------------------------------
-
-                        "Use conversation memory when interpreting follow-up questions. "
-                        "Extract price_intent: none, cheapest, most_expensive, under, over, "
-                        "between, cheaper_than, or more_expensive_than. Set min_price for over, "
-                        "max_price for under, both for between; unused bounds are null. "
-                        "Use category_browse for price-based alternatives and remove price words "
-                        "and amounts from product_query. For 'the cheapest router' or 'the most "
-                        "expensive speaker', desired_product_count is 1. Never choose or calculate "
-                        "the cheapest product yourself: Python applies all numeric constraints. "
-                        "For 'cheaper ones', resolve the product type from memory, not the exact "
-                        "model name; use cheaper_than. For 'more expensive ones', use "
-                        "more_expensive_than. Leave reference_price null for contextual comparisons; "
-                        "the backend derives it from stored facts. If the user states a numeric "
-                        "comparison price explicitly, use under/over with that bound instead. "
-                        "If context is absent, leave product_query empty; do not invent a category. "
-
-                        "The structured memory contains products previously shown to the user. "
-                        "Treat their numeric order as authoritative when the user says "
-                        "'first one', 'second one', 'third one', and similar references. "
-
-                        "If the user refers to a specific previous product, resolve the "
-                        "reference to that product's exact name and use that exact name "
-                        "as product_query. "
-
-                        "For example, if last_products_shown contains "
-                        "1. Router A and 2. Router B, and the user says "
-                        "'tell me about the second one', product_query should be "
-                        "'Router B'. "
-
-                        "Use last_selected_product when the user says things like "
-                        "'it', 'that product', or 'that one' and clearly refers to "
-                        "the currently discussed product. "
-
-                        "Use current_category to understand references such as "
-                        "'other ones', 'more like these', and 'cheaper ones'. "
-
-                        "Do not invent a product that does not appear in the supplied "
-                        "conversation memory or LifeStore retrieval context."
-                    ),
-                ),
+                ("system", LIFESTORE_PLANNER_SYSTEM_PROMPT),
                 (
                     "human",
                     (
@@ -543,44 +766,15 @@ def _plan_lifestore_answer(
                         f"{message}\n\n"
 
                         f"Frontend requested limit: "
-                        f"{requested_limit}\n\n"
-
-                        "Return exactly this JSON shape:\n"
-
-                        "{"
-                        "\"answer_mode\":"
-                        "\"greeting|single_product|availability|category_browse|"
-                        "comparison|purchase|general\","
-
-                        "\"product_query\":\"clean retrieval phrase\","
-
-                        "\"comparison_queries\":["
-                        "\"optional product name 1\","
-                        "\"optional product name 2\""
-                        "],"
-
-                        "\"desired_product_count\":1,"
-
-                        "\"show_product_cards\":true,"
-
-                        "\"open_lifestore_form\":false,"
-
-                        "\"needs_comparison_table\":false,"
-                        "\"price_intent\":\"none\","
-                        "\"min_price\":null,\"max_price\":null,\"reference_price\":null"
-                        "}"
+                        f"{requested_limit}"
                     ),
                 ),
             ]
         )
 
-        parsed = _extract_json_object(
-            getattr(
-                response,
-                "content",
-                response,
-            )
-        )
+        # Structured output guarantees plan_obj is a valid LifestorePlan —
+        # no free-text JSON parsing, no malformed/missing-field failures.
+        parsed = plan_obj.model_dump()
 
         return _normalize_plan(
             parsed,
@@ -589,11 +783,15 @@ def _plan_lifestore_answer(
         )
 
     except Exception:
+        print("PLANNER FAILED:")
+        print(traceback.format_exc())
         return _fallback_plan(
             message,
             requested_limit,
         )
+        
 
+    
 
 
 
@@ -625,8 +823,21 @@ def _resolve_price_context(plan: dict[str, Any], memory: dict[str, Any]) -> None
     intent = plan.get("price_intent", "none")
     if intent == "none":
         return
+    state = memory.get("state") or {}
+
+    if intent not in {"cheaper_than", "more_expensive_than"} and not plan.get("product_query"):
+        shown = state.get("last_products_shown") or []
+        context = state.get("current_category")
+        if not context and shown:
+            types = {p.get("product_type") or p.get("category") for p in shown}
+            if len(types) == 1:
+                context = shown[0].get("product_type") or shown[0].get("category")
+        if context:
+            plan["product_query"] = context
+        else:
+            plan["price_clarification"] = "What type of product are you looking for?"
+
     if intent in {"cheaper_than", "more_expensive_than"}:
-        state = memory.get("state") or {}
         selected = state.get("last_selected_product")
         shown = state.get("last_products_shown") or []
         plan["reference_price"] = None
@@ -635,7 +846,6 @@ def _resolve_price_context(plan: dict[str, Any], memory: dict[str, Any]) -> None
             plan["reference_price_source"] = selected.get("name") or "selected product"
             context = selected.get("product_type") or state.get("current_category") or selected.get("category")
         else:
-            # Only use a list baseline when it describes a single product context.
             types = {p.get("product_type") or p.get("category") for p in shown}
             prices = [product_price(p) for p in shown]
             prices = [p for p in prices if p is not None]
@@ -650,6 +860,7 @@ def _resolve_price_context(plan: dict[str, Any], memory: dict[str, Any]) -> None
             plan["product_query"] = context
         if not context or plan["reference_price"] is None:
             plan["price_clarification"] = "Which product or price should I compare against, and what type of product are you looking for?"
+
     required = {
         "under": ("max_price",), "over": ("min_price",),
         "between": ("min_price", "max_price"),
@@ -658,8 +869,6 @@ def _resolve_price_context(plan: dict[str, Any], memory: dict[str, Any]) -> None
         plan["price_clarification"] = "What price or price range in rupees should I use?"
     if not plan.get("product_query") and not plan.get("price_clarification"):
         plan["price_clarification"] = "What type of product are you looking for?"
-
-
 def _price_result_intro(plan: dict[str, Any]) -> str:
     intent = plan.get("price_intent", "none")
     if intent == "cheapest":
@@ -1070,7 +1279,7 @@ def _extract_products(result: dict[str, Any]) -> list[dict[str, Any]]:
     return [product for product in products if isinstance(product, dict)]
 
 
-def _retrieve_products(module: Any, message: str, plan: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
+def _retrieve_products(module: Any, message: str, plan: dict[str, Any], memory: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
     mode = _safe_text(plan.get("answer_mode"))
     product_query = _safe_text(plan.get("product_query")) or message
     desired_limit = _bounded_int(plan.get("desired_product_count"), 1, 1, 8)
@@ -1169,6 +1378,19 @@ def _retrieve_products(module: Any, message: str, plan: dict[str, Any]) -> tuple
     )
 
     if mode in {"single_product", "purchase"}:
+        if not product_query.strip() or _LOW_SIGNAL_QUERY.match(product_query.strip()):
+            # The resolved query has no real product-name content, whatever
+            # wording produced it — don't waste a lookup call on garbage.
+            state = (memory or {}).get("state") or {}
+            fallback_category = state.get("current_category")
+            if fallback_category:
+                result = _call_mcp_tool(
+                    module, "lifestore_hybrid_product_search",
+                    query=fallback_category, search_mode="auto",
+                    limit=desired_limit, include_vector_evidence=True,
+                )
+                return result, _dedupe_products(_extract_products(result))[:desired_limit], "lifestore_hybrid_product_search"
+            return {"status": "not_found", "answer": CLARIFICATION}, [], None
         try:
             result = _call_mcp_tool(
                 module,
@@ -1452,6 +1674,7 @@ def _process_lifestore_clause(request: LifeStoreMCPChatRequest, message: str,
             module,
             message,
             plan,
+            memory,
         )
 
 
