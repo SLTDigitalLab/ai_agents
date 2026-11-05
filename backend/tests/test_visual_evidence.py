@@ -54,7 +54,7 @@ class CosineTests(unittest.TestCase):
             ), patch.object(
                 visual_extractor.settings, "VISUAL_AUDIT_ALL_PDF_PAGES", False
             ), patch.object(
-                visual_extractor, "analyze_image_with_gpt4o", return_value="Title: Leave approval flow\nTopic: leave applications"
+                visual_extractor, "analyze_image_with_vlm", return_value="Title: Leave approval flow\nTopic: leave applications"
             ):
                 _, documents = visual_extractor.process_pdf_visuals(str(pdf_path), "safe-id")
 
@@ -82,7 +82,7 @@ class CosineTests(unittest.TestCase):
             deck.save(deck_path)
 
             with patch.object(visual_extractor, "STORAGE_DIR", storage), patch.object(
-                visual_extractor, "analyze_image_with_gpt4o", return_value="Title: Useful chart"
+                visual_extractor, "analyze_image_with_vlm", return_value="Title: Useful chart"
             ):
                 _, documents = visual_extractor.process_pptx_visuals(str(deck_path), "safe-id")
 
@@ -105,7 +105,7 @@ class CosineTests(unittest.TestCase):
             workbook.save(workbook_path)
 
             with patch.object(visual_extractor, "STORAGE_DIR", storage), patch.object(
-                visual_extractor, "analyze_image_with_gpt4o", return_value="Title: Useful chart"
+                visual_extractor, "analyze_image_with_vlm", return_value="Title: Useful chart"
             ):
                 _, documents = visual_extractor.process_xlsx_visuals(str(workbook_path), "safe-id")
 
@@ -120,10 +120,25 @@ class CosineTests(unittest.TestCase):
             storage = root / "evidence"
             storage.mkdir()
             with patch.object(visual_extractor, "STORAGE_DIR", storage), patch.object(
-                visual_extractor, "analyze_image_with_gpt4o", side_effect=RuntimeError("vision unavailable")
+                visual_extractor, "analyze_image_with_vlm", side_effect=RuntimeError("vision unavailable")
             ):
                 with self.assertRaisesRegex(RuntimeError, "vision unavailable"):
                     visual_extractor.process_image_visuals(str(image_path), "safe-id")
+
+    def test_gpt6_vision_uses_reasoning_options_without_temperature(self):
+        with TemporaryDirectory() as temp_name:
+            image_path = Path(temp_name) / "flow.png"
+            Image.new("RGB", (20, 20), "green").save(image_path)
+            with patch.object(visual_extractor.settings, "VISUAL_VLM_MODEL", "gpt-6-luna"), patch.object(
+                visual_extractor, "ChatOpenAI"
+            ) as chat_model:
+                chat_model.return_value.invoke.return_value = SimpleNamespace(content="Title: Flow")
+                result = visual_extractor.analyze_image_with_vlm(str(image_path))
+
+        self.assertEqual(result, "Title: Flow")
+        self.assertEqual(chat_model.call_args.kwargs, {
+            "model": "gpt-6-luna", "reasoning_effort": "low"
+        })
 
 
 class VisualEvidenceTests(unittest.IsolatedAsyncioTestCase):

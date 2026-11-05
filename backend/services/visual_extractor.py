@@ -20,9 +20,6 @@ STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 AUDIT_DIR = STORAGE_DIR / "audits"
 AUDIT_DIR.mkdir(parents=True, exist_ok=True)
 
-VLM_MODEL = "gpt-4o"
-VLM_TEMPERATURE = 0
-
 VISUAL_DETECTION_PROMPT = (
     "Analyze this document page/slide/chart image carefully.\n"
     "If it contains a flowchart, diagram, process flow, organizational chart, or data chart, "
@@ -77,11 +74,20 @@ def save_embedded_png(image_data: bytes, image_path: Path) -> None:
         image.convert("RGB").save(image_path, format="PNG")
 
 
-def analyze_image_with_gpt4o(image_path: str, prompt: str = VISUAL_DETECTION_PROMPT) -> str:
-    """Send an image to GPT-4o for visual analysis."""
+def analyze_image_with_vlm(image_path: str, prompt: str = VISUAL_DETECTION_PROMPT) -> str:
+    """Send an image to the configured vision model for analysis."""
     try:
         base64_img = encode_image(image_path)
-        llm = ChatOpenAI(model=VLM_MODEL, temperature=VLM_TEMPERATURE)
+        model_name = settings.VISUAL_VLM_MODEL.strip()
+        if not model_name:
+            raise ValueError("VISUAL_VLM_MODEL must not be empty")
+        model_options = {"model": model_name}
+        if model_name.startswith(("gpt-5", "gpt-6")):
+            # Reasoning models reject custom temperature at non-none effort.
+            model_options["reasoning_effort"] = "low"
+        else:
+            model_options["temperature"] = 0
+        llm = ChatOpenAI(**model_options)
         
         message = HumanMessage(
             content=[
@@ -96,7 +102,7 @@ def analyze_image_with_gpt4o(image_path: str, prompt: str = VISUAL_DETECTION_PRO
         response = llm.invoke([message])
         return response.content.strip()
     except Exception as e:
-        log.error(f"GPT-4o analysis failed for {image_path}: {e}")
+        log.error("Visual analysis failed for %s: %s", image_path, e)
         raise
 
 
@@ -163,7 +169,7 @@ def create_vector_document(
 def process_pdf_visuals(pdf_path: str, doc_id: str) -> Tuple[List[dict], List[Document]]:
     """
     Scans PDF pages for visual content, extracts page renders, 
-    generates visual descriptions using GPT-4o, and formats output for Vector DB indexing.
+    generates visual descriptions using the configured model, and formats output for Vector DB indexing.
     """
     visual_records = []
     vector_documents = []
@@ -224,8 +230,8 @@ def process_pdf_visuals(pdf_path: str, doc_id: str) -> Tuple[List[dict], List[Do
             image_path = STORAGE_DIR / image_filename
             pix.save(str(image_path))
 
-            # 2. Analyze with GPT-4o
-            visual_description = analyze_image_with_gpt4o(str(image_path))
+            # 2. Analyze with the configured vision model
+            visual_description = analyze_image_with_vlm(str(image_path))
 
             # Skip saving if no meaningful visual was detected
             if "NO_VISUAL_CONTENT" in visual_description:
@@ -300,8 +306,8 @@ def process_docx_visuals(docx_path: str, doc_id: str) -> Tuple[List[dict], List[
                     
                     save_embedded_png(image_data, image_path)
                     
-                    # Analyze with GPT-4o
-                    visual_description = analyze_image_with_gpt4o(str(image_path))
+                    # Analyze with the configured vision model
+                    visual_description = analyze_image_with_vlm(str(image_path))
                     
                     if "NO_VISUAL_CONTENT" in visual_description:
                         if image_path.exists():
@@ -354,7 +360,7 @@ def process_pptx_visuals(pptx_path: str, doc_id: str) -> Tuple[List[dict], List[
 
                             save_embedded_png(image.blob, image_path)
                             
-                            visual_description = analyze_image_with_gpt4o(str(image_path))
+                            visual_description = analyze_image_with_vlm(str(image_path))
                             
                             if "NO_VISUAL_CONTENT" in visual_description:
                                 if image_path.exists():
@@ -411,7 +417,7 @@ def process_xlsx_visuals(xlsx_path: str, doc_id: str) -> Tuple[List[dict], List[
                         image_path = STORAGE_DIR / image_filename
                         save_embedded_png(drawing._data(), image_path)
 
-                        visual_description = analyze_image_with_gpt4o(str(image_path))
+                        visual_description = analyze_image_with_vlm(str(image_path))
 
                         if "NO_VISUAL_CONTENT" in visual_description:
                             image_path.unlink(missing_ok=True)
@@ -459,8 +465,8 @@ def process_image_visuals(image_path: str, doc_id: str) -> Tuple[List[dict], Lis
         with Image.open(image_path) as img:
             img.convert("RGB").save(dest_path, format="PNG")
 
-        # Analyze with GPT-4o
-        visual_description = analyze_image_with_gpt4o(str(dest_path))
+        # Analyze with the configured vision model
+        visual_description = analyze_image_with_vlm(str(dest_path))
 
         if "NO_VISUAL_CONTENT" in visual_description:
             if dest_path.exists():
@@ -510,7 +516,7 @@ def process_eml_visuals(eml_path: str, doc_id: str) -> Tuple[List[dict], List[Do
 
                     save_embedded_png(image_data, image_path)
 
-                    visual_description = analyze_image_with_gpt4o(str(image_path))
+                    visual_description = analyze_image_with_vlm(str(image_path))
 
                     if "NO_VISUAL_CONTENT" in visual_description:
                         if image_path.exists():

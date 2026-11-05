@@ -30,9 +30,11 @@ on text chunks is ignored while `VISUAL_RAG_ENABLED=true`.
 
 **Existing files must be re-ingested to create visual descriptions.** A code
 deployment alone will not make images from old Qdrant points appear. Vision
-extraction uses OpenAI `gpt-4o`, so the production backend needs a valid
-`OPENAI_API_KEY`. Re-ingestion uses model calls and should begin with one known
-document before a full folder.
+extraction uses `VISUAL_VLM_MODEL` (default `gpt-4o`), so the production backend
+needs a valid `OPENAI_API_KEY`. To use `gpt-6-luna`, set
+`VISUAL_VLM_MODEL=gpt-6-luna` in the server `.env` and recreate the backend.
+Re-ingestion uses model calls and should begin with one known document before a
+full folder.
 
 ## Before deployment
 

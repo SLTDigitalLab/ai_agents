@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     # Visual descriptions are created during ingestion and searched separately
     # for diagram questions. Disable to omit visual evidence during rollback.
     VISUAL_RAG_ENABLED: bool = True
+    VISUAL_VLM_MODEL: str = "gpt-4o"
     VISUAL_AUDIT_ALL_PDF_PAGES: bool = False
     VISUAL_EVIDENCE_RELEVANCE_ENABLED: bool = True
     VISUAL_EVIDENCE_MIN_SCORE: float = 0.45
