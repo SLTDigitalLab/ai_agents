@@ -42,6 +42,7 @@ services:
         condition: service_started
     environment:
       PYTHONUNBUFFERED: 1
+      LANGFUSE_TRACING_ENVIRONMENT: development
       POSTGRES_URL: postgresql://slt:slt123@db_postgres:5432/slt_db
       QDRANT_URL: http://slt_qdrant:6333
       # Ask LifeStore MCP — loaded in-process by the /api/v1/lifestore/mcp-chat router.

@@ -77,7 +77,7 @@ class AdminSecurityTests(unittest.TestCase):
             'domain.registry': module('domain.registry', AGENT_BUILDERS={'hr': None}, get_compiled_sync_graph=Mock()),
             'psycopg': module('psycopg', connect=self.database),
             'psycopg.rows': module('psycopg.rows', dict_row=Mock()),
-            'langfuse': module('langfuse', Langfuse=Mock()),
+            'langfuse': module('langfuse', get_client=Mock(return_value=Mock())),
         }
         self.app = FastAPI()
         with patch.dict(sys.modules, stubs):

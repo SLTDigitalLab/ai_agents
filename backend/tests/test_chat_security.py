@@ -1,6 +1,7 @@
 """Actual chat/feedback routes, signed JWTs and synthetic graph/database state."""
 import importlib.util
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -41,6 +42,10 @@ class ChatSecurityTests(unittest.TestCase):
         self.database = MagicMock()
         self.cursor = self.database.connect.return_value.__enter__.return_value.cursor.return_value.__enter__.return_value
         self.cursor.fetchall.return_value = []
+        self.langfuse_client = MagicMock()
+        self.langfuse_root = MagicMock()
+        self.langfuse_client.start_as_current_observation.return_value = nullcontext(self.langfuse_root)
+        self.propagate_attributes = Mock(side_effect=lambda **kwargs: nullcontext())
         module = fixtures.module
         stubs = {
             'core.config': module('core.config', settings=SimpleNamespace(POSTGRES_URL='synthetic')),
@@ -55,7 +60,11 @@ class ChatSecurityTests(unittest.TestCase):
             'domain.tools.rag_tools': module('domain.tools.rag_tools', clear_thread_evidence=Mock(), consume_thread_evidence=Mock()),
             'services.sessions': module('services.sessions', record_session=self.record, ensure_sessions_table=Mock()),
             'langfuse.langchain': module('langfuse.langchain', CallbackHandler=Mock()),
-            'langfuse': module('langfuse', Langfuse=Mock()),
+            'langfuse': module(
+                'langfuse',
+                get_client=Mock(return_value=self.langfuse_client),
+                propagate_attributes=self.propagate_attributes,
+            ),
             'psycopg': module('psycopg', connect=self.database.connect),
             'psycopg.rows': module('psycopg.rows', dict_row=Mock()),
         }
@@ -97,6 +106,21 @@ class ChatSecurityTests(unittest.TestCase):
         self.assertIsNone(stored['job_title'])
         self.assertEqual(self.record.call_args.kwargs['user_id'], 'owner@example.test')
         self.assertEqual(self.record.call_args.kwargs['thread_id'], stored['thread_id'])
+        self.langfuse_client.start_as_current_observation.assert_called_once_with(
+            name='workmate-chat',
+            as_type='span',
+            input={'message': 'Synthetic message'},
+            metadata={'agent_id': 'hr'},
+        )
+        self.propagate_attributes.assert_called_once_with(
+            trace_name='workmate-chat',
+            user_id='owner@example.test',
+            session_id=stored['thread_id'],
+            tags=['hr', 'prod'],
+        )
+        self.langfuse_root.update.assert_called_once_with(
+            output={'response': "I'm sorry, but I'm unable to help with that request."},
+        )
 
     def test_verified_graph_profile_is_saved_for_admin_display(self):
         from services import user_profile
@@ -190,6 +214,29 @@ class ChatSecurityTests(unittest.TestCase):
         self.assertEqual(params['user_id'], 'owner@example.test')
         self.client.get('/api/v1/feedback/hr/known-thread', headers=self.other)
         self.assertNotEqual(self.cursor.execute.call_args.args[1]['thread_id'], next(iter(self.state)))
+
+    def test_feedback_is_recorded_as_v4_session_score(self):
+        self.cursor.fetchone.return_value = {
+            'id': 1,
+            'agent_id': 'hr',
+            'thread_id': 'scoped-thread',
+            'message_index': 0,
+            'rating': 'up',
+            'user_id': 'owner@example.test',
+            'user_name': None,
+        }
+        body = {'agent_id': 'hr', 'thread_id': 'known-thread', 'message_index': 0,
+                'rating': 'up', 'user_id': 'forged@example.test'}
+        response = self.client.post('/api/v1/feedback', json=body, headers=self.owner)
+        self.assertEqual(response.status_code, 200, response.text)
+        scoped = self.cursor.execute.call_args.args[1]['thread_id']
+        self.langfuse_client.create_score.assert_called_once_with(
+            session_id=scoped,
+            name='user_feedback',
+            value=1.0,
+            data_type='BOOLEAN',
+            comment='Rated message index 0',
+        )
 
 
 if __name__ == '__main__':

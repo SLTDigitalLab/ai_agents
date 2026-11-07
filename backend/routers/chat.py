@@ -6,12 +6,15 @@ Includes input guardrails (LLM-based intent + sentiment classification) run befo
 import json
 import logging
 import re
+import sys
+from contextlib import ExitStack
 from typing import AsyncGenerator
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
+from langfuse import get_client, propagate_attributes
 
 from core.auth import get_optional_verified_user
 from core.chat_access import chat_identity, scoped_thread_id, bind_chat_request, require_agent_identity
@@ -31,6 +34,8 @@ from services.user_profile import enrich_chat_identity
 
 # --- 1. Import Langfuse CallbackHandler ---
 from langfuse.langchain import CallbackHandler
+
+langfuse = get_client()
 
 router = APIRouter(prefix="/api/v1/chat", tags=["Chat"])
 logger = logging.getLogger(__name__)
@@ -469,19 +474,38 @@ async def chat(
         # Tracked outside the try so the error handler can tell whether a
         # partial answer was already streamed before the failure.
         streamed_any_text = False
+        streamed_response_text = ""
+        langfuse_stack = ExitStack()
+        root_observation = None
         try:
-            # --- 2. Initialize Langfuse Handler (Empty in v3+) ---
+            # V4/V5 are observation-first. Create one logical application root
+            # so evaluators and reports have stable request input/output, then
+            # propagate bounded trace attributes to all LangChain observations.
+            root_observation = langfuse_stack.enter_context(
+                langfuse.start_as_current_observation(
+                    name="workmate-chat",
+                    as_type="span",
+                    input={"message": safe_user_message},
+                    metadata={"agent_id": request.agent_id},
+                )
+            )
+            langfuse_stack.enter_context(
+                propagate_attributes(
+                    trace_name="workmate-chat",
+                    user_id=request.user_id,
+                    session_id=request.thread_id,
+                    tags=[request.agent_id, "prod"],
+                )
+            )
+
+            # --- 2. Initialize the LangChain observation handler ---
             langfuse_handler = CallbackHandler()
 
-            # --- 3. Inject callbacks and Langfuse metadata into the config ---
+            # --- 3. Inject callbacks and bounded application metadata ---
             config = {
                 "configurable": {"thread_id": request.thread_id},
                 "callbacks": [langfuse_handler],
-                "metadata": {
-                    "langfuse_session_id": request.thread_id,
-                    "langfuse_user_id": request.user_id,
-                    "langfuse_tags": [request.agent_id, "prod"]
-                }
+                "metadata": {"agent_id": request.agent_id},
             }
 
             # Record who is behind this session (id + display name) so the admin
@@ -525,6 +549,7 @@ async def chat(
                 except Exception as e:
                     logger.warning(f"Failed to save blocked exchange: {e}")
 
+                streamed_response_text = BLOCK_MESSAGE
                 yield BLOCK_MESSAGE
                 return
 
@@ -547,8 +572,6 @@ async def chat(
 
             # Reuse the cached, pre-compiled graph bound to a long-lived pool.
             graph = await get_compiled_async_graph(request.agent_id)
-
-            streamed_response_text = ""
 
             # We use astream_events (v2) for fine-grained streaming.
             #
@@ -694,7 +717,21 @@ async def chat(
             # If we already streamed part of an answer, separate the notice.
             if streamed_any_text:
                 yield "\n\n"
+                streamed_response_text += "\n\n"
+            streamed_response_text += user_message
             yield user_message
+        finally:
+            if root_observation is not None:
+                try:
+                    root_observation.update(
+                        output={"response": streamed_response_text},
+                    )
+                except Exception as lf_exc:
+                    logger.warning("Langfuse root observation update failed: %s", lf_exc)
+            try:
+                langfuse_stack.__exit__(*sys.exc_info())
+            except Exception as lf_exc:
+                logger.warning("Langfuse observation close failed: %s", lf_exc)
 
     if not request.stream:
         chunks = [chunk async for chunk in event_generator()]

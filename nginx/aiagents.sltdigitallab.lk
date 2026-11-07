@@ -20,7 +20,7 @@ server {
     # Restricted application metrics endpoint for the hosted MonitoringPulse
     # Prometheus server. The backend also requires its dedicated bearer token.
     # Keep the exact source IP synchronized with the monitoring host's egress IP.
-    location = /internal/metrics {
+    location = /metrics {
         allow 124.43.145.146/32;
         deny all;
 
@@ -28,16 +28,12 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header Authorization $http_authorization;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
         proxy_connect_timeout 5s;
         proxy_read_timeout 10s;
+        proxy_buffering off;
+        proxy_cache off;
     }
-    location ^~ /internal/metrics/ { return 404; }
-
-    # Never expose the backend's native scrape paths through the public proxy.
-    location = /metrics { return 404; }
     location ^~ /metrics/ { return 404; }
     location = /api/metrics { return 404; }
     location ^~ /api/metrics/ { return 404; }
