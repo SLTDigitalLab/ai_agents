@@ -145,9 +145,12 @@ def save_cpe_turn(
     assistant_message: str,
     hardware_cards: list[dict] | None = None,
 ) -> None:
-    """Atomically append a user-assistant dialogue turn and update device context."""
+    """Atomically append a user-assistant dialogue turn and update device context, preventing duplicate turns."""
     if not thread_id:
         return
+
+    u_clean = user_message.strip()
+    a_clean = assistant_message.strip()
 
     # Extract primary device context if hardware cards were produced
     device_context = None
@@ -162,12 +165,23 @@ def save_cpe_turn(
     try:
         with _conversation(thread_id, write=True) as conv:
             messages = conv["messages"]
-            messages.append({"role": "user", "content": user_message})
-            messages.append({
-                "role": "assistant",
-                "content": assistant_message,
-                "hardware_cards": hardware_cards or [],
-            })
+            # Deduplicate: if an identical user message was just submitted (e.g. rapid double click),
+            # update the assistant response in place rather than inserting a duplicate turn.
+            if (
+                len(messages) >= 2
+                and messages[-2].get("role") == "user"
+                and messages[-2].get("content", "").strip() == u_clean
+            ):
+                messages[-1]["content"] = a_clean
+                messages[-1]["hardware_cards"] = hardware_cards or []
+            else:
+                messages.append({"role": "user", "content": u_clean})
+                messages.append({
+                    "role": "assistant",
+                    "content": a_clean,
+                    "hardware_cards": hardware_cards or [],
+                })
+
             # Keep up to 30 recent message turns
             conv["messages"] = messages[-30:]
             if device_context:
@@ -224,9 +238,9 @@ _MODEL_ALIASES = [
     (re.compile(r"\bsrx\s*300\b", re.I), "SRX 300"),
     (re.compile(r"\bsrx\s*320\b", re.I), "SRX 320"),
     (re.compile(r"\bsrx\s*340\b", re.I), "SRX 340"),
-    (re.compile(r"\b(one\s*421|421s)\b", re.I), "ONE421"),
-    (re.compile(r"\b(one\s*521|521s)\b", re.I), "ONE521"),
-    (re.compile(r"\b(one\s*2501|2501s)\b", re.I), "ONE2501"),
+    (re.compile(r"\b(?:one\s*)?421(?:['’]s|s)?\b", re.I), "OneAccess ONE421"),
+    (re.compile(r"\b(?:one\s*)?521(?:['’]s|s)?\b", re.I), "OneAccess ONE521"),
+    (re.compile(r"\b(?:one\s*)?2501(?:['’]s|s)?\b", re.I), "OneAccess ONE2501"),
     (re.compile(r"\b1121x\b", re.I), "Cisco 1121X"),
     (re.compile(r"\bc8200l\b", re.I), "C8200L"),
     (re.compile(r"\bc8200\b", re.I), "C8200"),
@@ -245,6 +259,11 @@ _BRAND_PREFERENCE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_FIRST_DEVICE_PATTERN = re.compile(
+    r"\b(?:back to the first(?: one)?|the first one|the first model|the first device|the initial (?:model|device|one))\b",
+    re.IGNORECASE,
+)
+
 _SPECIFIC_DEVICE_PATTERN = re.compile(
     r"\b(one421|one521|one2501|one\s*421|one\s*521|one\s*2501|1424|s5735|isr\s*\d+|catalyst\s*\d*|1300|srx\s*\d+|fortigate\s*\w*|c8200l?|c8300|c1121x?|1121x?|t31p|t46u|t48u|t54w|grp\s*\d+|gxp\s*\d+|f670l?|eg8145)\b",
     re.IGNORECASE,
@@ -254,47 +273,78 @@ _SPECIFIC_DEVICE_PATTERN = re.compile(
 def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
     """
     Contextualize follow-up questions for accurate Qdrant vector retrieval.
-    1. Strips topic-reset prefixes ('forget that', 'instead', 'never mind') so old context doesn't leak.
-    2. Normalizes model aliases ('srx300' -> 'SRX 300', '1121x' -> 'Cisco 1121X', '521s' -> 'ONE521').
-    3. Handles brand preference follow-ups ('what if he insists on cisco?') by appending the previous device.
-    4. If the query has pronouns (e.g., 'What is its port configuration?') and does not explicitly
+    1. Resolves references to the session's first discussed device ('back to the first one').
+    2. Strips topic-reset prefixes ('forget that', 'instead', 'never mind') so old context doesn't leak.
+    3. Normalizes model aliases ('srx300' -> 'SRX 300', '1121x' -> 'Cisco 1121X', '521s' -> 'ONE521').
+    4. Handles brand preference follow-ups ('what if he insists on cisco?') by appending the previous device.
+    5. If the query has pronouns (e.g., 'What is its port configuration?') and does not explicitly
        name a specific model or reset topic, appends the last discussed device context.
     """
     clean_query = query.strip()
 
-    # 1. Topic-reset prefix detection
+    # 1. Handle ordinal reference to the first discussed device ('back to the first one')
+    match_first = _FIRST_DEVICE_PATTERN.search(clean_query)
+    if match_first and thread_id:
+        memory = get_cpe_conversation_memory(thread_id)
+        first_dev = None
+        for msg in memory.get("messages", []):
+            cards = msg.get("hardware_cards") or []
+            if cards and len(cards) > 0:
+                first_dev = cards[0].get("name")
+                break
+            content = msg.get("content", "")
+            dev_match = _SPECIFIC_DEVICE_PATTERN.search(content)
+            if dev_match:
+                first_dev = dev_match.group(0).upper()
+                break
+        if first_dev:
+            # Replace 'back to the first one' with the actual first device name
+            resolved_query = _FIRST_DEVICE_PATTERN.sub(first_dev, clean_query).strip()
+            # Clean up leading punctuation like commas
+            resolved_query = re.sub(r"^[, ]+", "", resolved_query)
+            logger.info("[Ask CPE Query Rewriter] Resolved '%s' -> '%s' (First device: %s)", clean_query, resolved_query, first_dev)
+            return f"{resolved_query} (Context: {first_dev} authoritative technical specifications)"
+
+    # 2. Topic-reset prefix detection
     is_reset = False
     match_reset = _RESET_TOPIC_PATTERN.search(clean_query)
     if match_reset:
         is_reset = True
         clean_query = clean_query[match_reset.end():].strip()
 
-    # 2. Model alias normalization for optimal sparse BM25 and vector matching
+    # 3. Model alias normalization for optimal sparse BM25 and vector matching
     for pattern, replacement in _MODEL_ALIASES:
         clean_query = pattern.sub(replacement, clean_query)
 
     if not thread_id or is_reset:
+        logger.info("[Ask CPE Query Rewriter] Clean query: '%s' (is_reset=%s)", clean_query, is_reset)
         return clean_query
 
-    # 3. Handle brand-preference follow-ups (e.g. 'what if he insists on cisco?')
+    # 4. Handle brand-preference follow-ups (e.g. 'what if he insists on cisco?')
     if _BRAND_PREFERENCE_PATTERN.search(clean_query):
         memory = get_cpe_conversation_memory(thread_id)
         last_dev = memory.get("last_device_context")
         if last_dev and last_dev.get("device"):
             device_name = last_dev["device"]
-            return f"{clean_query} (Context: brand-specific replacement for {device_name} Cisco 1121X C1121X-8P NWKEAC084 stock)"
+            out = f"{clean_query} (Context: brand-specific replacement for {device_name} Cisco 1121X C1121X-8P NWKEAC084 stock)"
+            logger.info("[Ask CPE Query Rewriter] Preference query: '%s'", out)
+            return out
 
-    # 4. If the user already named a specific model, don't modify
+    # 5. If the user already named a specific model, don't modify
     if _SPECIFIC_DEVICE_PATTERN.search(clean_query):
+        logger.info("[Ask CPE Query Rewriter] Named model query: '%s'", clean_query)
         return clean_query
 
-    # 5. If the query uses pronouns/implicit reference, attach device context
+    # 6. If the query uses pronouns/implicit reference, attach device context
     if _PRONOUN_PATTERN.search(clean_query):
         memory = get_cpe_conversation_memory(thread_id)
         last_dev = memory.get("last_device_context")
         if last_dev and last_dev.get("device"):
             device_name = last_dev["device"]
-            return f"{clean_query} (Context: {device_name})"
+            out = f"{clean_query} (Context: {device_name})"
+            logger.info("[Ask CPE Query Rewriter] Pronoun query: '%s'", out)
+            return out
 
+    logger.info("[Ask CPE Query Rewriter] Final query: '%s'", clean_query)
     return clean_query
 

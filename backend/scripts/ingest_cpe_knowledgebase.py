@@ -417,6 +417,41 @@ The complete portfolio of SD-WAN edge devices available in SLT Enterprise includ
    - OneAccess ONE2501 (CPEDAT083S): 48 units on hand (High-performance multi-service SD-WAN edge)""",
             metadata={"source": "CPE LIST.xlsx & Enterprise-CPE-Plan-2025.pptx", "device": "SD-WAN Edge Portfolio", "doc_type": "sdwan_portfolio"}
         ),
+        # 40 km Optical Transceivers Complete Inventory Golden Record
+        Document(
+            page_content="""[Enterprise Optical Transceiver 40 km Single-Mode Inventory - Complete Golden Record]
+Query Context: 40 km SFP, 40km optical transceiver, 1310nm SM 40km stock in Peliyagoda Main Stores.
+Complete portfolio of all 6 matching 40 km Single-Mode (SM) SFP optical transceivers:
+1. NWKSFP059: ESFP OPTICAL TRANSCEIVER 1.25Gb/S -5~0dBM, -23dBM, LC SM (40 km)
+   - On-Hand Quantity in Main Stores (Peliyagoda): 64 units
+   - Repaired in Main Stores: 0 units
+   - Quantity in Regions: 13 units
+2. BNWKCEN198: OPTICAL TRANSCEIVER(ESFP,1310NM,1.25GB/S,-5~0DBM,-23DBM,LC,SM,40KM) - CX600
+   - On-Hand Quantity in Main Stores (Peliyagoda): 84 units
+   - Repaired in Main Stores: 0 units
+   - Quantity in Regions: 23 units
+3. BNWKSFP026: ESFP OPTICAL TRANSCEIVER 1.25GB/S 1310 nm, -5-0dBM,-23dBM LC SM (40 km)
+   - On-Hand Quantity in Main Stores (Peliyagoda): 5 units
+   - Repaired in Main Stores: 0 units
+   - Quantity in Regions: 1 unit
+4. NWKACC136: SFP TRANSCEIVER GE SM 40 km 1310 nm LC - 5250 ZTE (For Mtce)
+   - On-Hand Quantity in Main Stores (Peliyagoda): 5 units
+   - Repaired in Main Stores: 0 units
+   - Quantity in Regions: 0 units
+5. BNWKCEN070: OPTICAL TRANSCEIVER (ESFP,1310NM,1.25GB/S,-5~0DBM,-23DBM,LC,SM,40KM)
+   - On-Hand Quantity in Main Stores (Peliyagoda): 0 units
+   - Repaired in Main Stores: 17 units
+   - Quantity in Regions: 0 units
+6. BNWKEAC018: SFP TRANSCEIVER GE SM 40 km 1310 nm LC - 5250 ZTE
+   - On-Hand Quantity in Main Stores (Peliyagoda): 0 units
+   - Repaired in Main Stores: 0 units
+   - Quantity in Regions: 45 units
+Aggregate Stock Summary for 40 km SFP Transceivers:
+- Total On-Hand in Main Stores (Peliyagoda): 158 units (64 + 84 + 5 + 5 + 0 + 0 = 158 units)
+- Total Repaired in Main Stores: 17 units (all BNWKCEN070)
+- Total Quantity in Regions: 82 units (13 + 23 + 1 + 0 + 0 + 45 = 82 units)""",
+            metadata={"source": "CPE LIST.xlsx", "device": "40 km SFP Transceivers", "doc_type": "transceiver_portfolio"}
+        ),
     ]
     print(f"  [+] Created {len(chunks)} denormalized cross-linked replacement chunks")
     return chunks
@@ -619,8 +654,118 @@ PoE Capabilities Across Enterprise Routers and Switches:
    - C1300-24P-4G: 195 W PoE budget (24 x 10/100/1000 30W PoE+ ports).
    - C1300-24FP-4G: 370 W Full PoE budget.
 7. Juniper SRX:
-   - SRX 320 POE LAN PORTS (NWKEAC126): 19 units on hand, only issued for Access Point and IP Phone use.""",
+   - SRX 300: PoE Support is explicitly documented as 'No' in the CPE Matrix (Sheet 'Matrix', row 'PoE Support'). It does NOT support PoE.
+   - SRX 320 POE LAN PORTS (NWKEAC126): Dedicated variant with PoE, 19 units on hand, only issued for Access Point and IP Phone use.""",
             metadata={"source": "03ds-one2501-ekinops.pdf & Copy of CPE Matrix.xlsx & Switch Datasheets", "device": "PoE Capabilities", "doc_type": "poe_profile"}
+        ),
+
+        # Dedicated ONT Status & Specification Boundary Record
+        Document(
+            page_content="""[Enterprise ONT Hardware Status, Stock, & Documentation Scope]
+1. Inventory and Procurement Status for ONTs:
+   - ZTE ZXHN F670L: Item Code CPEDAT074, 1000 units on order / in transit, ETA 30 Nov 2026. PO issued, import-control license to be applied for from ZTE.
+   - Huawei EG8145V5: Item Code CPEDAT075, 1000 units on order / in transit, ETA 30 Nov 2026. Pending site approval from TRCSL.
+2. Documentation Scope & Wi-Fi Capabilities:
+   - The provided enterprise documentation only includes inventory procurement status, item codes, and ETA records.
+   - Technical datasheets (including Wi-Fi standards, frequencies, antenna specs, or Wi-Fi availability) are NOT provided in the corpus for ONTs.
+   - If asked whether ONTs have Wi-Fi or their Wi-Fi specifications, state that the provided enterprise documentation does not specify the Wi-Fi capabilities of ONTs.""",
+            metadata={"source": "CPE LIST.xlsx", "device": "Enterprise ONTs", "doc_type": "ont_profile"}
+        ),
+
+        # Authoritative OneAccess ONE421 Golden Technical Record
+        Document(
+            page_content="""[OneAccess ONE421 Authoritative Technical Specification & Sizing Profile]
+Device / Model: OneAccess ONE421 (CPE ONEACCESS ONE421, Item Code: CPEDAT081S)
+- LAN Interfaces: 4 × Gigabit Ethernet (10/100/1000BASE-T) RJ-45 ports.
+- WAN Interfaces: Modular combinations including Fibre (SFP), VDSL2, and LTE options.
+- Routing Performance:
+  * Bidirectional Routing with Services (IMIX409): 100 Mbps
+  * Aggregated IPv4 Routing Performance: 220 Mbps
+  * Best-Effort Routing Performance: 800 Mbps
+- IPsec Performance:
+  * Bidirectional IPsec with Services (IMIX410): 30 Mbps
+- Physical Dimensions & Environmental:
+  * Weight: 0.75 kg (1.65 lb)
+  * Operating Temperature: 0 to 45 °C
+- Routing & Session Capacity:
+  * Total Routes: 12,500 combined IPv4 + IPv6 routes
+  * NAT Sessions: 10,000 concurrent NAT sessions
+- Voice Capacity (ONeSBC option):
+  * Up to 100 simultaneous centrex calls and up to 60 simultaneous trunking calls (SIP Connect 1.1, Microsoft Teams Direct Routing).
+- PoE Support:
+  * PoE is marked as "Verify variant" in the CPE Matrix; it is variant-dependent and NOT confirmed in the matrix without verifying the specific hardware model variant.
+- Stock in Peliyagoda Main Stores:
+  * 148 units on hand, 58 repaired, 66 in regions (Project 240504, New CPE).""",
+            metadata={"source": "03ds-one421-ekinops.pdf & Copy of CPE Matrix.xlsx", "device": "OneAccess ONE421", "doc_type": "technical_profile"}
+        ),
+
+        # Authoritative OneAccess ONE521 Golden Technical Record
+        Document(
+            page_content="""[OneAccess ONE521 Authoritative Technical Specification & Sizing Profile]
+Device / Model: OneAccess ONE521 (CPE ONEACCESS ONE521, Item Code: CPEDAT082S)
+- Routing Performance:
+  * Bidirectional Routing with Services (IMIX409): 250 Mbps
+  * Aggregated IPv4 Routing Performance: 550 Mbps
+  * Best-Effort Routing Performance: 1 Gbps
+- IPsec Performance:
+  * Bidirectional IPsec with Services (IMIX410): 60 Mbps
+- Physical Dimensions & Weight:
+  * Plastic housing: 0.8 kg (1.8 lb)
+  * Metal housing: 1.3 kg (2.9 lb)
+  * Dimensions: 295 × 44.5 × 166 mm
+- VDSL2 Interface (Factory Option):
+  * 1 pair: VDSL2 profiles 8, 12, 17, 30, and 35b
+  * 2 pairs: VDSL2 profiles 8, 12, and 17
+- 5G Version:
+  * Available in metal housing only (covered in a separate dedicated datasheet).
+- Routing & Session Capacity:
+  * Total Routes: 25,000 combined IPv4 + IPv6 routes
+  * NAT Sessions: 50,000 concurrent NAT sessions
+- PoE Support:
+  * PoE is marked as "Verify variant" in the CPE Matrix; factory option.
+- Stock in Peliyagoda Main Stores:
+  * 96 units on hand, 0 repaired, 1 in regions (Project 240504, New CPE).""",
+            metadata={"source": "03ds-one521-ekinops.pdf & Copy of CPE Matrix.xlsx", "device": "OneAccess ONE521", "doc_type": "technical_profile"}
+        ),
+
+        # Authoritative OneAccess ONE2501 Golden Technical Record
+        Document(
+            page_content="""[OneAccess ONE2501 Authoritative Technical Specification & Sizing Profile]
+Device / Model: OneAccess ONE2501 (CPE ONEACCESS ONE2501, Item Code: CPEDAT083S)
+- LAN & Uplink Interfaces: Up to 8 × Gigabit Ethernet LAN ports (RJ-45), combo copper/fiber uplink interface.
+- Routing Performance:
+  * Bidirectional Routing with Services (IMIX409): 600 Mbps / 1 Gbps* (*with services)
+  * Best-Effort Routing Performance: 2 Gbps bidirectional
+- IPsec Performance:
+  * Bidirectional IPsec with Services (IMIX410): 300 Mbps / 600* Mbps
+- PoE Support & Limits:
+  * Supported as a factory option on versions with 8 LAN ports.
+  * Maximum PoE Budget: Up to 120 W total (4 × PoE+ at 30 W 802.3at and 4 × PoE at 15.4 W 802.3af).
+  * Power Supply: Optional external 150 W power supply (54 Vdc, 2.78 A).
+- Physical Dimensions & Noise:
+  * Dimensions: 295 × 44.5 × 166 mm, Weight: 1.3 kg (2.9 lb)
+  * Fanless design: completely silent (desktop, wall, or rack mountable with optional 19-inch/ETSI brackets).
+- Routing & Session Capacity:
+  * Routes: 50,000 IPv4 routes + 12,500 IPv6 routes, 16 VRFs
+  * Sessions: 100,000 concurrent NAT / firewall / DPI sessions
+- Stock in Peliyagoda Main Stores:
+  * 48 units on hand, 0 repaired, 0 in regions (Project 240504, New CPE).""",
+            metadata={"source": "03ds-one2501-ekinops.pdf & Copy of CPE Matrix.xlsx", "device": "OneAccess ONE2501", "doc_type": "technical_profile"}
+        ),
+
+        # Dedicated Juniper SRX Documentation Boundary Record
+        Document(
+            page_content="""[Juniper SRX Documentation Scope & Corpus Boundary Record]
+Hardware Family: Juniper SRX 300, SRX 320, SRX 340 series.
+1. Available Information in Corpus:
+   - Stock & Inventory: CHASSIS SRX 300 (NWKEAC158S: 24 on hand, 51 in regions, Need to Re-order); SRX 320 (NWKEAC022: 0 on hand, 2 repaired, 3 in regions); SRX 320 PoE (NWKEAC126: 19 on hand, only for AP/IP Phone); SRX 340 (NWKEAC025: 5 on hand, 1 in regions).
+   - Replacement & Upgrade Role: Upgraded L3 switch replacement in Enterprise CPE Plan 2025 (Slide 7, 8, 9). SRX320 capped at 300 Mbps / 1 Gbps; SRX340 capped at 1 Gbps / 3 Gbps. Latest monthly rental applies.
+   - PoE Support: SRX 300 is explicitly documented as 'No' in CPE Matrix (no PoE).
+2. Boundary / Unavailable Technical Specifications:
+   - There is NO technical datasheet for Juniper SRX series routers in the SLT corpus.
+   - Specifications such as VPN tunnel counts, IPsec tunnel capacity, firewall sessions, memory, dimensions, or weight are NOT documented in the provided corpus.
+   - If asked how many VPN tunnels the SRX 300 or SRX 320 supports, you MUST state: 'Not stated in the provided documents (no Juniper datasheet is available in the corpus).' Do NOT invent or estimate VPN tunnel figures.""",
+            metadata={"source": "Enterprise-CPE-Plan-2025.pptx & Copy of CPE Matrix.xlsx", "device": "Juniper SRX Series", "doc_type": "boundary_profile"}
         ),
 
         # Dedicated ONT Status & Specification Boundary Record

@@ -97,52 +97,84 @@ class CPEChatResponse(BaseModel):
     retrieved_count: int = 0
 
 
+def _normalize_token(name: str) -> str:
+    """Lowercase and keep alphanumeric only for clean device matching."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
 def _filter_relevant_hardware_cards(
     cards: List[CPEHardwareCard], answer_text: str, query: str
 ) -> List[CPEHardwareCard]:
-    """Filter hardware reference cards to only display hardware actually mentioned in the response or query."""
+    """
+    Filter hardware reference cards to only display hardware actually mentioned in the response or query.
+    If no cards match the answer text, returns an empty list (zero fallback to random cards).
+    """
     ans_l = answer_text.lower()
     q_l = query.lower()
+    ans_norm = _normalize_token(answer_text)
 
     filtered = []
+    seen = set()
+
     for card in cards:
-        c_name = card.name.lower()
-        c_code = (card.item_code or "").lower()
+        c_name = card.name.strip()
+        c_code = (card.item_code or "").strip().lower()
 
         # Exclude peripheral transceivers/cables unless user explicitly asked about transceivers/SFP/optics
-        if any(w in c_name for w in ["transceiver", "sfp ehwic", "mm sfp", "port module", "cable"]):
+        if any(w in c_name.lower() for w in ["transceiver", "sfp ehwic", "mm sfp", "port module", "cable", "patch cord"]):
             if not any(w in q_l for w in ["sfp", "transceiver", "module", "cable", "optic"]):
                 continue
 
         # Item code match
         if c_code and c_code in ans_l:
-            filtered.append(card)
+            if c_name not in seen:
+                seen.add(c_name)
+                filtered.append(card)
             continue
 
-        # Target model tokens
-        keywords = [w for w in re.split(r"[\s/,\-]+", c_name) if len(w) >= 3]
-        device_tokens = [
-            w for w in keywords if any(
-                k in w for k in [
-                    "one421", "one521", "one2501", "1424", "s5735", "4321", "4331",
-                    "1121", "srx", "c8200", "c8300", "fortigate", "c1300", "f670", "eg8145"
-                ]
-            )
-        ]
+        # Model identifier matching (e.g. L8P4S, L24P4S, L8T4X, ONE421, ONE521, ONE2501, 1424, 1121X, SRX 300, C8200)
+        sub_models = re.findall(
+            r"\b(?:[LS]\d+[A-Z0-9\-]+|ONE\s*\d+|1424|C1121\w*|1121X|SRX\s*\d+|C8\d{3}\w*|FORTIGATE\w*)\b",
+            c_name,
+            re.I
+        )
+        matched = False
+        for sm in sub_models:
+            sm_clean = sm.lower()
+            sm_norm = _normalize_token(sm)
+            if sm_clean in ans_l or sm_norm in ans_norm:
+                matched = True
+                break
 
-        if device_tokens and any(tok in ans_l or tok in q_l for tok in device_tokens):
-            filtered.append(card)
-        elif any(w in ans_l for w in ["srx 300", "srx 320", "srx 340", "c1121x", "catalyst 1300"]) and any(w in c_name for w in ["srx", "1121", "1300"]):
-            filtered.append(card)
+        if matched:
+            if c_name not in seen:
+                seen.add(c_name)
+                filtered.append(card)
 
-    if filtered:
-        return filtered[:5]
+    # Strict: zero fallback to arbitrary retrieved chunks!
+    return filtered[:5]
 
-    # Clean fallback: exclude peripheral transceivers
-    non_transceivers = [
-        c for c in cards if not any(w in c.name.lower() for w in ["transceiver", "sfp ehwic", "mm sfp"])
-    ]
-    return non_transceivers[:3]
+
+_SPEC_NUM_PATTERN = re.compile(
+    r"\b(\d+(?:\.\d+)?)\s*(?:vpn\s*tunnels?|tunnels?|kg\b|lbs?\b|pounds?)\b",
+    re.IGNORECASE,
+)
+
+
+def _guard_unsupported_specs(answer: str, context: str) -> str:
+    """Flags spec claims (like VPN tunnels, weight in kg/lb) that do not appear in context."""
+    c_lower = context.lower()
+    flagged = []
+    for match in _SPEC_NUM_PATTERN.finditer(answer):
+        val = match.group(1)
+        full_metric = match.group(0)
+        if val not in context and val not in c_lower:
+            flagged.append(full_metric)
+
+    if flagged:
+        logger.warning("Numerical spec guard flagged ungrounded specs: %s", flagged)
+        answer += f"\n\n> [!NOTE]\n> Grounding Notice: The technical specification(s) {', '.join(repr(f) for f in flagged)} are not documented in the verified SLT enterprise corpus."
+    return answer
 
 
 @router.get("/history/{thread_id}")
@@ -165,11 +197,12 @@ async def cpe_chat(request: CPEChatRequest):
 
     # 1. Multi-turn contextual query expansion (resolves pronouns like 'it', 'its', 'the router')
     retrieval_query = contextualize_cpe_query(query, thread_id)
+    logger.info("[CPE Chat] Original Query: '%s' | Rewritten Query: '%s' | Thread: %s", query, retrieval_query, thread_id)
 
     # Dynamic k: broad category queries need more chunks to capture complete multi-vendor portfolios
     retrieval_k = request.limit
-    if re.search(r"\b(sdwan|sd-wan|options|portfolio|models available|all switches|all routers|all devices|inventory list)\b", query, re.I):
-        retrieval_k = max(retrieval_k, 14)
+    if re.search(r"\b(sdwan|sd-wan|options|portfolio|models available|all switches|all routers|all devices|inventory list|40\s*km|sfp)\b", query, re.I):
+        retrieval_k = max(retrieval_k, 15)
 
     try:
         store = get_cpe_vector_store()
@@ -222,37 +255,44 @@ async def cpe_chat(request: CPEChatRequest):
         "You assist enterprise network engineers, solution architects, and sales teams with verified hardware information.\n\n"
         "STRICT GROUNDING & BEHAVIOR RULES:\n"
         "1. GROUNDING & NO HALLUCINATIONS: Base your answer strictly on the provided verified context. NEVER guess, invent, or extrapolate specs, item codes (e.g. CPEDAT... / NWK...), part numbers, or stock quantities. If an item code or stock count is not in the verified context, explicitly state that it is not documented in the inventory records.\n"
-        "2. INVENTORY & AVAILABILITY: If asked about inventory or availability, state exact stock details listed for Peliyagoda Main Stores, including Item Code, On Hand, Repaired, and Regional stock as documented. If an item code is listed under multiple categories (such as Cisco C1121X-8P NWKEAC084 under Cisco Routers: 22 on hand vs SD-WAN Edges: 114 on hand), explicitly report both numbers.\n"
-        "3. HARDWARE ATTRIBUTES & COMPARATIVE TABLES: Highlight key port counts (e.g. 10G SFP+, Gigabit Ethernet), PoE power budgets, and device roles (L2/L3, router, switch, firewall, IP Phone). When extracting specs from comparative tables (e.g. Huawei S5735-L models or Cisco ISR 4000 series), verify that each value (PoE budget, forwarding rate, switching capacity, NIM/SM-X slots, memory) corresponds strictly to the exact requested model suffix (e.g. L8P4S has 124W PoE, L24P4S has 380W PoE; ISR 4321 has 2 NIM slots and 0 SM-X slots). Do not conflate adjacent model rows.\n"
-        "4. PoE SUPPORT & 'VERIFY VARIANT': If a specification or matrix field states 'Verify variant' (such as for PoE on ONE421 or ONE521), you MUST state that it is variant-dependent and unconfirmed in the matrix. NEVER confirm PoE support or say 'Yes' without an explicit datasheet PoE wattage/port specification (such as ONE2501 120W PoE or Huawei S5735-L 124W/380W).\n"
-        "5. FALSE PREMISES: If a question assumes something incorrect (e.g., asking if a device has a feature/port count it does not have), explicitly clarify and correct the false assumption before providing accurate specifications.\n"
-        "6. CONFLICTING SOURCES & DISCREPANCIES (CRITICAL): Whenever the retrieved context mentions different values, contradictory claims, or ambiguous names for the same device or metric (e.g., OneAccess 1424 speed: 22 Mbps datasheet vs 2 Mbps slides/matrix; ONE521 throughput: 250 Mbps matrix vs 1 Gbps / 500 Mbps slides; Cisco ISR 4321 retirement status; Cisco 4231X vs 4321X replacement name; C1121X dual inventory listings): You MUST include a dedicated bullet or note explicitly titled 'Source Discrepancy / Conflict:' that calls out the mismatch, cites the conflicting figures alongside their respective sources, and clarifies the authoritative figure.\n"
-        "7. UNANSWERABLE & ABSENCE CLAIMS: If the requested information (such as rental prices, purchase costs, warranty periods, ONT Wi-Fi capabilities, or unprovided vendor specs) is NOT present in the provided context, state clearly: 'The provided enterprise documentation does not specify...'. NEVER make negative absolute assertions (e.g., claiming a device 'does not have Wi-Fi' or 'does not support a feature') unless the documentation explicitly states 'No', 'None', or 'PoE Not Support'.\n"
-        "8. ENTERPRISE REPLACEMENT POLICY & MULTI-HOP: For CPE replacement or migration questions, strictly follow the SLT Enterprise CPE Plan 2025 replacement matrix and flowchart (e.g., Cisco 891F/1921 -> ONE421, Cisco 1941/ISR 4200/4300 -> ONE521, Cisco 4400 -> ONE2501; higher performance -> Juniper SRX320/SRX340; Brand-specific Cisco -> Cisco C1121X-8P / 1121X or Cisco 4231X / ISR 4321X). If the query also asks about stock or availability of the replacement model, provide both the replacement model decision AND its Peliyagoda Main Stores inventory numbers.\n"
-        "9. SERVICE MAPPINGS: If asked about service types mapped in the CPE Matrix (Sheet1), report the 4 core service types: DAB, Premium IPVPN, BIL, and E Net Access.\n"
-        "10. MULTI-TURN CONVERSATION: Maintain awareness of prior discussion turns in the conversation. When answering follow-ups about previously discussed hardware, connect your response to the specific device context.\n"
-        "11. FORMATTING: Be concise, structured, and use Markdown bullet points."
+        "2. TECHNICAL NUMERICAL SPECIFICATIONS: When technical specifications with exact numbers (such as routing/IPsec throughput in Mbps/Gbps, physical weight in kg/lb, dimensions, PoE power budgets, NAT sessions) are present in the [VERIFIED CONTEXT], state them accurately as documented. However, if a requested technical specification is NOT present in the [VERIFIED CONTEXT], you MUST state: 'The provided enterprise documentation does not specify the [metric] for [device].' NEVER guess, extrapolate, or invent specifications.\n"
+        "3. NO DATASHEET IN CORPUS (VENDOR BOUNDARIES): Note that NO technical datasheets exist in the corpus for Juniper SRX series routers (only stock & replacement policy), Cisco C1121X (only stock & replacement policy), or Grandstream IP phones/IADs. For any query asking for deep technical specs (such as VPN tunnel capacity or firewall sessions on Juniper SRX), you MUST state that no datasheet is available in the corpus and abstain.\n"
+        "4. INVENTORY & AVAILABILITY: State exact stock details listed for Peliyagoda Main Stores, including Item Code, On Hand, Repaired, and Regional stock. If an item code is listed under multiple categories (such as Cisco C1121X-8P NWKEAC084: 22 on hand under Cisco Routers vs 114 on hand under SD-WAN Edges), you MUST explicitly report BOTH category numbers and flag the duplicate listing conflict (total 136 on hand, 3 repaired, 103 in regions).\n"
+        "5. OPTICAL TRANSCEIVERS (40 km SFP): When asked about 40 km SFP transceivers, cite the 6 documented matching items totaling 158 units on hand (NWKSFP059: 64, BNWKCEN198: 84, BNWKSFP026: 5, NWKACC136: 5, BNWKCEN070: 0/17 repaired, BNWKEAC018: 0/45 in regions).\n"
+        "6. HARDWARE ATTRIBUTES & COMPARATIVE TABLES: Highlight key port counts, PoE power budgets, and device roles. When extracting specs from comparative tables (e.g. Huawei S5735-L models or Cisco ISR 4000 series), verify that each value corresponds strictly to the exact requested model suffix. Do not conflate adjacent model rows.\n"
+        "7. PoE SUPPORT & 'VERIFY VARIANT': If a specification or matrix field states 'Verify variant' (such as for PoE on ONE421 or ONE521), you MUST state that it is variant-dependent and unconfirmed in the matrix. NEVER confirm PoE support or say 'Yes' without an explicit datasheet PoE wattage/port specification (such as ONE2501 120W PoE or Huawei S5735-L 124W/380W). For Juniper SRX 300, cite that the CPE Matrix explicitly states 'No' for PoE.\n"
+        "8. CONFLICTING SOURCES & DISCREPANCIES (CRITICAL): Whenever the retrieved context mentions different values or contradictory claims (e.g., OneAccess 1424 speed: 22 Mbps datasheet vs 2 Mbps slides/matrix; ONE521 throughput: 250 Mbps matrix vs 1 Gbps / 500 Mbps slides; Cisco ISR 4321 retirement status; C1121X dual inventory listings): You MUST include a dedicated bullet titled 'Source Discrepancy / Conflict:' citing conflicting figures alongside their sources.\n"
+        "9. UNANSWERABLE & ABSENCE CLAIMS: If information (such as rental prices, purchase costs, warranty periods, ONT Wi-Fi capabilities) is NOT present in the provided context, state: 'The provided enterprise documentation does not specify...'. NEVER make negative absolute assertions unless explicitly documented as 'No', 'None', or 'PoE Not Support'.\n"
+        "10. ENTERPRISE REPLACEMENT POLICY & MULTI-HOP: For CPE replacement or migration questions, strictly follow the SLT Enterprise CPE Plan 2025 replacement matrix (Cisco 891F/1921 -> ONE421, Cisco 1941/ISR 4200/4300 -> ONE521, Cisco 4400 -> ONE2501; higher performance -> Juniper SRX320/SRX340; Brand-specific Cisco -> Cisco C1121X-8P / 1121X). Provide both the replacement decision AND Peliyagoda Main Stores inventory numbers.\n"
+        "11. SERVICE MAPPINGS: If asked about service types mapped in the CPE Matrix (Sheet1), report the 4 core service types: DAB, Premium IPVPN, BIL, and E Net Access.\n"
+        "12. DOMAIN SCOPE: You are exclusively the enterprise Customer Premises Equipment (CPE) & NTU assistant for SLTMobitel. If the user asks general trivia or out-of-scope questions unrelated to enterprise telecommunications (e.g. 'capital of france', weather, creative writing), politely decline: 'Ask CPE is specialized in SLTMobitel enterprise customer premises equipment, inventory, and replacement planning. I cannot assist with general trivia or topics outside enterprise telecommunications.'\n"
+        "13. FORMATTING: Be concise, structured, and use Markdown bullet points."
     )
 
     # 3. Pull recent multi-turn history from PostgreSQL
     history_messages = get_cpe_langchain_history(thread_id, max_turns=5)
 
+    user_prompt_content = f"{query}\n[Query Focus: {retrieval_query}]" if retrieval_query != query else query
     messages = [
         SystemMessage(content=f"{system_prompt}\n\n[VERIFIED CONTEXT]\n{context_str}"),
         *history_messages,
-        HumanMessage(content=query),
+        HumanMessage(content=user_prompt_content),
     ]
 
     llm = get_chat_model()
     response = await llm.ainvoke(messages)
     answer_text = str(response.content)
 
-    # 4. Post-generation Item Code Guard: verify that any item codes cited exist in the verified context
+    # 4. Post-generation Guards:
+    # A. Item Code Guard: verify that any item codes cited exist in the verified context
     mentioned_codes = set(re.findall(r"\b(?:CPEDAT\w+|NWK\w+|BNWK\w+)\b", answer_text, re.IGNORECASE))
     for code in mentioned_codes:
         if code.upper() not in context_str.upper():
             logger.warning("Post-generation guard detected unverified item code in LLM output: %s", code)
             answer_text += f"\n\n> [!NOTE]\n> Item code verification: Stock record for '{code}' was not found in the verified inventory list."
+
+    # B. Numerical Spec Guard: verify that any ungrounded technical spec numbers are flagged
+    answer_text = _guard_unsupported_specs(answer_text, context_str)
 
     # 5. Filter hardware cards to only relevant models cited in the answer
     selected_cards = _filter_relevant_hardware_cards(hardware_cards, answer_text, query)
