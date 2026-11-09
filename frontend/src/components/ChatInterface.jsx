@@ -26,7 +26,7 @@ const EVIDENCE_CLOSE = '[[/EVIDENCE_JSON]]';
 
 // Product agents skip client-side PII masking so SKU/model numbers in
 // queries are not corrupted. Mirrors PII_MASK_EXEMPT_AGENTS in the backend.
-const PII_MASK_EXEMPT_AGENTS = ['lifestore', 'enterprise'];
+const PII_MASK_EXEMPT_AGENTS = ['lifestore', 'enterprise', 'cpe'];
 
 // ── Ask LifeStore product cards ─────────────────────────────────────────
 // The LifeStore MCP endpoint returns a structured `products` array. These
@@ -637,6 +637,89 @@ const ProductCards = ({ products, color, display = null }) => {
                     ))}
                 </div>
             )}
+        </motion.section>
+    );
+};
+
+// ── Enterprise CPE Hardware Cards ───────────────────────────────────────
+const EnterpriseHardwareCard = ({ card, color }) => {
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="overflow-hidden rounded-2xl border border-gray-200/90 dark:border-gray-700/80 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md transition-shadow"
+        >
+            <div className={`px-4 py-3 bg-gradient-to-r ${color} text-white flex items-center justify-between`}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                    </div>
+                    <span className="font-semibold text-sm tracking-wide truncate">{card.name}</span>
+                </div>
+                {card.vendor && (
+                    <span className="text-[0.68rem] uppercase tracking-wider font-bold bg-white/20 backdrop-blur-sm px-2.5 py-0.5 rounded-full shrink-0">
+                        {card.vendor}
+                    </span>
+                )}
+            </div>
+
+            <div className="p-4 space-y-2.5 text-xs text-gray-700 dark:text-gray-300">
+                <div className="flex flex-wrap gap-1.5">
+                    {card.category && (
+                        <span className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-0.5 font-medium text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
+                            {card.category}
+                        </span>
+                    )}
+                    {card.item_code && (
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-900/30 px-2.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-800 font-mono">
+                            Item: {card.item_code}
+                        </span>
+                    )}
+                    {card.warehouse && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+                            🏢 {card.warehouse}
+                        </span>
+                    )}
+                </div>
+
+                {card.specs && (
+                    <p className="text-gray-600 dark:text-gray-300 leading-relaxed font-light">
+                        {card.specs}
+                    </p>
+                )}
+
+                {card.source && (
+                    <p className="text-[0.65rem] text-gray-400 dark:text-gray-500 pt-1 border-t border-gray-100 dark:border-gray-800">
+                        Source: {card.source}
+                    </p>
+                )}
+            </div>
+        </motion.div>
+    );
+};
+
+const EnterpriseHardwareCards = ({ cards, color }) => {
+    if (!cards || cards.length === 0) return null;
+    return (
+        <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mt-5 mb-2"
+        >
+            <div className="mb-2.5">
+                <p className="text-[0.7rem] uppercase tracking-[0.18em] font-bold text-gray-400 dark:text-gray-500">
+                    Enterprise Hardware References
+                </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {cards.map((card, idx) => (
+                    <EnterpriseHardwareCard key={idx} card={card} color={color} />
+                ))}
+            </div>
         </motion.section>
     );
 };
@@ -1324,6 +1407,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                 type: msg.type === 'human' ? 'user' : 'bot',
                                 text,
                                 formType,
+                                hardwareCards: msg.hardware_cards || [],
                             };
                         });
                         setMessages(mappedMessages);
@@ -1576,6 +1660,35 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                 return; // finally block still runs (clears loading, refocuses input)
             }
 
+            // Ask CPE uses dedicated endpoint returning technical answer + hardware cards
+            if (agentConfig.id === 'cpe') {
+                const cpeResponse = await fetch(`${API_URL}/api/v1/cpe/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: maskedText,
+                        thread_id: threadId,
+                        limit: 8,
+                    }),
+                    signal: controller.signal,
+                });
+
+                if (!cpeResponse.ok) {
+                    throw new Error(`HTTP error! status: ${cpeResponse.status}`);
+                }
+
+                const data = await cpeResponse.json();
+                setMessages(prev => [...prev, {
+                    type: 'bot',
+                    text: data.answer || '',
+                    hardwareCards: data.hardware_cards || [],
+                    evidence: [],
+                    timestamp: Date.now(),
+                }]);
+                botMessageAdded = true;
+                return;
+            }
+
             const response = await fetch(`${API_URL}/api/v1/chat`, {
                 method: 'POST',
                 headers: await getChatAuthHeaders(instance, accounts[0], {
@@ -1711,7 +1824,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const lastRenderedIdx = (() => {
         for (let i = messages.length - 1; i >= 0; i--) {
             const m = messages[i];
-            if (m.type === 'user' || m.text || m.formType) return i;
+            if (m.type === 'user' || m.text || m.formType || (m.hardwareCards && m.hardwareCards.length > 0)) return i;
         }
         return -1;
     })();
@@ -1856,6 +1969,20 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         className="w-full max-w-[720px] mt-10 flex flex-col items-center"
                     >
                         {renderComposer(true)}
+                        {Array.isArray(agentConfig.suggestions) && agentConfig.suggestions.length > 0 && (
+                            <div className="flex flex-wrap items-center justify-center gap-2 mt-4 max-w-[700px]">
+                                {agentConfig.suggestions.map((suggestion, sIdx) => (
+                                    <button
+                                        key={sIdx}
+                                        type="button"
+                                        onClick={() => sendMessage(suggestion)}
+                                        className="text-xs px-3.5 py-1.5 rounded-full bg-white/90 dark:bg-gray-800/90 border border-gray-200/90 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-blue-400 dark:hover:border-blue-500 hover:text-blue-600 dark:hover:text-blue-400 shadow-sm transition-all text-left"
+                                    >
+                                        💡 {suggestion}
+                                    </button>
+                                ))}
+                            </div>
+                        )}
                         {disclaimerText}
                     </motion.div>
 
@@ -1894,7 +2021,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                         >
                             <div className="w-full max-w-[820px] mx-auto px-4 sm:px-6 space-y-7 py-6 pt-12">
                                 {messages.map((msg, index) => {
-                                    if (!(msg.type === 'user' || msg.text || msg.formType || (msg.evidence && msg.evidence.length > 0) || (msg.productCards && msg.productCards.length > 0))) return null;
+                                    if (!(msg.type === 'user' || msg.text || msg.formType || (msg.evidence && msg.evidence.length > 0) || (msg.productCards && msg.productCards.length > 0) || (msg.hardwareCards && msg.hardwareCards.length > 0))) return null;
                                     const isLastMsg = index === lastRenderedIdx;
                                     const isStreamingThisMsg = isLoading && isLastMsg && msg.type === 'bot' && !msg.error;
                                     const isErrorMsg = msg.error && isLastMsg;
@@ -1987,6 +2114,13 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                             products={msg.productCards}
                                                             color={agentConfig.color}
                                                             display={msg.productCardDisplay}
+                                                        />
+                                                    )}
+
+                                                    {Array.isArray(msg.hardwareCards) && msg.hardwareCards.length > 0 && (
+                                                        <EnterpriseHardwareCards
+                                                            cards={msg.hardwareCards}
+                                                            color={agentConfig.color}
                                                         />
                                                     )}
 

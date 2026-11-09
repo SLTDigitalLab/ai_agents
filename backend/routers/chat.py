@@ -41,6 +41,7 @@ PUBLIC_AGENT_IDS = frozenset(
         "backoffice_email",
         "embryo",
         "enterprise",
+        "cpe",
         "lifestore",
         "rainbowpages",
     }
@@ -696,6 +697,11 @@ async def get_history(
 ):
     """Retrieve the chat history for a specific session."""
     _enforce_agent_auth(agent_id, user)
+
+    if agent_id == "cpe":
+        from services.cpe_memory import get_cpe_history_for_frontend
+        messages = get_cpe_history_for_frontend(thread_id)
+        return {"messages": messages}
 
     try:
         builder_fn = get_agent_builder(agent_id)
