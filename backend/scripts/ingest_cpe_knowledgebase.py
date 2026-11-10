@@ -269,7 +269,13 @@ def _sum(items, attr) -> int:
 
 
 def _item_block(n: int, r: InvRow, by_code) -> List[str]:
-    out = [f"{n}. {r.code}: {r.desc}",
+    desc = r.desc
+    m_grp = re.search(r"\b(GRP|GXP|GXV)\s+(\d+[A-Z]*)\b", desc, re.I)
+    if m_grp:
+        hyphen_model = f"{m_grp.group(1).upper()}-{m_grp.group(2).upper()}"
+        if hyphen_model not in desc:
+            desc = desc.replace(m_grp.group(0), f"{hyphen_model} ({m_grp.group(0)})")
+    out = [f"{n}. {r.code}: {desc}",
            f"   - Stock: {qty(r.on_hand)} on hand, {qty(r.repaired)} repaired, {qty(r.regions)} in regions ({r.triplet})"]
     status = []
     if r.inv_status:
@@ -298,7 +304,7 @@ def group_doc(title: str, ctx: str, noun: str, items: List[InvRow], as_of: str, 
     empty = [r for r in items if (r.on_hand or 0) == 0]
     lines.append(f"Computed totals (calculated by code): {_sum(items, 'on_hand')} on hand, "
                  f"{_sum(items, 'repaired')} repaired, {_sum(items, 'regions')} in regions.")
-    lines.append(f"With stock on hand (> 0): {len(stocked)} of {len(items)}: "
+    lines.append(f"Subset with on-hand quantity above zero (> 0): {len(stocked)} of {len(items)}: "
                  + (", ".join(f"{r.desc[:40]} ({r.code}): {r.on_hand}" for r in stocked) or "none"))
     lines.append(f"With 0 on hand: {len(empty)}: " + (", ".join(f"{r.code}" for r in empty) or "none"))
     dups = sorted({r.code for r in items if r.duplicate})
@@ -322,17 +328,17 @@ def build_group_docs(rows: List[InvRow], as_of: str, by_code) -> List[Document]:
     sec = lambda name: [r for r in rows if r.section == name]
 
     specs = [
-        ("Huawei Switches Complete Inventory Record", "list all huawei switches, huawei switch inventory, huawei models held in stock.",
+        ("Huawei Switches Complete Inventory Record", "list all huawei switches, huawei switch inventory, huawei models held in stock, which huawei switches support poe, which of them support poe.",
          "Huawei switches", [r for r in rows if r.vendor.lower().startswith("huawei") and r.section != "ONT"],
          "switch_portfolio", "Huawei Switches",
-         "Scope note: the Huawei ONT EG8145V5 is an optical network terminal (ONT), NOT a switch."),
+         "PoE Capability Note: S5735-L8P4S-A1 (124 W PoE+), S5735-L24P4S-A1 (380 W PoE+), and S5331-H24P4XC (NWKEAC035, 24 x 10/100/1000BASE-T PoE+ ports, Ultra PoE) support PoE. Huawei S5735-L8T4X-A1 explicitly has NO PoE; Huawei S310-24T4S, S5331-H24T4XC, and S5332-H48S6Q do NOT document or support PoE. Scope note: the Huawei ONT EG8145V5 is an optical network terminal (ONT), NOT a switch."),
         ("Grandstream IP Phones Complete Inventory & Stock Record",
          "list all ip phones we have, ip phone stock, which ip phones have stock on hand in main stores right now.",
          "Grandstream IP phone / extension-module items", sec("IP Phone"), "phone_portfolio", "IP Phones Portfolio", ""),
         ("SD-WAN Edge Devices Complete Inventory Record",
          "list all sd-wan edge devices with stock, list sd-wan edge devices, sd-wan models available.",
          "SD-WAN edge devices", sec("SD WAN Edges"), "sdwan_portfolio", "SD-WAN Edge Devices",
-         "Scope note: OneAccess ONE421 / ONE521 / ONE2501 are 'SD-WAN Ready' per the deck but are not in the SD-WAN Edges inventory block."),
+         "Complete inventory scope note: This record contains all 14 SD-WAN edge devices (stocked and zero-stock items: NWKEAC084, NWKEAC085, NWKEAC059, NWKEAC053, NWKEAC078, NWKEAC122, NWKEAC121, NWKEAC124, NWKSRG261, NWKSRG262, NWKSRG263, NWKSRG264, NWKSRG266, NWKSRG267). All 14 belong to the portfolio. OneAccess ONE421 / ONE521 / ONE2501 are 'SD-WAN Ready' per the deck but are not in the SD-WAN Edges inventory block."),
         ("FortiGate Inventory Record", "fortigate stock, list all fortigates, fortigates out of stock.",
          "FortiGate models", [r for r in rows if r.vendor.lower().startswith("fortigate")],
          "sdwan_portfolio", "FortiGate", ""),
@@ -804,7 +810,7 @@ Query Context: brand-specific Cisco router replacement for Cisco ISR 4200 / ISR 
 2. OneAccess ONE521: PoE is 'Verify variant' in the CPE Matrix; the datasheet describes no PoE.
 3. OneAccess ONE2501: PoE is a factory option on versions with 8 LAN ports: up to 120 W, 4 x PoE+ (30 W, 802.3at) and 4 x PoE (15 W, 802.3af); optional external 150 W power supply (54 Vdc, 2.78 A).
 4. OneAccess 1424-1P: PoE is 'Verify variant' in the CPE Matrix.
-5. Huawei CloudEngine S5735-L: L8P4S-A1 PoE+ 124 W; L24P4S-A1 PoE+ 380 W; L8T4X-A1 no PoE; L24T4X-A1 no PoE; L24P4X-A1 PoE+ 380 W.
+5. Huawei CloudEngine & Switches PoE: S5735-L8P4S-A1 (124 W PoE+); S5735-L24P4S-A1 (380 W PoE+); S5331-H24P4XC (NWKEAC035, 24 x 10/100/1000BASE-T PoE+ ports, Ultra PoE); S5735-L8T4X-A1 no PoE; S5735-L24T4X-A1 no PoE; S5735-L24P4X-A1 PoE+ 380 W; S310-24T4S, S5331-H24T4XC, S5332-H48S6Q do NOT support PoE.
 6. Cisco Catalyst 1300: C1300-24P-4G 195 W PoE budget; C1300-24FP-4G 370 W.
 7. Juniper SRX 300: the CPE Matrix says PoE 'No'. SRX 320 POE LAN PORTS (NWKEAC126) is a dedicated PoE variant that is only issued for Access Point and IP Phone use.""",
                   "03ds-one2501-ekinops.pdf & Copy of CPE Matrix.xlsx & Switch Datasheets", "PoE Capabilities", "poe_profile"))
@@ -825,7 +831,7 @@ Device / Model: OneAccess ONE421 (CPE ONEACCESS ONE421, Item Code: CPEDAT081S)
 - Capacity: 12,500 combined IPv4 + IPv6 routes; 10,000 NAT sessions.
 - VDSL2 (factory option): 1 pair, profiles 8, 12, 17, 30 and 35b.
 - Dimensions: 274 x 61 x 166 mm; weight 0.75 kg (1.65 lb); plastic housing; operating temperature 0 to 45 C.
-- Power: external 12 V adapter (2 A or 3 A, region dependent); optional 24/48 Vdc; power consumption < 36 W.
+- Power: external 12 V adapter (2 A or 3 A, region dependent); optional 24/48 Vdc; power consumption / power draw < 36 W.
 - Voice (ONeSBC option): up to 100 simultaneous centrex calls and up to 60 simultaneous trunking calls (no transcoding).
 - PoE: 'Verify variant' in the CPE Matrix; do not claim PoE support.
 Stock (from CPE LIST.xlsx):
@@ -840,7 +846,7 @@ Device / Model: OneAccess ONE521 (CPE ONEACCESS ONE521, Item Code: CPEDAT082S)
 - Dimensions and weight depend on the housing:
   * Plastic housing: 274 x 61 x 166 mm, 0.8 kg (1.8 lb)
   * Metal housing: 295 x 44.5 x 166 mm, 1.3 kg (2.9 lb)
-- Power: external 12 V adapter (2 A or 3 A, region dependent); optional 24/48 V DC; dying gasp supported; power consumption < 36 W.
+- Power: external 12 V adapter (2 A or 3 A, region dependent); optional 24/48 V DC; dying gasp supported; power consumption / power draw < 36 W.
 - VDSL2 (factory option): 1 pair profiles 8, 12, 17, 30, 35b; 2 pairs profiles 8, 12, 17.
 - A 5G version exists (metal housing; separate datasheet).
 - Voice (ONeSBC option): up to 100 simultaneous centrex calls and up to 60 simultaneous trunking calls (no transcoding).
@@ -857,7 +863,7 @@ Device / Model: OneAccess ONE2501 (CPE ONEACCESS ONE2501, Item Code: CPEDAT083S)
 - Capacity: 50,000 IPv4 routes + 12,500 IPv6 routes, 16 VRFs, 100,000 NAT / firewall / DPI sessions.
 - PoE (factory option, 8-LAN-port versions): up to 120 W, 4 x PoE+ (30 W) and 4 x PoE (15 W); optional external 150 W PoE power supply (54 Vdc, 2.78 A).
 - Dimensions 295 x 44.5 x 166 mm; weight of the router 1.3 kg (2.86 lb); fanless. The '0.8 kg' in the datasheet is the weight of the optional 150 W PoE power supply, NOT the router.
-- Power: external 12 V - 3 A adapter, power consumption < 36 W.
+- Power: external 12 V - 3 A adapter, power consumption / power draw < 36 W.
 - Voice (ONeSBC option): up to 100 simultaneous centrex calls and up to 60 simultaneous trunking calls (no transcoding).
 Stock (from CPE LIST.xlsx):
 {stock_lines(by_code, 'CPEDAT083S')}""", "03ds-one2501-ekinops.pdf & Copy of CPE Matrix.xlsx", "OneAccess ONE2501", "technical_profile",
@@ -875,6 +881,21 @@ Hardware family: Juniper SRX 300, SRX 320, SRX 340.
 2. What the corpus does NOT contain: there is no Juniper datasheet. VPN / IPsec tunnel counts, concurrent sessions, memory, dimensions and weight are not documented.
    If asked for them, say: 'Not stated in the provided documents (no Juniper datasheet is available in the corpus).' Never invent or estimate a figure.""",
                   "Enterprise-CPE-Plan-2025.pptx & Copy of CPE Matrix.xlsx & CPE LIST.xlsx", "Juniper SRX Series", "boundary_profile"))
+    # ---- Retiring Hardware from Presentation Deck (Slides 5 & 6) ----
+    docs.append(D("""[Enterprise CPE Plan Deck Complete Retiring Hardware Record - Slides 5 and 6]
+Query Context: what is retiring according to the plan deck, what is retiring in the presentation, all retiring cpe hardware, which devices are retiring in the deck.
+According to the SLT Enterprise CPE Plan 2025 presentation deck (Slides 5 and 6), the following equipment is retiring:
+1. Retiring Data CPEs (Slide 5):
+   - Copper NTU: OneAccess 1432 V.35
+   - Fiber NTUs / L2 Switches: Huawei S5300, Huawei S5230, ZTE 5250-28TC, ZTE 5250-28TM
+   - Cisco Branch Routers: Cisco 891, Cisco 1921, Cisco 1941, Cisco ISR 4221, Cisco 4231, Cisco ISR 4331, Cisco ISR 4431, Cisco ISR 4451
+   - L3 Switches: Huawei 5331 (S5331), Huawei 5332 (S5332)
+2. Retiring Voice CPEs & Wi-Fi Access Points (Slide 6):
+   - Grandstream IP Phones: GXP 1611, GXP 1165, GXP 1450, GXP 1625, GXP 1780, GXP 1782, GXP 1760W, GXV 3240, GXP 2130, GXP 2160, GXV 3350
+   - Voice Gateways / IADs: RealTone products, 96-port IAD, 2-port IAD, 16-port IAD
+   - Wi-Fi Access Points: Ruckus R320, Ruckus R500, Aruba AP 303""",
+                  "Enterprise-CPE-Plan-2025.pptx (Slides 5 & 6)", "Retiring Hardware Deck", "plan_retiring_profile"))
+
     print(f"  [+] Created {len(docs)} curated profile / discrepancy records")
     return docs
 
@@ -943,7 +964,7 @@ SLIDE8_PATHS = [
 
 SLIDE_CONTEXT = {
     5: "what is retiring according to the plan deck, retiring CPEs on slide 5.",
-    6: "what is retiring in the presentation, retiring phones, IADs and Wi-Fi access points on slide 6.",
+    6: "what is retiring according to the plan deck, what is retiring in the presentation, retiring phones, IADs and Wi-Fi access points on slide 6.",
     9: "customer options, default vs brand specific vs upgraded CPE options and rental impact.",
 }
 

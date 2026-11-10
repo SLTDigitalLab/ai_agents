@@ -361,7 +361,7 @@ _MODEL_ALIASES = [
 ]
 
 _PRONOUN_PATTERN = re.compile(
-    r"\b(it|its|they|them|those|these|the router|the switch|the phone|the device|the model|the same)\b",
+    r"\b(it|its|they|them|those|these|the router|the switch|the phone|the device|the model|the same|which of|which one|which ones|any of|how many of|what about|how about|the \d+\s*port)\b",
     re.IGNORECASE,
 )
 
@@ -472,6 +472,20 @@ def contextualize_cpe_query(
         if last_dev and last_dev.get("device"):
             card_refs.append(f"{last_dev['device']} {last_dev.get('item_code') or ''}".strip())
 
+    # Extract recent user query category or subject if available
+    last_user_query = ""
+    for msg in reversed(messages):
+        if msg.get("role") == "user":
+            last_user_query = msg.get("content", "").strip()
+            break
+
+    category_match = re.search(
+        r"\b((?:huawei|cisco|juniper|fortigate|grandstream|oneaccess|zte|aruba|ruckus)?\s*(?:switches|switch|routers|router|edge devices|edge device|firewalls|firewall|ip phones|ip phone|phones|phone|iads|iad|transceivers|transceiver|sfp|access points|access point|aps|ap|onts|ont))\b",
+        last_user_query,
+        re.I
+    )
+    prev_category = category_match.group(1).strip() if category_match else ""
+
     # 7. Follow-up resolution when NO model/code is named
     # (a) Brand preference follow-up (e.g. 'what if he insists on cisco?')
     if _BRAND_PREFERENCE_PATTERN.search(clean_query):
@@ -480,9 +494,10 @@ def contextualize_cpe_query(
         logger.info("[Ask CPE Query Rewriter] Preference follow-up: '%s'", out)
         return out
 
-    # (b) Pronoun or relative follow-up (e.g. 'what is its poe budget?', 'what about the 24 port one')
-    if card_refs and (_PRONOUN_PATTERN.search(clean_query) or re.search(r"\b(?:what about|how about|the \d+\s*port)\b", clean_query, re.I)):
-        out = f"{clean_query} (Context: {', '.join(card_refs)})"
+    # (b) Pronoun or relative follow-up (e.g. 'what is its poe budget?', 'which of them support poe?')
+    if (card_refs or prev_category) and (_PRONOUN_PATTERN.search(clean_query) or re.search(r"\b(?:what about|how about|the \d+\s*port)\b", clean_query, re.I)):
+        context_items = ([prev_category] if prev_category else []) + card_refs
+        out = f"{clean_query} (Context: {', '.join(context_items)})"
         logger.info("[Ask CPE Query Rewriter] Follow-up resolution: '%s'", out)
         return out
 
