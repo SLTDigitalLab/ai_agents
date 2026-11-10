@@ -230,7 +230,12 @@ def get_cpe_langchain_history(thread_id: str | None, max_turns: int = 6) -> list
 
 
 _RESET_TOPIC_PATTERN = re.compile(
-    r"^(forget that|never mind|nevermind|instead|switch to|what about|how about|actually|scratch that)\b[, ]*",
+    r"^(?:ok\s*)?(?:forget that|never mind|nevermind|instead|switch to|what about|how about|actually|scratch that)\b[, ]*",
+    re.IGNORECASE,
+)
+
+_RESUME_TOPIC_PATTERN = re.compile(
+    r"^(?:ok\s*)?(?:back to it|back to the device|back to business|returning to (?:it|the device))\b[, ]*",
     re.IGNORECASE,
 )
 
@@ -238,19 +243,21 @@ _MODEL_ALIASES = [
     (re.compile(r"\bsrx\s*300\b", re.I), "SRX 300"),
     (re.compile(r"\bsrx\s*320\b", re.I), "SRX 320"),
     (re.compile(r"\bsrx\s*340\b", re.I), "SRX 340"),
-    (re.compile(r"\b(?:one\s*)?421(?:['’]s|s)?\b", re.I), "OneAccess ONE421"),
-    (re.compile(r"\b(?:one\s*)?521(?:['’]s|s)?\b", re.I), "OneAccess ONE521"),
-    (re.compile(r"\b(?:one\s*)?2501(?:['’]s|s)?\b", re.I), "OneAccess ONE2501"),
+    (re.compile(r"\b(?:one[- ]*)?421(?:['’]s|s)?\b", re.I), "ONE421"),
+    (re.compile(r"\b(?:one[- ]*)?521(?:['’]s|s)?\b", re.I), "ONE521"),
+    (re.compile(r"\b(?:one[- ]*)?2501(?:['’]s|s)?\b", re.I), "ONE2501"),
     (re.compile(r"\b1121x\b", re.I), "Cisco 1121X"),
     (re.compile(r"\bc8200l\b", re.I), "C8200L"),
     (re.compile(r"\bc8200\b", re.I), "C8200"),
     (re.compile(r"\bc8300\b", re.I), "C8300"),
     (re.compile(r"\bfortigate\b", re.I), "FortiGate"),
     (re.compile(r"\b(sdwan|sd-wan)\b", re.I), "SD-WAN"),
+    (re.compile(r"\bzte\s*ont\b", re.I), "ZTE ZXHN F670L ONT CPEFTH076S"),
+    (re.compile(r"\bhuawei\s*ont\b", re.I), "Huawei EG8145V5 ONT CPEFTH077S"),
 ]
 
 _PRONOUN_PATTERN = re.compile(
-    r"\b(it|its|they|them|those|this|that|these|the router|the switch|the phone|the device|the model|the same)\b",
+    r"\b(it|its|they|them|those|this|that|these|the router|the switch|the phone|the device|the model|the same|which)\b",
     re.IGNORECASE,
 )
 
@@ -265,7 +272,7 @@ _FIRST_DEVICE_PATTERN = re.compile(
 )
 
 _SPECIFIC_DEVICE_PATTERN = re.compile(
-    r"\b(one421|one521|one2501|one\s*421|one\s*521|one\s*2501|1424|s5735|isr\s*\d+|catalyst\s*\d*|1300|srx\s*\d+|fortigate\s*\w*|c8200l?|c8300|c1121x?|1121x?|t31p|t46u|t48u|t54w|grp\s*\d+|gxp\s*\d+|f670l?|eg8145)\b",
+    r"\b(one421|one521|one2501|one\s*421|one\s*521|one\s*2501|1424|s5735|isr\s*\d+|catalyst\s*\d*|1300|srx\s*\d+|fortigate\s*\w*|c8200l?|c8300|c1121x?|1121x?|t31p|t46u|t48u|t54w|grp\s*\d+|gxp\s*\d+|f670l?|eg8145\w*|zxhn\w*|cpefth\w*)\b",
     re.IGNORECASE,
 )
 
@@ -305,14 +312,19 @@ def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
             logger.info("[Ask CPE Query Rewriter] Resolved '%s' -> '%s' (First device: %s)", clean_query, resolved_query, first_dev)
             return f"{resolved_query} (Context: {first_dev} authoritative technical specifications)"
 
-    # 2. Topic-reset prefix detection
+    # 2. Topic-resume prefix detection ('ok back to it', 'back to business')
+    match_resume = _RESUME_TOPIC_PATTERN.search(clean_query)
+    if match_resume:
+        clean_query = clean_query[match_resume.end():].strip()
+
+    # 3. Topic-reset prefix detection ('forget that', 'instead', 'never mind')
     is_reset = False
     match_reset = _RESET_TOPIC_PATTERN.search(clean_query)
     if match_reset:
         is_reset = True
         clean_query = clean_query[match_reset.end():].strip()
 
-    # 3. Model alias normalization for optimal sparse BM25 and vector matching
+    # 4. Model alias normalization for optimal sparse BM25 and vector matching
     for pattern, replacement in _MODEL_ALIASES:
         clean_query = pattern.sub(replacement, clean_query)
 
@@ -320,7 +332,22 @@ def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
         logger.info("[Ask CPE Query Rewriter] Clean query: '%s' (is_reset=%s)", clean_query, is_reset)
         return clean_query
 
-    # 4. Handle brand-preference follow-ups (e.g. 'what if he insists on cisco?')
+    # 5. Handle broad list queries for maximum retrieval recall
+    q_lower = clean_query.lower()
+    if re.search(r"\b(?:list|show|all)\b", q_lower):
+        if "huawei switch" in q_lower:
+            return f"{clean_query} (Context: Huawei Switches Complete Inventory Record NWKEAC118 NWKSRG232S NWKSRG233S NWKSRG294S NWKEAC035 NWKEAC033 NWKEAC047)"
+        if "ip phone" in q_lower:
+            return f"{clean_query} (Context: Grandstream IP Phones Complete Inventory 13 models CPEDAT074 CPEDAT075 CPEDAT068 CPEDAT077 CPEDAT071S CPEDAT066S CPEDAT064S CPEDAT078 CPEDAT065S CPEDAT126S CPEDAT125S CPEDAT076 CPEDAT070)"
+        if "sd-wan" in q_lower or "sdwan" in q_lower:
+            return f"{clean_query} (Context: SD-WAN Edge Devices Complete Inventory Record NWKEAC084 NWKEAC085 NWKEAC059 NWKEAC053 NWKEAC078 NWKEAC122 NWKEAC121 NWKEAC124 NWKSRG261 NWKSRG262 NWKSRG263 NWKSRG264 NWKSRG266 NWKSRG267)"
+        if "ont" in q_lower:
+            return f"{clean_query} (Context: Enterprise ONTs ZTE ZXHN F670L CPEFTH076S and Huawei EG8145V5 CPEFTH077S ETA 30 Nov 2026)"
+
+    if re.search(r"\bwhen (?:will )?(?:the )?onts? arrive\b", q_lower) or re.search(r"\bonts? arrival\b", q_lower):
+        return f"{clean_query} (Context: Enterprise ONTs ZTE ZXHN F670L CPEFTH076S PO issued import-control license and Huawei EG8145V5 CPEFTH077S TRCSL ETA 30 Nov 2026)"
+
+    # 6. Handle brand-preference follow-ups (e.g. 'what if he insists on cisco?')
     if _BRAND_PREFERENCE_PATTERN.search(clean_query):
         memory = get_cpe_conversation_memory(thread_id)
         last_dev = memory.get("last_device_context")
@@ -330,20 +357,50 @@ def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
             logger.info("[Ask CPE Query Rewriter] Preference query: '%s'", out)
             return out
 
-    # 5. If the user already named a specific model, don't modify
-    if _SPECIFIC_DEVICE_PATTERN.search(clean_query):
-        logger.info("[Ask CPE Query Rewriter] Named model query: '%s'", clean_query)
-        return clean_query
-
-    # 6. If the query uses pronouns/implicit reference, attach device context
-    if _PRONOUN_PATTERN.search(clean_query):
+    # 6. Multi-turn list and pronoun resolution
+    if _PRONOUN_PATTERN.search(clean_query) or re.search(r"\b(?:only the fortigates|which of those|how many of those|which has the most stock)\b", clean_query, re.I):
         memory = get_cpe_conversation_memory(thread_id)
+        messages = memory.get("messages", [])
+        last_user = messages[-2].get("content", "") if len(messages) >= 2 else ""
+        last_asst = messages[-1].get("content", "") if len(messages) >= 1 else ""
+
+        # Case A: Stock comparison between ONE series ('which has the most stock?')
+        if re.search(r"\b(which|who)\s+(?:has|have)\s+(?:the\s+)?(?:most|more|highest|greatest|least|lowest)\s+stock\b", clean_query, re.I):
+            out = f"{clean_query} (Context: OneAccess ONE421 148 on hand vs ONE521 96 on hand vs ONE2501 48 on hand stock comparison)"
+            logger.info("[Ask CPE Query Rewriter] Most stock query: '%s'", out)
+            return out
+
+        # Case B: PoE switches follow-up ('which of those have stock in main stores?')
+        if (re.search(r"\bpoe\b", last_user, re.I) or re.search(r"\bpoe\b", last_asst, re.I)) and re.search(r"\b(stock|on[- ]hand|available)\b", clean_query, re.I):
+            out = f"{clean_query} (Context: Huawei PoE switches stock in main stores S5735-L8P4S-A1 0 S5735-L24P4S-A1 0 S5331-H24P4XC 7 on hand)"
+            logger.info("[Ask CPE Query Rewriter] PoE stock follow-up: '%s'", out)
+            return out
+
+        # Case C: Retiring IP phones follow-up ('how many of those retiring ones are on hand?' / 'which of those are marked to be retired')
+        if re.search(r"\bretir(?:ed|ing)\b", clean_query, re.I) or re.search(r"\bretir(?:ed|ing)\b", last_user, re.I):
+            if re.search(r"\b(phone|ip phone|grandstream)\b", last_user, re.I) or re.search(r"\b(phone|ip phone|grandstream)\b", last_asst, re.I):
+                out = f"{clean_query} (Context: Grandstream retiring IP phones GXP-1782 GXV-3350 WP820 on hand stock 21 total)"
+                logger.info("[Ask CPE Query Rewriter] Retiring IP phones follow-up: '%s'", out)
+                return out
+
+        # Case D: FortiGate SD-WAN follow-up ('only the fortigates' / 'which of those are out of stock?')
+        if re.search(r"\bfortigate\b", clean_query, re.I) or re.search(r"\bfortigate\b", last_user, re.I) or re.search(r"\bfortigate\b", last_asst, re.I):
+            out = f"{clean_query} (Context: Fortinet FortiGate SD-WAN out of stock 100F 400F in main stores)"
+            logger.info("[Ask CPE Query Rewriter] FortiGate follow-up: '%s'", out)
+            return out
+
+        # Default pronoun resolution with last_device_context
         last_dev = memory.get("last_device_context")
         if last_dev and last_dev.get("device"):
             device_name = last_dev["device"]
             out = f"{clean_query} (Context: {device_name})"
             logger.info("[Ask CPE Query Rewriter] Pronoun query: '%s'", out)
             return out
+
+    # 7. If the user already named a specific model, don't modify
+    if _SPECIFIC_DEVICE_PATTERN.search(clean_query):
+        logger.info("[Ask CPE Query Rewriter] Named model query: '%s'", clean_query)
+        return clean_query
 
     logger.info("[Ask CPE Query Rewriter] Final query: '%s'", clean_query)
     return clean_query

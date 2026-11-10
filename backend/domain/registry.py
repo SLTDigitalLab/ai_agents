@@ -51,6 +51,7 @@ AGENT_BUILDERS: dict[str, callable] = {
     "aiexpo": build_kb_workflow,
     "mintcrm": build_kb_workflow,
     "embryo": build_kb_workflow,
+    "cpe": build_kb_workflow,
 
     # Archetype 2 – KB + API
     "hr": build_kb_api_workflow,
