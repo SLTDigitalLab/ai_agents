@@ -1323,6 +1323,8 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                 type: msg.type === 'human' ? 'user' : 'bot',
                                 text,
                                 formType,
+                                // Evidence saved with the answer, so pictures survive a reload.
+                                evidence: Array.isArray(msg.evidence) ? msg.evidence : [],
                             };
                         });
                         setMessages(mappedMessages);

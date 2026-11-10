@@ -3,6 +3,7 @@ Chat router - connects the React frontend to the LangGraph agent system with str
 Includes input guardrails (LLM-based intent + sentiment classification) run before the agent.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -30,6 +31,7 @@ from domain.archetypes.helpdesk_agent import INTERNAL_LLM_TAG
 from domain.tools.rag_tools import clear_thread_evidence, consume_thread_evidence
 from schemas.chat import ChatRequest
 from services.sessions import record_session
+from services.chat_evidence import load_thread_evidence, save_message_evidence
 from services.user_profile import enrich_chat_identity
 
 # --- 1. Import Langfuse CallbackHandler ---
@@ -422,16 +424,19 @@ def _filter_evidence_for_answer(answer_text: str, evidence_items: list[dict]) ->
     return _select_best_evidence(answer_text, source_filtered)
 
 
-def _build_evidence_stream_chunk(answer_text: str, thread_id: str) -> str:
-    """Build hidden evidence JSON for the frontend, if relevant evidence exists."""
+def _select_evidence_for_answer(answer_text: str, thread_id: str) -> list[dict]:
+    """Pick the cited/relevant evidence items to show with this answer."""
     # Select cited/relevant evidence before applying the display limit. A
     # relevant crop may otherwise be lost behind earlier, uncited candidates.
     evidence_items = consume_thread_evidence(thread_id)
 
     evidence_items = _filter_evidence_for_answer(answer_text, evidence_items)
     evidence_items = evidence_items[:settings.EVIDENCE_MAX_ITEMS_PER_ANSWER]
-    evidence_items = [_sanitize_evidence_item(item) for item in evidence_items]
+    return [_sanitize_evidence_item(item) for item in evidence_items]
 
+
+def _build_evidence_stream_chunk(evidence_items: list[dict]) -> str:
+    """Build hidden evidence JSON for the frontend, if relevant evidence exists."""
     if not evidence_items:
         return ""
 
@@ -444,6 +449,25 @@ def _build_evidence_stream_chunk(answer_text: str, thread_id: str) -> str:
         + json.dumps(payload, ensure_ascii=False)
         + "[[/EVIDENCE_JSON]]"
     )
+
+
+def _last_ai_message_id(messages: list) -> str | None:
+    """Return the id of the last AI message that has visible content."""
+    for msg in reversed(messages or []):
+        if getattr(msg, "type", None) == "ai" and getattr(msg, "content", None) and getattr(msg, "id", None):
+            return str(msg.id)
+    return None
+
+
+async def _persist_answer_evidence(graph, thread_id: str, evidence_items: list[dict]) -> None:
+    """Link the evidence shown with this answer to its AI message. Never raises."""
+    try:
+        snapshot = await graph.aget_state({"configurable": {"thread_id": thread_id}})
+        message_id = _last_ai_message_id((snapshot.values or {}).get("messages", []))
+        if message_id:
+            await asyncio.to_thread(save_message_evidence, thread_id, message_id, evidence_items)
+    except Exception as exc:
+        logger.warning(f"Failed to persist answer evidence for {thread_id}: {exc}")
 
 
 @router.post("")
@@ -694,13 +718,19 @@ async def chat(
             # Stream a hidden evidence block (cropped PDF images/tables)
             # after the answer. The frontend parses and renders it as a
             # "Relevant Evidence" section.
-            evidence_chunk = _build_evidence_stream_chunk(
+            evidence_items = _select_evidence_for_answer(
                 streamed_response_text,
                 request.thread_id,
             )
+            evidence_chunk = _build_evidence_stream_chunk(evidence_items)
 
             if evidence_chunk and request.stream:
                 yield evidence_chunk
+
+            # Save the shown evidence against the final AI message so the
+            # history endpoint can return it after a page reload.
+            if evidence_items:
+                await _persist_answer_evidence(graph, request.thread_id, evidence_items)
 
         except Exception as exc:
             import traceback
@@ -766,6 +796,9 @@ async def get_history(
         if not snapshot.values:
             return {"messages": []}
 
+        # Evidence saved with each answer, keyed by AI message id.
+        evidence_by_message = load_thread_evidence(thread_id)
+
         messages = []
         for msg in snapshot.values.get("messages", []):
             if msg.type not in ("human", "ai"):
@@ -786,10 +819,14 @@ async def get_history(
                 content = content.strip()
 
             if content:
-                messages.append({
+                entry = {
                     "type": msg.type,
                     "content": content
-                })
+                }
+                evidence = evidence_by_message.get(str(getattr(msg, "id", "") or ""))
+                if msg.type == "ai" and evidence:
+                    entry["evidence"] = evidence
+                messages.append(entry)
 
         return {"messages": messages}
 
