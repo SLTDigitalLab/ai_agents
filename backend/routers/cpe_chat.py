@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import time
+from datetime import date
 from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException
@@ -275,6 +276,11 @@ async def cpe_chat(request: CPEChatRequest):
 
     context_str = "\n\n---\n\n".join(context_blocks)
 
+    today_dt = date.today()
+    snapshot_dt = date(2026, 10, 19)
+    snapshot_age = (today_dt - snapshot_dt).days if today_dt >= snapshot_dt else (snapshot_dt - today_dt).days
+    today_str = today_dt.strftime("%d/%m/%Y")
+
     system_prompt = (
         "You are Ask CPE, SLTMobitel's Enterprise Customer Premises Equipment (CPE) & NTU assistant.\n"
         "You assist enterprise network engineers, solution architects, and sales teams with verified hardware information.\n\n"
@@ -303,7 +309,13 @@ async def cpe_chat(request: CPEChatRequest):
         "19. OPTICAL NETWORK TERMINALS (ONTs - ZTE & HUAWEI):\n"
         "    - ZTE ZXHN F670L (GPON ONT): Item Code is strictly CPEFTH076S (1000 units on order / in transit, ETA 30 Nov 2026. Blocker: PO issued, import-control license to be applied for from ZTE). NEVER cite CPEDAT074 (which is a Grandstream IP phone).\n"
         "    - Huawei EG8145V5 (GPON ONT): Item Code is strictly CPEFTH077S (1000 units on order / in transit, ETA 30 Nov 2026. Blocker: Pending site approval from TRCSL). NEVER cite CPEDAT075 (which is a Grandstream IP phone).\n"
-        "    - When asked when the ONTs will arrive or about both ONTs, cite both ZTE ZXHN F670L (CPEFTH076S) and Huawei EG8145V5 (CPEFTH077S) with ETA 30 Nov 2026 and their blockers."
+        "    - When asked when the ONTs will arrive or about both ONTs, cite both ZTE ZXHN F670L (CPEFTH076S) and Huawei EG8145V5 (CPEFTH077S) with ETA 30 Nov 2026 and their blockers.\n"
+        f"20. SNAPSHOT: All stock comes from CPE LIST.xlsx dated 19/10/2026. Today is {today_str}. It is NOT live: if asked, say it is a snapshot {snapshot_age} days old to be confirmed in the live system.\n"
+        "21. NAMED MODEL ONLY: Answer only for the model(s) named. Never add quantities of different models. Give a total only when asked, and list each item.\n"
+        "22. CAUTION LINES: If a record has a CAUTION line (ETA, LC, PO, approval), repeat it: receipt of the stock is not confirmed.\n"
+        "23. VERIFY VARIANT (ALL FIELDS): 'Verify variant' means unconfirmed. Never say the device 'has' it.\n"
+        "24. RETIREMENT: For 'is X retiring' questions, report both the inventory status and the plan-deck lists (slides 5 and 6), and flag any disagreement.\n"
+        "25. SLIDE 8 CAPS: Attribute a cap only to the access path named in the record, and don't apply a direct-fiber cap to a service-switch path."
     )
 
     # 3. Pull recent multi-turn history from PostgreSQL
