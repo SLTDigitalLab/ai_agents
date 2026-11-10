@@ -310,4 +310,62 @@ def test_task4_validate_item_codes_lookup_and_replacement():
         assert "Verification Notice" not in res_valid
 
 
+# ==============================================================================
+# TASK 5 TESTS: Query Rewriter Acceptance
+# ==============================================================================
+
+def test_task5_rewriter_no_facts_injected():
+    """Retrieval queries must contain entity names/codes only, never answers/facts."""
+    from services.cpe_memory import contextualize_cpe_query
+
+    # Test list queries
+    res = contextualize_cpe_query("list all huawei switches")
+    assert "NWKEAC118" not in res  # Code list removed from query injection
+    assert "148 on hand" not in res
+
+    # Retiring query
+    res_retiring = contextualize_cpe_query("which items are marked to be retired in the inventory?")
+    assert "21 total" not in res_retiring
+    assert "GXP-1782" not in res_retiring
+
+
+def test_task5_rewriter_pronoun_and_reset_patterns():
+    """'which', 'that', 'this' removed from _PRONOUN_PATTERN; 'what about' removed from _RESET_TOPIC_PATTERN."""
+    from services.cpe_memory import contextualize_cpe_query
+
+    memory = {
+        "messages": [
+            {"role": "user", "content": "list all ip phones"},
+            {
+                "role": "assistant",
+                "content": "Here are the Grandstream IP phones...",
+                "hardware_cards": [{"name": "Grandstream GRP-2602W", "item_code": "CPEDAT074"}],
+            },
+        ],
+        "last_device_context": {"device": "Grandstream GRP-2602W", "item_code": "CPEDAT074"},
+    }
+
+    # "which items are marked to be retired" must NOT resolve to Grandstream phones!
+    rewritten = contextualize_cpe_query("which items are marked to be retired in the inventory?", memory_dict=memory)
+    assert "Grandstream" not in rewritten
+    assert "CPEDAT074" not in rewritten
+    assert rewritten == "which items are marked to be retired in the inventory?"
+
+    # "what about the 24 port one" after S5735-L8P4S must keep context
+    memory_switch = {
+        "messages": [
+            {"role": "user", "content": "poe budget of the l8p4s"},
+            {
+                "role": "assistant",
+                "content": "The S5735-L8P4S-A1 has a PoE budget of 124 W.",
+                "hardware_cards": [{"name": "Huawei S5735-L8P4S-A1", "item_code": "NWKEAC035"}],
+            },
+        ],
+        "last_device_context": {"device": "Huawei S5735-L8P4S-A1", "item_code": "NWKEAC035"},
+    }
+    rewritten_switch = contextualize_cpe_query("what about the 24 port one", memory_dict=memory_switch)
+    assert "Huawei S5735-L8P4S-A1" in rewritten_switch
+
+
+
 
