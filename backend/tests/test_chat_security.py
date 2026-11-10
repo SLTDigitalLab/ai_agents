@@ -153,11 +153,39 @@ class ChatSecurityTests(unittest.TestCase):
                    'data': {'chunk': SimpleNamespace(content='Complete answer')}}
         self.graph.astream_events.side_effect = events
         evidence = '[[EVIDENCE_JSON]]{"items": [{"url": "private-image"}]}[[/EVIDENCE_JSON]]'
-        with patch.object(self.chat_router, '_build_evidence_stream_chunk', return_value=evidence):
+        with patch.object(self.chat_router, '_build_evidence_stream_chunk', return_value=evidence), \
+                patch.object(self.chat_router, '_select_evidence_for_answer', return_value=[]):
             response = self.client.post('/api/v1/chat', json={**self.body, 'stream': False}, headers=self.owner)
             self.assertEqual(response.json(), {'response': 'Complete answer'})
             response = self.client.post('/api/v1/chat', json=self.body, headers=self.owner)
             self.assertIn(evidence, response.text)
+
+    def test_evidence_is_saved_with_answer_and_returned_in_history(self):
+        self.classifier.return_value = SimpleNamespace(action='PASS', reason='synthetic', sentiment='neutral')
+        async def events(*args, **kwargs):
+            yield {'event': 'on_chat_model_stream', 'metadata': {'langgraph_node': 'agent'},
+                   'data': {'chunk': SimpleNamespace(content='Answer')}}
+        self.graph.astream_events.side_effect = events
+        answer = SimpleNamespace(type='ai', content='Answer', id='ai-1')
+        self.graph.aget_state = AsyncMock(return_value=SimpleNamespace(values={'messages': [answer]}))
+        item = {'type': 'image', 'url': '/api/v1/evidence/images/flow.png', 'source': 'a.pdf'}
+        save = Mock()
+        with patch.object(self.chat_router, '_select_evidence_for_answer', return_value=[item]), \
+                patch.object(self.chat_router, 'save_message_evidence', save):
+            response = self.client.post('/api/v1/chat', json=self.body, headers=self.owner)
+            self.assertIn('[[EVIDENCE_JSON]]', response.text)
+        save.assert_called_once()
+        thread_key, message_id, items = save.call_args.args
+        self.assertEqual((message_id, items), ('ai-1', [item]))
+
+        # History returns the saved evidence on that AI message only.
+        self.state[thread_key] = {'messages': [
+            SimpleNamespace(type='human', content='Question', id='h-1'), answer,
+        ]}
+        with patch.object(self.chat_router, 'load_thread_evidence', return_value={'ai-1': [item]}):
+            messages = self.client.get('/api/v1/chat/hr/known-thread', headers=self.owner).json()['messages']
+        self.assertNotIn('evidence', messages[0])
+        self.assertEqual(messages[1]['evidence'], [item])
 
     def test_same_thread_id_cannot_read_or_overwrite_another_users_conversation(self):
         self.client.post('/api/v1/chat', json=self.body, headers=self.owner)
