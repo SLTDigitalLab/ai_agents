@@ -222,6 +222,11 @@ class VisualEvidenceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selected, [candidates[0]["item"]])
         review_payload = json.loads(model.ainvoke.call_args.args[0][1][1])
         self.assertEqual(len(review_payload["candidates"]), 1)
+        # The reviewer's JSON must be tagged internal so chat.py hides it.
+        self.assertEqual(
+            model.ainvoke.call_args.kwargs["config"],
+            {"tags": ["helpdesk_internal_llm_call"]},
+        )
 
     async def test_model_failure_omits_images_without_breaking_text(self):
         embeddings = Mock(embed_query=Mock(return_value=[1.0, 0.0]))

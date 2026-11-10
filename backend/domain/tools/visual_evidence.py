@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 from core.config import settings
-from core.llm import get_chat_model
+from core.llm import INTERNAL_LLM_TAG, get_chat_model
 
 log = logging.getLogger(__name__)
 
@@ -109,7 +109,8 @@ async def select_relevant_images(
             _model().ainvoke([
                 ("system", _REVIEW_PROMPT),
                 ("human", json.dumps({"question": query, "candidates": payload}, ensure_ascii=True)),
-            ]),
+            # Tagged internal so routers/chat.py hides the reviewer JSON.
+            ], config={"tags": [INTERNAL_LLM_TAG]}),
             timeout=settings.VISUAL_EVIDENCE_REVIEW_TIMEOUT_SECONDS,
         )
 

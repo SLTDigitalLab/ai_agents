@@ -9,13 +9,11 @@ from typing import Any, Literal
 from langchain_core.messages import AIMessage
 
 from domain.state import AgentState
-from core.llm import get_chat_model
+# INTERNAL_LLM_TAG lives in core.llm so non-helpdesk code can use it;
+# re-exported here for existing imports.
+from core.llm import get_chat_model, INTERNAL_LLM_TAG  # noqa: F401
 
 llm = get_chat_model()
-
-# Tag for LLM calls whose output is internal-only (never shown to the
-# user), so routers/chat.py's stream listener can filter them out.
-INTERNAL_LLM_TAG = "helpdesk_internal_llm_call"
 
 
 def _message_to_text(message: Any) -> str:
