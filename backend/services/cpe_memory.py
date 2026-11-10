@@ -21,6 +21,7 @@ from typing import Any, List, Optional
 import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
+from psycopg_pool import ConnectionPool
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from core.config import settings
@@ -30,10 +31,45 @@ logger = logging.getLogger(__name__)
 _AGENT_ID = "cpe"
 _table_created = False
 _table_lock = Lock()
+_cpe_pool: Optional[ConnectionPool] = None
+_cpe_pool_lock = Lock()
 
 
 class CPEMemoryStorageError(RuntimeError):
     """Persistent CPE memory is unavailable."""
+
+
+class CPEThreadNotFoundError(Exception):
+    """Thread does not exist or owner mismatch (mismatch -> 404)."""
+
+
+def get_cpe_memory_pool() -> ConnectionPool:
+    """Singleton connection pool for CPE memory (min 1, max 10)."""
+    global _cpe_pool
+    if _cpe_pool is None:
+        with _cpe_pool_lock:
+            if _cpe_pool is None:
+                _cpe_pool = ConnectionPool(
+                    settings.POSTGRES_URL,
+                    min_size=1,
+                    max_size=10,
+                    open=True,
+                    kwargs={"row_factory": dict_row},
+                )
+    return _cpe_pool
+
+
+def close_cpe_memory_pool() -> None:
+    """Close the CPE memory connection pool on app shutdown."""
+    global _cpe_pool
+    with _cpe_pool_lock:
+        if _cpe_pool is not None:
+            try:
+                _cpe_pool.close()
+            except Exception as exc:
+                logger.warning("Error closing CPE memory connection pool: %s", exc)
+            finally:
+                _cpe_pool = None
 
 
 @contextmanager
@@ -52,7 +88,8 @@ def ensure_cpe_memory_table() -> None:
         if _table_created:
             return
         with _database_errors():
-            with psycopg.connect(settings.POSTGRES_URL) as conn:
+            pool = get_cpe_memory_pool()
+            with pool.connection() as conn:
                 with conn.cursor() as cur:
                     # Advisory lock serializes DDL across concurrent workers
                     cur.execute("SELECT pg_advisory_xact_lock(1818846822, 1)")
@@ -60,6 +97,7 @@ def ensure_cpe_memory_table() -> None:
                         CREATE TABLE IF NOT EXISTS public.cpe_memory (
                             agent_id VARCHAR(50) NOT NULL DEFAULT 'cpe',
                             thread_id VARCHAR(255) NOT NULL,
+                            owner_id VARCHAR(255),
                             summary TEXT NOT NULL DEFAULT '',
                             messages JSONB NOT NULL DEFAULT '[]'::jsonb,
                             last_device_context JSONB,
@@ -69,6 +107,10 @@ def ensure_cpe_memory_table() -> None:
                         )
                     """)
                     cur.execute("""
+                        ALTER TABLE public.cpe_memory
+                        ADD COLUMN IF NOT EXISTS owner_id VARCHAR(255)
+                    """)
+                    cur.execute("""
                         CREATE INDEX IF NOT EXISTS idx_cpe_memory_updated_at
                         ON public.cpe_memory (updated_at)
                     """)
@@ -76,47 +118,76 @@ def ensure_cpe_memory_table() -> None:
 
 
 @contextmanager
-def _conversation(thread_id: str, *, write: bool = False):
-    """Read or mutate conversation row in one transaction, locking on write."""
+def _conversation(
+    thread_id: str,
+    *,
+    write: bool = False,
+    owner_id: Optional[str] = None,
+):
+    """Read or mutate conversation row in one transaction, locking on write.
+    
+    Read paths do NOT insert rows. Unknown threads return empty history.
+    """
     ensure_cpe_memory_table()
     with _database_errors():
-        with psycopg.connect(settings.POSTGRES_URL) as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
+        pool = get_cpe_memory_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
                 key = {"agent_id": _AGENT_ID, "thread_id": thread_id}
-                cur.execute("""
-                    INSERT INTO public.cpe_memory (agent_id, thread_id)
-                    VALUES (%(agent_id)s, %(thread_id)s)
-                    ON CONFLICT (agent_id, thread_id) DO NOTHING
-                """, key)
-                cur.execute("""
-                    SELECT summary, messages, last_device_context
-                    FROM public.cpe_memory
-                    WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
-                """ + (" FOR UPDATE" if write else ""), key)
+                if write:
+                    cur.execute("""
+                        INSERT INTO public.cpe_memory (agent_id, thread_id, owner_id)
+                        VALUES (%(agent_id)s, %(thread_id)s, %(owner_id)s)
+                        ON CONFLICT (agent_id, thread_id) DO UPDATE
+                        SET updated_at = NOW()
+                    """, {**key, "owner_id": owner_id})
+
+                    cur.execute("""
+                        SELECT owner_id, summary, messages, last_device_context
+                        FROM public.cpe_memory
+                        WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
+                        FOR UPDATE
+                    """, key)
+                else:
+                    cur.execute("""
+                        SELECT owner_id, summary, messages, last_device_context
+                        FROM public.cpe_memory
+                        WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
+                    """, key)
+
                 row = cur.fetchone()
                 if not row:
                     conversation = {
+                        "owner_id": None,
                         "summary": "",
                         "messages": [],
                         "last_device_context": None,
                     }
                 else:
+                    row_owner = row.get("owner_id")
+                    if row_owner and owner_id and row_owner != owner_id:
+                        raise CPEThreadNotFoundError(f"Thread '{thread_id}' not found for user.")
                     conversation = {
+                        "owner_id": row_owner,
                         "summary": row.get("summary") or "",
                         "messages": row.get("messages") or [],
                         "last_device_context": row.get("last_device_context"),
                     }
+
                 yield conversation
+
                 if write:
                     cur.execute("""
                         UPDATE public.cpe_memory SET
                             summary = %(summary)s,
                             messages = %(messages)s,
                             last_device_context = %(last_device_context)s,
+                            owner_id = COALESCE(%(owner_id)s, owner_id),
                             updated_at = NOW()
                         WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
                     """, {
                         **key,
+                        "owner_id": owner_id,
                         "summary": conversation["summary"],
                         "messages": Jsonb(conversation["messages"]),
                         "last_device_context": (
@@ -127,16 +198,21 @@ def _conversation(thread_id: str, *, write: bool = False):
                     })
 
 
-def get_cpe_conversation_memory(thread_id: str | None) -> dict[str, Any]:
-    """Retrieve full memory state for a thread."""
+def get_cpe_conversation_memory(
+    thread_id: str | None,
+    owner_id: Optional[str] = None,
+) -> dict[str, Any]:
+    """Retrieve full memory state for a thread. Unknown thread -> empty history."""
     if not thread_id:
-        return {"summary": "", "messages": [], "last_device_context": None}
+        return {"summary": "", "messages": [], "last_device_context": None, "owner_id": None}
     try:
-        with _conversation(thread_id, write=False) as conv:
+        with _conversation(thread_id, write=False, owner_id=owner_id) as conv:
             return deepcopy(conv)
+    except CPEThreadNotFoundError:
+        raise
     except Exception as exc:
-        logger.error("Error reading CPE memory for thread %s: %s", thread_id, exc)
-        return {"summary": "", "messages": [], "last_device_context": None}
+        logger.error("[CPE Memory %s] DB error reading memory: %s", thread_id, exc, exc_info=True)
+        return {"summary": "", "messages": [], "last_device_context": None, "owner_id": None}
 
 
 def save_cpe_turn(
@@ -144,6 +220,7 @@ def save_cpe_turn(
     user_message: str,
     assistant_message: str,
     hardware_cards: list[dict] | None = None,
+    owner_id: Optional[str] = None,
 ) -> None:
     """Atomically append a user-assistant dialogue turn and update device context, preventing duplicate turns."""
     if not thread_id:
@@ -163,7 +240,7 @@ def save_cpe_turn(
         }
 
     try:
-        with _conversation(thread_id, write=True) as conv:
+        with _conversation(thread_id, write=True, owner_id=owner_id) as conv:
             messages = conv["messages"]
             # Deduplicate: if an identical user message was just submitted (e.g. rapid double click),
             # update the assistant response in place rather than inserting a duplicate turn.
@@ -186,15 +263,21 @@ def save_cpe_turn(
             conv["messages"] = messages[-30:]
             if device_context:
                 conv["last_device_context"] = device_context
+    except CPEThreadNotFoundError:
+        raise
     except Exception as exc:
-        logger.error("Failed to save CPE turn for thread %s: %s", thread_id, exc)
+        logger.error("[CPE Memory %s] Failed to save CPE turn: %s", thread_id, exc, exc_info=True)
 
 
-def get_cpe_history_for_frontend(thread_id: str | None) -> list[dict[str, Any]]:
+def get_cpe_history_for_frontend(
+    thread_id: str | None,
+    memory_dict: Optional[dict[str, Any]] = None,
+    owner_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
     """Format messages for React ChatInterface history restoration."""
     if not thread_id:
         return []
-    memory = get_cpe_conversation_memory(thread_id)
+    memory = memory_dict if memory_dict is not None else get_cpe_conversation_memory(thread_id, owner_id=owner_id)
     raw_messages = memory.get("messages", [])
     output = []
     for msg in raw_messages:
@@ -211,11 +294,16 @@ def get_cpe_history_for_frontend(thread_id: str | None) -> list[dict[str, Any]]:
     return output
 
 
-def get_cpe_langchain_history(thread_id: str | None, max_turns: int = 6) -> list[BaseMessage]:
+def get_cpe_langchain_history(
+    thread_id: str | None,
+    max_turns: int = 6,
+    memory_dict: Optional[dict[str, Any]] = None,
+    owner_id: Optional[str] = None,
+) -> list[BaseMessage]:
     """Retrieve LangChain BaseMessage objects for LLM prompting."""
     if not thread_id:
         return []
-    memory = get_cpe_conversation_memory(thread_id)
+    memory = memory_dict if memory_dict is not None else get_cpe_conversation_memory(thread_id, owner_id=owner_id)
     raw_messages = memory.get("messages", [])
     selected = raw_messages[- (max_turns * 2):]  # each turn is user + assistant
     langchain_messages: list[BaseMessage] = []
@@ -277,9 +365,14 @@ _SPECIFIC_DEVICE_PATTERN = re.compile(
 )
 
 
-def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
+def contextualize_cpe_query(
+    query: str,
+    thread_id: str | None,
+    memory_dict: Optional[dict[str, Any]] = None,
+) -> str:
     """
     Contextualize follow-up questions for accurate Qdrant vector retrieval.
+    Memory dictionary is passed in to avoid redundant database reads.
     1. Resolves references to the session's first discussed device ('back to the first one').
     2. Strips topic-reset prefixes ('forget that', 'instead', 'never mind') so old context doesn't leak.
     3. Normalizes model aliases ('srx300' -> 'SRX 300', '1121x' -> 'Cisco 1121X', '521s' -> 'ONE521').
@@ -288,11 +381,13 @@ def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
        name a specific model or reset topic, appends the last discussed device context.
     """
     clean_query = query.strip()
+    memory: Optional[dict[str, Any]] = memory_dict
+    if memory is None and thread_id:
+        memory = get_cpe_conversation_memory(thread_id)
 
     # 1. Handle ordinal reference to the first discussed device ('back to the first one')
     match_first = _FIRST_DEVICE_PATTERN.search(clean_query)
-    if match_first and thread_id:
-        memory = get_cpe_conversation_memory(thread_id)
+    if match_first and thread_id and memory:
         first_dev = None
         for msg in memory.get("messages", []):
             cards = msg.get("hardware_cards") or []
@@ -328,7 +423,7 @@ def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
     for pattern, replacement in _MODEL_ALIASES:
         clean_query = pattern.sub(replacement, clean_query)
 
-    if not thread_id or is_reset:
+    if not thread_id or is_reset or not memory:
         logger.info("[Ask CPE Query Rewriter] Clean query: '%s' (is_reset=%s)", clean_query, is_reset)
         return clean_query
 
@@ -349,7 +444,6 @@ def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
 
     # 6. Handle brand-preference follow-ups (e.g. 'what if he insists on cisco?')
     if _BRAND_PREFERENCE_PATTERN.search(clean_query):
-        memory = get_cpe_conversation_memory(thread_id)
         last_dev = memory.get("last_device_context")
         if last_dev and last_dev.get("device"):
             device_name = last_dev["device"]
@@ -359,7 +453,7 @@ def contextualize_cpe_query(query: str, thread_id: str | None) -> str:
 
     # 6. Multi-turn list and pronoun resolution
     if _PRONOUN_PATTERN.search(clean_query) or re.search(r"\b(?:only the fortigates|which of those|how many of those|which has the most stock)\b", clean_query, re.I):
-        memory = get_cpe_conversation_memory(thread_id)
+        messages = memory.get("messages", [])
         messages = memory.get("messages", [])
         last_user = messages[-2].get("content", "") if len(messages) >= 2 else ""
         last_asst = messages[-1].get("content", "") if len(messages) >= 1 else ""

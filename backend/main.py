@@ -20,6 +20,7 @@ from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, 
 from services.ingestion import router as ingestion_router
 from core.config import settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
+from services.cpe_memory import get_cpe_memory_pool, close_cpe_memory_pool
 
 from fastapi.openapi.utils import get_openapi
 
@@ -29,12 +30,17 @@ from fastapi.openapi.utils import get_openapi
 async def lifespan(app: FastAPI):
     """Manage shared resources for the app's lifetime.
 
-    Checkpointer connection pools are created lazily on first use (per agent)
-    and live for the whole process; we close them cleanly on shutdown.
+    Checkpointer and CPE connection pools live for the process;
+    we close them cleanly on shutdown.
     """
+    try:
+        get_cpe_memory_pool()
+    except Exception as exc:
+        logging.getLogger(__name__).warning("CPE memory pool warm-up skipped: %s", exc)
     yield
     await aclose_async_pools()
     close_sync_pools()
+    close_cpe_memory_pool()
 
 def custom_openapi():
     """Configure OpenAPI schema with Azure AD security scheme."""
