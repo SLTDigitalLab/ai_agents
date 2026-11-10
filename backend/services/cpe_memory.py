@@ -76,6 +76,8 @@ def close_cpe_memory_pool() -> None:
 def _database_errors():
     try:
         yield
+    except CPEThreadNotFoundError:
+        raise
     except Exception as exc:
         logger.warning("CPE memory database operation failed: %s", exc)
         raise CPEMemoryStorageError("CPE memory storage is unavailable.") from None
@@ -136,43 +138,57 @@ def _conversation(
                 key = {"agent_id": _AGENT_ID, "thread_id": thread_id}
                 if write:
                     cur.execute("""
-                        INSERT INTO public.cpe_memory (agent_id, thread_id, owner_id)
-                        VALUES (%(agent_id)s, %(thread_id)s, %(owner_id)s)
-                        ON CONFLICT (agent_id, thread_id) DO UPDATE
-                        SET updated_at = NOW()
-                    """, {**key, "owner_id": owner_id})
-
-                    cur.execute("""
                         SELECT owner_id, summary, messages, last_device_context
                         FROM public.cpe_memory
                         WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
                         FOR UPDATE
                     """, key)
+                    row = cur.fetchone()
+                    if row:
+                        row_owner = row.get("owner_id")
+                        if row_owner and owner_id and row_owner != owner_id:
+                            raise CPEThreadNotFoundError(f"Thread '{thread_id}' not found for user.")
+                        conversation = {
+                            "owner_id": row_owner,
+                            "summary": row.get("summary") or "",
+                            "messages": row.get("messages") or [],
+                            "last_device_context": row.get("last_device_context"),
+                        }
+                    else:
+                        cur.execute("""
+                            INSERT INTO public.cpe_memory (agent_id, thread_id, owner_id)
+                            VALUES (%(agent_id)s, %(thread_id)s, %(owner_id)s)
+                        """, {**key, "owner_id": owner_id})
+                        conversation = {
+                            "owner_id": owner_id,
+                            "summary": "",
+                            "messages": [],
+                            "last_device_context": None,
+                        }
                 else:
                     cur.execute("""
                         SELECT owner_id, summary, messages, last_device_context
                         FROM public.cpe_memory
                         WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
                     """, key)
-
-                row = cur.fetchone()
-                if not row:
-                    conversation = {
-                        "owner_id": None,
-                        "summary": "",
-                        "messages": [],
-                        "last_device_context": None,
-                    }
-                else:
-                    row_owner = row.get("owner_id")
-                    if row_owner and owner_id and row_owner != owner_id:
-                        raise CPEThreadNotFoundError(f"Thread '{thread_id}' not found for user.")
-                    conversation = {
-                        "owner_id": row_owner,
-                        "summary": row.get("summary") or "",
-                        "messages": row.get("messages") or [],
-                        "last_device_context": row.get("last_device_context"),
-                    }
+                    row = cur.fetchone()
+                    if not row:
+                        conversation = {
+                            "owner_id": None,
+                            "summary": "",
+                            "messages": [],
+                            "last_device_context": None,
+                        }
+                    else:
+                        row_owner = row.get("owner_id")
+                        if row_owner and owner_id and row_owner != owner_id:
+                            raise CPEThreadNotFoundError(f"Thread '{thread_id}' not found for user.")
+                        conversation = {
+                            "owner_id": row_owner,
+                            "summary": row.get("summary") or "",
+                            "messages": row.get("messages") or [],
+                            "last_device_context": row.get("last_device_context"),
+                        }
 
                 yield conversation
 

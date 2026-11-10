@@ -15,9 +15,10 @@ import os
 import re
 import threading
 import time
+import uuid
 from datetime import date
 from typing import Any, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from fastapi import APIRouter, HTTPException
 
 from qdrant_client import QdrantClient
@@ -27,6 +28,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from core.config import settings
 from core.llm import get_ingestion_embedding_model, get_chat_model
 from services.cpe_memory import (
+    CPEThreadNotFoundError,
     get_cpe_conversation_memory,
     get_cpe_langchain_history,
     save_cpe_turn,
@@ -39,6 +41,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/cpe", tags=["Ask CPE"])
 
 COLLECTION_NAME = "cpe_docs"
+THREAD_ID_REGEX = r"^[A-Za-z0-9_-]{8,64}$"
+_THREAD_ID_PATTERN = re.compile(THREAD_ID_REGEX)
 
 _VECTOR_STORE: Optional[QdrantVectorStore] = None
 _VECTOR_STORE_LOCK = threading.Lock()
@@ -82,10 +86,20 @@ def get_cpe_vector_store() -> QdrantVectorStore:
 
 
 class CPEChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="User's query about CPE/NTU hardware or stock")
+    message: str = Field(..., min_length=1, max_length=2000, description="User's query about CPE/NTU hardware or stock")
     thread_id: Optional[str] = Field(default=None, description="Conversation thread identifier")
     agent_id: str = "cpe"
     limit: int = Field(default=8, ge=1, le=16)
+
+    @field_validator("thread_id")
+    @classmethod
+    def validate_client_thread_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v_clean = v.strip()
+            if not _THREAD_ID_PATTERN.match(v_clean):
+                raise ValueError("thread_id must match regex ^[A-Za-z0-9_-]{8,64}$")
+            return v_clean
+        return v
 
 
 class CPEHardwareCard(BaseModel):
@@ -213,26 +227,55 @@ def _guard_unsupported_specs(answer: str, context: str) -> str:
     return answer
 
 
+# TODO: Enforce owner_id when auth dependency (e.g. Depends(get_current_user)) is attached to /api/v1/cpe endpoints.
+# The frontend ChatInterface currently accesses /api/v1/cpe without Authorization bearer headers.
+# Once auth is enabled:
+# 1. Inject current_user: Optional[dict] = Depends(get_current_user_optional)
+# 2. Extract owner_id = current_user.get("oid") or current_user.get("sub")
+# 3. Pass owner_id to get_cpe_conversation_memory, save_cpe_turn, and get_cpe_history_for_frontend.
+# 4. On owner mismatch, cpe_memory raises CPEThreadNotFoundError which maps to HTTP 404 (not 403).
+
+
 @router.get("/history/{thread_id}")
-async def cpe_get_history(thread_id: str):
+async def cpe_get_history(thread_id: str, owner_id: Optional[str] = None):
     """Retrieve full conversation history for this CPE thread."""
-    messages = await asyncio.to_thread(get_cpe_history_for_frontend, thread_id)
-    return {"messages": messages}
+    if not _THREAD_ID_PATTERN.match(thread_id):
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid thread_id format. Must match ^[A-Za-z0-9_-]{8,64}$",
+        )
+    try:
+        messages = await asyncio.to_thread(get_cpe_history_for_frontend, thread_id, None, owner_id)
+        return {"messages": messages}
+    except CPEThreadNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Thread '{thread_id}' not found.")
 
 
 @router.post("/chat", response_model=CPEChatResponse)
 @router.post("/mcp-chat", response_model=CPEChatResponse)
-async def cpe_chat(request: CPEChatRequest):
+async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
     """
     Handle CPE queries: technical specs, Peliyagoda inventory, hardware comparisons.
     Maintains full PostgreSQL multi-turn memory and contextual retrieval.
     """
     start_time = time.time()
     query = request.message.strip()
-    thread_id = request.thread_id or f"cpe_{int(time.time())}"
+
+    if request.thread_id:
+        if not _THREAD_ID_PATTERN.match(request.thread_id):
+            raise HTTPException(
+                status_code=422,
+                detail="Invalid thread_id format. Must match ^[A-Za-z0-9_-]{8,64}$",
+            )
+        thread_id = request.thread_id
+    else:
+        thread_id = uuid.uuid4().hex
 
     # 1. Read conversation memory ONCE per request off the event loop
-    memory = await asyncio.to_thread(get_cpe_conversation_memory, thread_id)
+    try:
+        memory = await asyncio.to_thread(get_cpe_conversation_memory, thread_id, owner_id)
+    except CPEThreadNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Thread '{thread_id}' not found.")
 
     # Multi-turn contextual query expansion (resolves pronouns like 'it', 'its', 'the router')
     retrieval_query = await asyncio.to_thread(contextualize_cpe_query, query, thread_id, memory)
@@ -386,7 +429,7 @@ async def cpe_chat(request: CPEChatRequest):
     cards_dicts = [card.model_dump() for card in selected_cards]
 
     # 6. Atomically persist conversation turn in PostgreSQL off the event loop
-    await asyncio.to_thread(save_cpe_turn, thread_id, query, answer_text, cards_dicts)
+    await asyncio.to_thread(save_cpe_turn, thread_id, query, answer_text, cards_dicts, owner_id)
 
     return CPEChatResponse(
         status="success",
