@@ -10,6 +10,10 @@ from core.config import settings
 
 log = logging.getLogger(__name__)
 
+# Tag for LLM calls whose output is internal-only (never shown to the
+# user), so routers/chat.py's stream listener can filter them out.
+INTERNAL_LLM_TAG = "helpdesk_internal_llm_call"
+
 
 def _openai_chat_transport(model_name: str) -> dict:
     """Return transport overrides required by particular OpenAI models."""

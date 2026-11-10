@@ -1634,6 +1634,10 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                     newMessages[lastIdx] = {
                         ...newMessages[lastIdx],
                         text: cleanText,
+                        // Keep the evidence parsed from the stream; cleanText
+                        // has the evidence block removed, so it can't be
+                        // re-parsed at render time.
+                        evidence: evidenceItems.length > 0 ? evidenceItems : newMessages[lastIdx].evidence,
                         formType: currentFormType || newMessages[lastIdx].formType
                     };
                     return newMessages;
