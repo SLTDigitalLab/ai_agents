@@ -288,11 +288,13 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
         store = await asyncio.to_thread(get_cpe_vector_store)
         docs = await asyncio.to_thread(store.similarity_search, retrieval_query, k=retrieval_k)
     except Exception as exc:
-        logger.exception("CPE retrieval failed: %s", exc)
+        error_id = uuid.uuid4().hex[:8]
+        logger.exception("[CPE Chat %s] Retrieval failed: %s", error_id, exc)
         return CPEChatResponse(
             status="error",
-            answer=f"Could not connect to the CPE knowledge base: {exc}",
+            answer=f"I encountered a temporary issue accessing the hardware database. (Error ID: {error_id})",
             thread_id=thread_id,
+            retrieved_count=0,
         )
 
     if not docs:
@@ -378,51 +380,66 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
         HumanMessage(content=user_prompt_content),
     ]
 
-    llm = get_chat_model()
-    llm_timeout_s = float(os.getenv("LLM_TIMEOUT_S", "60"))
-    response = await asyncio.wait_for(llm.ainvoke(messages), timeout=llm_timeout_s)
-    answer_text = str(response.content)
+    try:
+        llm = get_chat_model()
+        llm_timeout_s = float(os.getenv("LLM_TIMEOUT_S", "60"))
+        response = await asyncio.wait_for(llm.ainvoke(messages), timeout=llm_timeout_s)
+        answer_text = str(response.content)
+    except Exception as exc:
+        error_id = uuid.uuid4().hex[:8]
+        logger.exception("[CPE Chat %s] LLM call failed: %s", error_id, exc)
+        return CPEChatResponse(
+            status="error",
+            answer=f"I encountered a temporary issue generating a response. (Error ID: {error_id})",
+            thread_id=thread_id,
+            retrieved_count=len(docs),
+        )
 
     # 4. Post-generation Guards:
-    # A. Item Code Guard: verify that any item codes cited exist in the verified context
-    mentioned_codes = set(re.findall(r"\b(?:CPEDAT\w+|NWK\w+|BNWK\w+|CPEFTH\w+|BCPEDAT\w+)\b", answer_text, re.IGNORECASE))
-    for code in mentioned_codes:
-        if code.upper() not in context_str.upper():
-            logger.warning("Post-generation guard detected unverified item code in LLM output: %s", code)
-            answer_text += f"\n\n> [!NOTE]\n> Item code verification: Stock record for '{code}' was not found in the verified inventory list."
+    unguarded_answer = answer_text
+    try:
+        # A. Item Code Guard: verify that any item codes cited exist in the verified context
+        mentioned_codes = set(re.findall(r"\b(?:CPEDAT\w+|NWK\w+|BNWK\w+|CPEFTH\w+|BCPEDAT\w+)\b", answer_text, re.IGNORECASE))
+        for code in mentioned_codes:
+            if code.upper() not in context_str.upper():
+                logger.warning("Post-generation guard detected unverified item code in LLM output: %s", code)
+                answer_text += f"\n\n> [!NOTE]\n> Item code verification: Stock record for '{code}' was not found in the verified inventory list."
 
-    # B. Numerical Spec Guard: verify that any ungrounded technical spec numbers are flagged
-    answer_text = _guard_unsupported_specs(answer_text, context_str)
+        # B. Numerical Spec Guard: verify that any ungrounded technical spec numbers are flagged
+        answer_text = _guard_unsupported_specs(answer_text, context_str)
 
-    # C. C1121X Guard: ensure no accidental "136" is presented as a combined total
-    if re.search(r"\bc1121x\b", query, re.I) and re.search(r"\b(total|how many|stock)\b", query, re.I):
-        answer_text = re.sub(r"\b(?:to|into|total of|sum of)?\s*136\b", "conflicting counts (22 vs 114)", answer_text, flags=re.I)
+        # C. C1121X Guard: ensure no accidental "136" is presented as a combined total
+        if re.search(r"\bc1121x\b", query, re.I) and re.search(r"\b(total|how many|stock)\b", query, re.I):
+            answer_text = re.sub(r"\b(?:to|into|total of|sum of)?\s*136\b", "conflicting counts (22 vs 114)", answer_text, flags=re.I)
 
-    # D. ONE521 Inventory vs Procurement Status Guard
-    if re.search(r"\b(?:one\s*521|521|cpedat082s)\b", query, re.I) and "inventory status" in query.lower():
-        if "new cpe" not in answer_text.lower():
-            answer_text += "\n\nNote: While the Inventory Status cell is blank in the inventory sheet, its Procurement Status is listed as 'New CPE'."
-        if "cpedat082s" not in answer_text.upper():
-            answer_text += " (Item code: CPEDAT082S)."
+        # D. ONE521 Inventory vs Procurement Status Guard
+        if re.search(r"\b(?:one\s*521|521|cpedat082s)\b", query, re.I) and "inventory status" in query.lower():
+            if "new cpe" not in answer_text.lower():
+                answer_text += "\n\nNote: While the Inventory Status cell is blank in the inventory sheet, its Procurement Status is listed as 'New CPE'."
+            if "cpedat082s" not in answer_text.upper():
+                answer_text += " (Item code: CPEDAT082S)."
 
-    # E. ONT Item Code Model Guard (replaces misattributed phone codes with authentic ONT codes)
-    if re.search(r"\b(?:zte\s*ont|f670l?|zxhn)\b", query, re.I) or (re.search(r"\bzte\b", query, re.I) and "ont" in query.lower()):
-        answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH076S", answer_text, flags=re.I)
-        answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH076S", answer_text, flags=re.I)
-        if "cpefth076s" not in answer_text.lower():
-            answer_text = f"Device: ZTE ZXHN F670L (Item Code: CPEFTH076S)\n" + answer_text
-    elif re.search(r"\b(?:huawei\s*ont|eg8145\w*)\b", query, re.I) or (re.search(r"\bhuawei\b", query, re.I) and "ont" in query.lower()):
-        answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH077S", answer_text, flags=re.I)
-        answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH077S", answer_text, flags=re.I)
-        if "cpefth077s" not in answer_text.lower():
-            answer_text = f"Device: Huawei EG8145V5 (Item Code: CPEFTH077S)\n" + answer_text
-    else:
-        if re.search(r"\b(?:zte|f670l?)\b", answer_text, re.I):
+        # E. ONT Item Code Model Guard (replaces misattributed phone codes with authentic ONT codes)
+        if re.search(r"\b(?:zte\s*ont|f670l?|zxhn)\b", query, re.I) or (re.search(r"\bzte\b", query, re.I) and "ont" in query.lower()):
             answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH076S", answer_text, flags=re.I)
             answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH076S", answer_text, flags=re.I)
-        if re.search(r"\b(?:huawei\s*ont|eg8145\w*)\b", answer_text, re.I):
+            if "cpefth076s" not in answer_text.lower():
+                answer_text = f"Device: ZTE ZXHN F670L (Item Code: CPEFTH076S)\n" + answer_text
+        elif re.search(r"\b(?:huawei\s*ont|eg8145\w*)\b", query, re.I) or (re.search(r"\bhuawei\b", query, re.I) and "ont" in query.lower()):
             answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH077S", answer_text, flags=re.I)
             answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH077S", answer_text, flags=re.I)
+            if "cpefth077s" not in answer_text.lower():
+                answer_text = f"Device: Huawei EG8145V5 (Item Code: CPEFTH077S)\n" + answer_text
+        else:
+            if re.search(r"\b(?:zte|f670l?)\b", answer_text, re.I):
+                answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH076S", answer_text, flags=re.I)
+                answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH076S", answer_text, flags=re.I)
+            if re.search(r"\b(?:huawei\s*ont|eg8145\w*)\b", answer_text, re.I):
+                answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH077S", answer_text, flags=re.I)
+                answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH077S", answer_text, flags=re.I)
+    except Exception as exc:
+        logger.exception("[CPE Chat] Post-processing guard failed; falling back to unguarded answer: %s", exc)
+        answer_text = unguarded_answer
 
     # 5. Filter hardware cards to only relevant models cited in the answer
     selected_cards = _filter_relevant_hardware_cards(hardware_cards, answer_text, query)

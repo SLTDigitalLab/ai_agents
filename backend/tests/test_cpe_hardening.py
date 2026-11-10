@@ -165,3 +165,82 @@ async def test_task2_owner_access_control_404_mismatch():
         await cpe_get_history(thread_id, owner_id=user_b)
     assert exc_info.value.status_code == 404
 
+
+# ==============================================================================
+# TASK 3 TESTS: Error Handling & Exception Sanitization
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_task3_retrieval_failure_never_leaks_exception():
+    """Retrieval errors must return a sanitized message with error_id, never str(exc)."""
+    raw_secret_error = "Connection pool exhausted to postgres://admin:secret_pass@10.0.0.1:5432/cpe"
+    mock_store = MagicMock()
+    mock_store.similarity_search = MagicMock(side_effect=RuntimeError(raw_secret_error))
+
+    with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
+         patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}):
+
+        res = await cpe_chat(CPEChatRequest(message="Test retrieval crash", thread_id="error_test_thread_1"))
+
+        assert res.status == "error"
+        # Exception details must NEVER leak to client
+        assert raw_secret_error not in res.answer
+        assert "secret_pass" not in res.answer
+        # Must return generic message + 8-char error_id
+        import re
+        assert "Error ID:" in res.answer
+        match = re.search(r"Error ID:\s*([a-f0-9]{8})", res.answer)
+        assert match is not None, f"Expected 8-char error ID in answer: {res.answer}"
+
+
+@pytest.mark.asyncio
+async def test_task3_llm_failure_never_leaks_exception():
+    """LLM execution errors must return a sanitized message with error_id, never str(exc)."""
+    raw_llm_error = "Gemini API 500 Internal Error: ResourceExhausted for tenant 9999"
+    mock_store = MagicMock()
+    mock_store.similarity_search = MagicMock(return_value=[
+        Document(page_content="Mock doc", metadata={"device": "ONE421"})
+    ])
+    mock_llm = MagicMock()
+    mock_llm.ainvoke = MagicMock(side_effect=RuntimeError(raw_llm_error))
+
+    with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
+         patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
+         patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}):
+
+        res = await cpe_chat(CPEChatRequest(message="Test LLM crash", thread_id="error_test_thread_2"))
+
+        assert res.status == "error"
+        assert raw_llm_error not in res.answer
+        assert "ResourceExhausted" not in res.answer
+        import re
+        assert "Error ID:" in res.answer
+        match = re.search(r"Error ID:\s*([a-f0-9]{8})", res.answer)
+        assert match is not None
+
+
+@pytest.mark.asyncio
+async def test_task3_guard_failure_falls_back_to_unguarded_answer():
+    """If a post-processing guard raises an exception, log it and return unguarded answer."""
+    mock_store = MagicMock()
+    mock_store.similarity_search = MagicMock(return_value=[
+        Document(page_content="Mock doc ONE421 specs", metadata={"device": "ONE421"})
+    ])
+    mock_llm = MagicMock()
+    async def mock_ainvoke(messages, **kwargs):
+        return AIMessage(content="The ONE421 router has 148 units on hand.")
+    mock_llm.ainvoke = mock_ainvoke
+
+    with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
+         patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
+         patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}), \
+         patch("routers.cpe_chat._guard_unsupported_specs", side_effect=Exception("Guard regex crash!")), \
+         patch("routers.cpe_chat.save_cpe_turn", return_value=None):
+
+        res = await cpe_chat(CPEChatRequest(message="ONE421 stock", thread_id="error_test_thread_3"))
+
+        # Must not crash! Must succeed with unguarded answer
+        assert res.status == "success"
+        assert "The ONE421 router has 148 units on hand." in res.answer
+
+
