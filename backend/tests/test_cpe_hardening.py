@@ -367,5 +367,143 @@ def test_task5_rewriter_pronoun_and_reset_patterns():
     assert "Huawei S5735-L8P4S-A1" in rewritten_switch
 
 
+# ==============================================================================
+# TASK 7 TESTS: Observability & Health Endpoint
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_task7_json_log_line_structure(caplog):
+    """
+    TASK 7 Observability Test:
+    Verify one JSON log line per request with:
+    request_id, thread_id, retrieval_ms, llm_ms, total_ms, retrieved_count, rewritten_query, guards_fired.
+    """
+    import json
+    import logging
+
+    mock_store = MagicMock()
+    mock_store.similarity_search = MagicMock(return_value=[
+        Document(page_content="Mock doc ONE421 specs", metadata={"device": "ONE421"})
+    ])
+    mock_llm = MagicMock()
+    async def mock_ainvoke(messages, **kwargs):
+        return AIMessage(content="The ONE421 has 148 on hand.")
+    mock_llm.ainvoke = mock_ainvoke
+
+    with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
+         patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
+         patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}), \
+         patch("routers.cpe_chat.save_cpe_turn", return_value=None):
+
+        with caplog.at_level(logging.INFO):
+            res = await cpe_chat(CPEChatRequest(message="stock of ONE421", thread_id="test_task7_log_thread"))
+
+        assert res.status == "success"
+
+        json_log = None
+        for record in caplog.records:
+            try:
+                data = json.loads(record.message)
+                if "request_id" in data and "retrieval_ms" in data:
+                    json_log = data
+                    break
+            except Exception:
+                continue
+
+        assert json_log is not None, f"Expected JSON log line with metrics, captured logs: {[r.message for r in caplog.records]}"
+        assert json_log["thread_id"] == "test_task7_log_thread"
+        assert isinstance(json_log["request_id"], str) and len(json_log["request_id"]) == 8
+        assert json_log["retrieval_ms"] >= 0
+        assert json_log["llm_ms"] >= 0
+        assert json_log["total_ms"] >= 0
+        assert json_log["retrieved_count"] == 1
+        assert "stock of ONE421" in json_log["rewritten_query"]
+        assert isinstance(json_log["guards_fired"], list)
+
+
+@pytest.mark.asyncio
+async def test_task7_guards_fired_tracking(caplog):
+    """Verify guards_fired captures 'unsupported_specs' and 'validate_item_codes' when triggered."""
+    import json
+    import logging
+
+    mock_store = MagicMock()
+    mock_store.similarity_search = MagicMock(return_value=[
+        Document(page_content="OneAccess router IPsec throughput 100 Mbps.", metadata={"device": "ONE421"})
+    ])
+    mock_llm = MagicMock()
+    async def mock_ainvoke(messages, **kwargs):
+        return AIMessage(content="ONE421 supports 100 VPN tunnels.")
+    mock_llm.ainvoke = mock_ainvoke
+
+    with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
+         patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
+         patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}), \
+         patch("routers.cpe_chat.save_cpe_turn", return_value=None):
+
+        with caplog.at_level(logging.INFO):
+            res = await cpe_chat(CPEChatRequest(message="tunnels of ONE421", thread_id="test_task7_guards_thread"))
+
+        assert res.status == "success"
+        json_log = None
+        for record in caplog.records:
+            try:
+                data = json.loads(record.message)
+                if "request_id" in data:
+                    json_log = data
+                    break
+            except Exception:
+                continue
+
+        assert json_log is not None
+        assert "unsupported_specs" in json_log["guards_fired"]
+
+
+@pytest.mark.asyncio
+async def test_task7_health_endpoint():
+    """Verify /api/v1/cpe/health reports Qdrant status, point count, and Postgres status."""
+    from routers.cpe_chat import cpe_health
+
+    mock_store = MagicMock()
+    mock_client = MagicMock()
+    mock_alias = MagicMock()
+    mock_alias.alias_name = "cpe_docs"
+    mock_alias.collection_name = "cpe_docs_v4"
+    mock_client.get_aliases.return_value = MagicMock(aliases=[mock_alias])
+    mock_client.get_collection.return_value = MagicMock(points_count=632)
+    mock_store.client = mock_client
+
+    mock_pool = MagicMock()
+    mock_conn = MagicMock()
+    mock_cur = MagicMock()
+    mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+    mock_pool.connection.return_value.__enter__.return_value = mock_conn
+    mock_pool.get_stats.return_value = {"pool_size": 2, "pool_available": 2}
+
+    with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
+         patch("routers.cpe_chat.get_cpe_memory_pool", return_value=mock_pool):
+
+        health = await cpe_health()
+
+        assert health["status"] == "healthy"
+        assert health["qdrant"]["reachable"] is True
+        assert health["qdrant"]["collection"] == "cpe_docs_v4"
+        assert health["qdrant"]["points_count"] == 632
+        assert health["postgres"]["reachable"] is True
+        assert health["postgres"]["pool_stats"]["pool_size"] == 2
+
+
+@pytest.mark.asyncio
+async def test_task7_health_degraded_when_dependency_fails():
+    """Verify /api/v1/cpe/health returns 'degraded' when Qdrant is unreachable."""
+    from routers.cpe_chat import cpe_health
+
+    with patch("routers.cpe_chat.get_cpe_vector_store", side_effect=RuntimeError("Qdrant unreachable")):
+        health = await cpe_health()
+        assert health["status"] == "degraded"
+        assert health["qdrant"]["reachable"] is False
+
+
+
 
 

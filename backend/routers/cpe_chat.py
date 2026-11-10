@@ -10,6 +10,7 @@ Endpoints:
 """
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -29,6 +30,7 @@ from core.config import settings
 from core.llm import get_ingestion_embedding_model, get_chat_model
 from services.cpe_memory import (
     CPEThreadNotFoundError,
+    get_cpe_memory_pool,
     get_cpe_conversation_memory,
     get_cpe_langchain_history,
     save_cpe_turn,
@@ -469,6 +471,65 @@ async def cpe_get_history(thread_id: str, owner_id: Optional[str] = None):
         raise HTTPException(status_code=404, detail=f"Thread '{thread_id}' not found.")
 
 
+def _check_cpe_health() -> dict[str, Any]:
+    """Inspect Qdrant and PostgreSQL health synchronously (run off the event loop)."""
+    qdrant_info: dict[str, Any] = {"reachable": False}
+    try:
+        store = get_cpe_vector_store()
+        client: QdrantClient = store.client
+        alias_target = None
+        try:
+            aliases = client.get_aliases()
+            for a in aliases.aliases:
+                if a.alias_name == COLLECTION_NAME:
+                    alias_target = a.collection_name
+                    break
+        except Exception:
+            pass
+
+        target_coll = alias_target or COLLECTION_NAME
+        col_info = client.get_collection(target_coll)
+        qdrant_info = {
+            "reachable": True,
+            "collection": target_coll,
+            "alias_target": alias_target,
+            "points_count": col_info.points_count,
+        }
+    except Exception as exc:
+        qdrant_info = {"reachable": False, "error": str(exc)}
+
+    postgres_info: dict[str, Any] = {"reachable": False}
+    try:
+        pool = get_cpe_memory_pool()
+        with pool.connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+        pool_stats = {}
+        try:
+            pool_stats = pool.get_stats()
+        except Exception:
+            pass
+        postgres_info = {
+            "reachable": True,
+            "pool_stats": pool_stats,
+        }
+    except Exception as exc:
+        postgres_info = {"reachable": False, "error": str(exc)}
+
+    is_healthy = qdrant_info.get("reachable", False) and postgres_info.get("reachable", False)
+    return {
+        "status": "healthy" if is_healthy else "degraded",
+        "qdrant": qdrant_info,
+        "postgres": postgres_info,
+    }
+
+
+@router.get("/health")
+async def cpe_health():
+    """Check health of Ask CPE dependencies (Qdrant vector store and PostgreSQL memory pool)."""
+    return await asyncio.to_thread(_check_cpe_health)
+
+
 @router.post("/chat", response_model=CPEChatResponse)
 @router.post("/mcp-chat", response_model=CPEChatResponse)
 async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
@@ -476,8 +537,11 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
     Handle CPE queries: technical specs, Peliyagoda inventory, hardware comparisons.
     Maintains full PostgreSQL multi-turn memory and contextual retrieval.
     """
-    start_time = time.time()
+    start_time = time.perf_counter()
+    request_id = uuid.uuid4().hex[:8]
     query = request.message.strip()
+    retrieval_ms = 0.0
+    llm_ms = 0.0
 
     if request.thread_id:
         if not _THREAD_ID_PATTERN.match(request.thread_id):
@@ -502,12 +566,28 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
     # Broad retrieval k: ensure complete multi-vendor portfolios are always captured
     retrieval_k = max(request.limit, 16)
 
+    t_retrieval_start = time.perf_counter()
     try:
         store = await asyncio.to_thread(get_cpe_vector_store)
         docs = await asyncio.to_thread(store.similarity_search, retrieval_query, k=retrieval_k)
+        retrieval_ms = round((time.perf_counter() - t_retrieval_start) * 1000, 2)
     except Exception as exc:
+        retrieval_ms = round((time.perf_counter() - t_retrieval_start) * 1000, 2)
+        total_ms = round((time.perf_counter() - start_time) * 1000, 2)
         error_id = uuid.uuid4().hex[:8]
         logger.exception("[CPE Chat %s] Retrieval failed: %s", error_id, exc)
+        logger.info(
+            json.dumps({
+                "request_id": request_id,
+                "thread_id": thread_id,
+                "retrieval_ms": retrieval_ms,
+                "llm_ms": 0.0,
+                "total_ms": total_ms,
+                "retrieved_count": 0,
+                "rewritten_query": retrieval_query,
+                "guards_fired": [],
+            })
+        )
         return CPEChatResponse(
             status="error",
             answer=f"I encountered a temporary issue accessing the hardware database. (Error ID: {error_id})",
@@ -516,6 +596,19 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
         )
 
     if not docs:
+        total_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        logger.info(
+            json.dumps({
+                "request_id": request_id,
+                "thread_id": thread_id,
+                "retrieval_ms": retrieval_ms,
+                "llm_ms": 0.0,
+                "total_ms": total_ms,
+                "retrieved_count": 0,
+                "rewritten_query": retrieval_query,
+                "guards_fired": [],
+            })
+        )
         fallback_answer = "I searched the Enterprise CPE database, but no matching hardware, inventory, or datasheets were found for your query."
         await asyncio.to_thread(save_cpe_turn, thread_id, query, fallback_answer, [])
         return CPEChatResponse(
@@ -598,14 +691,30 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
         HumanMessage(content=user_prompt_content),
     ]
 
+    t_llm_start = time.perf_counter()
     try:
         llm = get_chat_model()
         llm_timeout_s = float(os.getenv("LLM_TIMEOUT_S", "60"))
         response = await asyncio.wait_for(llm.ainvoke(messages), timeout=llm_timeout_s)
         answer_text = str(response.content)
+        llm_ms = round((time.perf_counter() - t_llm_start) * 1000, 2)
     except Exception as exc:
+        llm_ms = round((time.perf_counter() - t_llm_start) * 1000, 2)
+        total_ms = round((time.perf_counter() - start_time) * 1000, 2)
         error_id = uuid.uuid4().hex[:8]
         logger.exception("[CPE Chat %s] LLM call failed: %s", error_id, exc)
+        logger.info(
+            json.dumps({
+                "request_id": request_id,
+                "thread_id": thread_id,
+                "retrieval_ms": retrieval_ms,
+                "llm_ms": llm_ms,
+                "total_ms": total_ms,
+                "retrieved_count": len(docs),
+                "rewritten_query": retrieval_query,
+                "guards_fired": [],
+            })
+        )
         return CPEChatResponse(
             status="error",
             answer=f"I encountered a temporary issue generating a response. (Error ID: {error_id})",
@@ -614,13 +723,20 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
         )
 
     # 4. Post-generation Guards:
+    guards_fired = []
     unguarded_answer = answer_text
     try:
         # A. Lookup-based Item Code Guard: validates codes against CODE_INDEX, replaces single-match mismatches, appends notes
-        answer_text = _validate_item_codes(answer_text)
+        answer_after_code_guard = _validate_item_codes(answer_text)
+        if answer_after_code_guard != answer_text:
+            guards_fired.append("validate_item_codes")
+        answer_text = answer_after_code_guard
 
         # B. Unsupported Numerical Spec Guard: flags ungrounded technical number+unit pairs
-        answer_text = _guard_unsupported_specs(answer_text, context_str)
+        answer_after_spec_guard = _guard_unsupported_specs(answer_text, context_str)
+        if answer_after_spec_guard != answer_text:
+            guards_fired.append("unsupported_specs")
+        answer_text = answer_after_spec_guard
     except Exception as exc:
         logger.exception("[CPE Chat] Post-processing guard failed; falling back to unguarded answer: %s", exc)
         answer_text = unguarded_answer
@@ -631,6 +747,20 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
 
     # 6. Atomically persist conversation turn in PostgreSQL off the event loop
     await asyncio.to_thread(save_cpe_turn, thread_id, query, answer_text, cards_dicts, owner_id)
+
+    total_ms = round((time.perf_counter() - start_time) * 1000, 2)
+    logger.info(
+        json.dumps({
+            "request_id": request_id,
+            "thread_id": thread_id,
+            "retrieval_ms": retrieval_ms,
+            "llm_ms": llm_ms,
+            "total_ms": total_ms,
+            "retrieved_count": len(docs),
+            "rewritten_query": retrieval_query,
+            "guards_fired": guards_fired,
+        })
+    )
 
     return CPEChatResponse(
         status="success",
