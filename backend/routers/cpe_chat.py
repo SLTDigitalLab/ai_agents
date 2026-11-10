@@ -205,25 +205,243 @@ def _filter_relevant_hardware_cards(
     return filtered[:5]
 
 
-_SPEC_NUM_PATTERN = re.compile(
-    r"\b(\d+(?:\.\d+)?)\s*(?:vpn\s*tunnels?|tunnels?|kg\b|lbs?\b|pounds?)\b",
+_GUARD_COUNTERS = {
+    "item_code_unverified": 0,
+    "item_code_replaced": 0,
+    "item_code_mismatch": 0,
+    "unsupported_specs": 0,
+}
+
+CODE_INDEX: dict[str, dict[str, str]] = {}
+_LAST_ALIAS_TARGET: Optional[str] = None
+_CODE_INDEX_LOCK = threading.Lock()
+
+_CODE_PATTERN = re.compile(r"\b(B?(?:CPEDAT|CPEFTH|CPEDTA|NWK[A-Z]{3})\d{2,3}S?)\b", re.IGNORECASE)
+
+_UNIT_MAP = {
+    "mbps": "mbps", "mb/s": "mbps",
+    "gbps": "gbps", "gb/s": "gbps",
+    "w": "w", "watt": "w", "watts": "w",
+    "kg": "kg", "kilogram": "kg", "kilograms": "kg",
+    "lb": "lb", "lbs": "lb", "pound": "lb", "pounds": "lb",
+    "mm": "mm",
+    "mpps": "mpps",
+    "gb": "gb",
+    "vpn tunnel": "tunnel", "vpn tunnels": "tunnel", "tunnel": "tunnel", "tunnels": "tunnel",
+    "session": "session", "sessions": "session",
+    "port": "port", "ports": "port",
+}
+
+_SPEC_PAIR_PATTERN = re.compile(
+    r"\b(\d+(?:,\d{3})*(?:\.\d+)?)\s*(mbps|gbps|gb/s|mb/s|w\b|watts?\b|kg\b|kilograms?\b|lbs?\b|pounds?\b|mm\b|mpps\b|gb\b|vpn\s*tunnels?\b|tunnels?\b|sessions?\b|ports?\b)",
     re.IGNORECASE,
 )
 
 
+def get_code_index(force_refresh: bool = False) -> dict[str, dict[str, str]]:
+    """Build or refresh cached CODE_INDEX {item_code -> {desc, vendor}} from Qdrant inventory points."""
+    global CODE_INDEX, _LAST_ALIAS_TARGET
+    if CODE_INDEX and not force_refresh:
+        return CODE_INDEX
+
+    with _CODE_INDEX_LOCK:
+        if CODE_INDEX and not force_refresh:
+            return CODE_INDEX
+
+        try:
+            store = get_cpe_vector_store()
+            client: QdrantClient = store.client
+            alias_target = None
+            try:
+                aliases = client.get_aliases()
+                for a in aliases.aliases:
+                    if a.alias_name == COLLECTION_NAME:
+                        alias_target = a.collection_name
+                        break
+            except Exception:
+                pass
+
+            target_coll = alias_target or COLLECTION_NAME
+            new_index: dict[str, dict[str, str]] = {}
+            offset = None
+            while True:
+                pts, offset = client.scroll(
+                    collection_name=target_coll,
+                    limit=200,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for p in pts:
+                    m = (p.payload or {}).get("metadata", {})
+                    if m.get("doc_type") == "inventory" and m.get("item_code"):
+                        new_index[m["item_code"].strip().upper()] = {
+                            "desc": m.get("device", ""),
+                            "vendor": m.get("vendor", ""),
+                        }
+                if not offset:
+                    break
+
+            if new_index:
+                CODE_INDEX = new_index
+                _LAST_ALIAS_TARGET = target_coll
+                logger.info("[CPE Code Index] Cached %d inventory codes from '%s'", len(CODE_INDEX), target_coll)
+        except Exception as exc:
+            logger.warning("[CPE Code Index] Failed to build CODE_INDEX from Qdrant: %s", exc)
+
+        return CODE_INDEX
+
+
+def check_and_refresh_code_index() -> dict[str, dict[str, str]]:
+    """Check if Qdrant alias target has changed and refresh index accordingly."""
+    global _LAST_ALIAS_TARGET
+    try:
+        store = get_cpe_vector_store()
+        aliases = store.client.get_aliases()
+        current_target = None
+        for a in aliases.aliases:
+            if a.alias_name == COLLECTION_NAME:
+                current_target = a.collection_name
+                break
+        if current_target and current_target != _LAST_ALIAS_TARGET:
+            logger.info("[CPE Code Index] Alias target changed to '%s'. Refreshing CODE_INDEX.", current_target)
+            return get_code_index(force_refresh=True)
+    except Exception:
+        pass
+    return get_code_index()
+
+
+def _get_tokens_4plus(text: str) -> set[str]:
+    words = re.split(r"[\s,;:()\/\-\.]+", text)
+    tokens = set()
+    for w in words:
+        clean = _normalize_token(w)
+        if len(clean) >= 4 and not _CODE_PATTERN.match(w):
+            tokens.add(clean)
+    return tokens
+
+
+def _validate_item_codes(answer: str) -> str:
+    """Validate item codes in the generated answer against cached CODE_INDEX.
+    
+    (a) Code must exist in CODE_INDEX, otherwise append a note.
+    (b) The model named in the same line/sentence must match the code's description.
+        On mismatch: if exactly one inventory item matches the model, replace code and log warning.
+        Otherwise append a verification note.
+    """
+    code_index = check_and_refresh_code_index()
+    if not code_index:
+        return answer
+
+    stopwords = {
+        "router", "switch", "phone", "device", "chassis", "access",
+        "equipment", "optical", "point", "ports", "series", "item",
+        "code", "stock", "unit", "units", "with", "from", "hand", "stores",
+        "peliyagoda", "main", "enterprise", "cpe", "gpon", "vdsl", "adsl",
+        "ethernet", "wireless", "security", "transceiver",
+    }
+
+    lines = answer.split("\n")
+    new_lines = []
+    notes = []
+
+    for line in lines:
+        codes = _CODE_PATTERN.findall(line)
+        if not codes:
+            new_lines.append(line)
+            continue
+
+        line_clean = line
+        line_tokens = _get_tokens_4plus(line) - stopwords
+
+        for code in set(codes):
+            code_u = code.upper()
+            if code_u not in code_index:
+                _GUARD_COUNTERS["item_code_unverified"] += 1
+                logger.info("[CPE Guard] Counter 'item_code_unverified' = %d (Code: %s)", _GUARD_COUNTERS["item_code_unverified"], code)
+                notes.append(f"Stock record for '{code}' was not found in the verified inventory list.")
+                continue
+
+            code_info = code_index[code_u]
+            desc_tokens = _get_tokens_4plus(code_info["desc"] + " " + code_info["vendor"]) - stopwords
+            overlap = line_tokens.intersection(desc_tokens)
+
+            # Check if there is a named model on this line that mismatches the code's description
+            if not overlap and line_tokens:
+                # Find matching candidates in CODE_INDEX for line_tokens
+                cand_scores = {}
+                for cand_code, cand_info in code_index.items():
+                    cand_tokens = _get_tokens_4plus(cand_info["desc"] + " " + cand_info["vendor"]) - stopwords
+                    overlap_count = len(line_tokens.intersection(cand_tokens))
+                    if overlap_count > 0:
+                        cand_scores[cand_code] = overlap_count
+
+                if cand_scores:
+                    max_score = max(cand_scores.values())
+                    best_matches = [c for c, s in cand_scores.items() if s == max_score]
+                    if len(best_matches) == 1:
+                        correct_code = best_matches[0]
+                        _GUARD_COUNTERS["item_code_replaced"] += 1
+                        logger.warning(
+                            "[CPE Item Code Guard] Counter 'item_code_replaced' = %d: Replaced code '%s' -> '%s' (Line: %r)",
+                            _GUARD_COUNTERS["item_code_replaced"], code, correct_code, line.strip(),
+                        )
+                        line_clean = re.sub(r"\b" + re.escape(code) + r"\b", correct_code, line_clean)
+                    else:
+                        _GUARD_COUNTERS["item_code_mismatch"] += 1
+                        logger.info("[CPE Guard] Counter 'item_code_mismatch' = %d (Code: %s)", _GUARD_COUNTERS["item_code_mismatch"], code)
+                        notes.append(f"Verification Notice: Item code '{code}' does not match the named hardware in the line.")
+
+        new_lines.append(line_clean)
+
+    ans = "\n".join(new_lines)
+    for n in notes:
+        ans += f"\n\n> [!NOTE]\n> {n}"
+    return ans
+
+
+def _extract_spec_pairs(text: str) -> set[tuple[float | int, str, str]]:
+    """Extract (number, normalized_unit, original_str) pairs from text."""
+    pairs = set()
+    for m in _SPEC_PAIR_PATTERN.finditer(text):
+        val_str = m.group(1).replace(",", "")
+        val = float(val_str) if "." in val_str else int(val_str)
+        unit_raw = re.sub(r"\s+", " ", m.group(2).lower())
+        unit_norm = _UNIT_MAP.get(unit_raw, unit_raw)
+        pairs.add((val, unit_norm, m.group(0)))
+    return pairs
+
+
 def _guard_unsupported_specs(answer: str, context: str) -> str:
-    """Flags spec claims (like VPN tunnels, weight in kg/lb) that do not appear in context."""
-    c_lower = context.lower()
+    """Extract number+unit pairs and require the same number+unit pair in context.
+    
+    If not found in context, append a soft note without deleting text.
+    Does not flag stock quantities.
+    """
+    context_pairs = {(v, u) for v, u, _ in _extract_spec_pairs(context)}
+
+    # Also support port configurations in context formatted like "24 x 10/100/1000"
+    for m in re.finditer(r"\b(\d+)\s*x\s*[^,\n]+?ports?\b", context, re.IGNORECASE):
+        context_pairs.add((int(m.group(1)), "port"))
+
+    answer_pairs = _extract_spec_pairs(answer)
     flagged = []
-    for match in _SPEC_NUM_PATTERN.finditer(answer):
-        val = match.group(1)
-        full_metric = match.group(0)
-        if val not in context and val not in c_lower:
-            flagged.append(full_metric)
+    for val, unit_norm, original_str in sorted(answer_pairs, key=lambda x: str(x[0])):
+        if (val, unit_norm) not in context_pairs:
+            flagged.append(original_str)
 
     if flagged:
-        logger.warning("Numerical spec guard flagged ungrounded specs: %s", flagged)
-        answer += f"\n\n> [!NOTE]\n> Grounding Notice: The technical specification(s) {', '.join(repr(f) for f in flagged)} are not documented in the verified SLT enterprise corpus."
+        _GUARD_COUNTERS["unsupported_specs"] += len(flagged)
+        logger.info(
+            "[CPE Guard] Counter 'unsupported_specs' = %d (Flagged: %s)",
+            _GUARD_COUNTERS["unsupported_specs"], flagged,
+        )
+        answer += (
+            f"\n\n> [!NOTE]\n"
+            f"> Grounding Notice: The technical specification(s) {', '.join(repr(f) for f in flagged)} "
+            "are not documented in the verified SLT enterprise corpus."
+        )
+
     return answer
 
 
@@ -398,45 +616,11 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
     # 4. Post-generation Guards:
     unguarded_answer = answer_text
     try:
-        # A. Item Code Guard: verify that any item codes cited exist in the verified context
-        mentioned_codes = set(re.findall(r"\b(?:CPEDAT\w+|NWK\w+|BNWK\w+|CPEFTH\w+|BCPEDAT\w+)\b", answer_text, re.IGNORECASE))
-        for code in mentioned_codes:
-            if code.upper() not in context_str.upper():
-                logger.warning("Post-generation guard detected unverified item code in LLM output: %s", code)
-                answer_text += f"\n\n> [!NOTE]\n> Item code verification: Stock record for '{code}' was not found in the verified inventory list."
+        # A. Lookup-based Item Code Guard: validates codes against CODE_INDEX, replaces single-match mismatches, appends notes
+        answer_text = _validate_item_codes(answer_text)
 
-        # B. Numerical Spec Guard: verify that any ungrounded technical spec numbers are flagged
+        # B. Unsupported Numerical Spec Guard: flags ungrounded technical number+unit pairs
         answer_text = _guard_unsupported_specs(answer_text, context_str)
-
-        # C. C1121X Guard: ensure no accidental "136" is presented as a combined total
-        if re.search(r"\bc1121x\b", query, re.I) and re.search(r"\b(total|how many|stock)\b", query, re.I):
-            answer_text = re.sub(r"\b(?:to|into|total of|sum of)?\s*136\b", "conflicting counts (22 vs 114)", answer_text, flags=re.I)
-
-        # D. ONE521 Inventory vs Procurement Status Guard
-        if re.search(r"\b(?:one\s*521|521|cpedat082s)\b", query, re.I) and "inventory status" in query.lower():
-            if "new cpe" not in answer_text.lower():
-                answer_text += "\n\nNote: While the Inventory Status cell is blank in the inventory sheet, its Procurement Status is listed as 'New CPE'."
-            if "cpedat082s" not in answer_text.upper():
-                answer_text += " (Item code: CPEDAT082S)."
-
-        # E. ONT Item Code Model Guard (replaces misattributed phone codes with authentic ONT codes)
-        if re.search(r"\b(?:zte\s*ont|f670l?|zxhn)\b", query, re.I) or (re.search(r"\bzte\b", query, re.I) and "ont" in query.lower()):
-            answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH076S", answer_text, flags=re.I)
-            answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH076S", answer_text, flags=re.I)
-            if "cpefth076s" not in answer_text.lower():
-                answer_text = f"Device: ZTE ZXHN F670L (Item Code: CPEFTH076S)\n" + answer_text
-        elif re.search(r"\b(?:huawei\s*ont|eg8145\w*)\b", query, re.I) or (re.search(r"\bhuawei\b", query, re.I) and "ont" in query.lower()):
-            answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH077S", answer_text, flags=re.I)
-            answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH077S", answer_text, flags=re.I)
-            if "cpefth077s" not in answer_text.lower():
-                answer_text = f"Device: Huawei EG8145V5 (Item Code: CPEFTH077S)\n" + answer_text
-        else:
-            if re.search(r"\b(?:zte|f670l?)\b", answer_text, re.I):
-                answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH076S", answer_text, flags=re.I)
-                answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH076S", answer_text, flags=re.I)
-            if re.search(r"\b(?:huawei\s*ont|eg8145\w*)\b", answer_text, re.I):
-                answer_text = re.sub(r"\bCPEDAT075\b", "CPEFTH077S", answer_text, flags=re.I)
-                answer_text = re.sub(r"\bCPEDAT074\b", "CPEFTH077S", answer_text, flags=re.I)
     except Exception as exc:
         logger.exception("[CPE Chat] Post-processing guard failed; falling back to unguarded answer: %s", exc)
         answer_text = unguarded_answer

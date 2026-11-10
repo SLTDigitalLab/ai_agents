@@ -244,3 +244,70 @@ async def test_task3_guard_failure_falls_back_to_unguarded_answer():
         assert "The ONE421 router has 148 units on hand." in res.answer
 
 
+# ==============================================================================
+# TASK 4 TESTS: Lookup-Based Guards & Numerical Spec Guard
+# ==============================================================================
+
+def test_task4_guard_unsupported_specs_unit_tests():
+    """
+    TASK 4 Unit Tests for Numerical Spec Guard:
+    - '100 VPN tunnels' with context containing '100 Mbps' -> flagged.
+    - '1.2 kg' with context '1.25Gb/s' -> flagged.
+    - '0.8 kg' with context '0.8 kg (1.8 lb)' -> not flagged.
+    """
+    from routers.cpe_chat import _guard_unsupported_specs
+
+    # Test 1: 100 VPN tunnels vs 100 Mbps context -> FLAGGED
+    ans1 = "The device supports up to 100 VPN tunnels."
+    ctx1 = "OneAccess router IPsec throughput 100 Mbps."
+    res1 = _guard_unsupported_specs(ans1, ctx1)
+    assert "Grounding Notice" in res1
+    assert "100 VPN tunnels" in res1
+
+    # Test 2: 1.2 kg vs 1.25Gb/s context -> FLAGGED
+    ans2 = "The chassis weighs 1.2 kg."
+    ctx2 = "ESFP optical transceiver 1.25Gb/s single-mode LC."
+    res2 = _guard_unsupported_specs(ans2, ctx2)
+    assert "Grounding Notice" in res2
+    assert "1.2 kg" in res2
+
+    # Test 3: 0.8 kg vs 0.8 kg (1.8 lb) context -> NOT FLAGGED
+    ans3 = "The device weight is 0.8 kg."
+    ctx3 = "Physical weight: 0.8 kg (1.8 lb) for desktop mount."
+    res3 = _guard_unsupported_specs(ans3, ctx3)
+    assert "Grounding Notice" not in res3
+
+
+def test_task4_validate_item_codes_lookup_and_replacement():
+    """
+    TASK 4 Item Code Guard:
+    (a) Unknown code -> note appended.
+    (b) Mismatch with single matching inventory item -> code replaced.
+    (c) Matching code -> untouched.
+    """
+    from routers.cpe_chat import _validate_item_codes, CODE_INDEX
+
+    mock_index = {
+        "CPEFTH076S": {"desc": "ZTE ZXHN F670L GPON ONT", "vendor": "ZTE"},
+        "CPEFTH077S": {"desc": "HUAWEI EG8145V5 GPON ONT", "vendor": "Huawei"},
+        "CPEDAT074": {"desc": "IP PHONE - GRANDSTREAM GRP-2602W", "vendor": "Grandstream"},
+        "CPEDAT081S": {"desc": "ONEACCESS ONE421", "vendor": "OneAccess"},
+    }
+
+    with patch("routers.cpe_chat.check_and_refresh_code_index", return_value=mock_index):
+        # Case A: Unknown code appends note
+        res_unknown = _validate_item_codes("Unknown hardware with code CPEDAT999.")
+        assert "Stock record for 'CPEDAT999' was not found" in res_unknown
+
+        # Case B: ZTE ONT with phone code CPEDAT074 -> replaced with CPEFTH076S
+        res_mismatch = _validate_item_codes("ZTE ZXHN F670L GPON ONT (Item Code: CPEDAT074)")
+        assert "CPEFTH076S" in res_mismatch
+        assert "CPEDAT074" not in res_mismatch
+
+        # Case C: Valid code untouched
+        res_valid = _validate_item_codes("ONE421 router with item code CPEDAT081S.")
+        assert "CPEDAT081S" in res_valid
+        assert "Verification Notice" not in res_valid
+
+
+
