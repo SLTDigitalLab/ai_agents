@@ -349,7 +349,7 @@ def build_group_docs(rows: List[InvRow], as_of: str, by_code) -> List[Document]:
          "srx_portfolio", "Juniper SRX Chassis",
          "Accessory note: NWKEAC029S (OEM TRANSCEIVERS - SRX-SFP-1GE-LX) is an optical transceiver accessory, NOT a router chassis."),
         ("Optical Transceivers / SFP Complete Inventory Record", "list all sfp transceivers in stock, optical transceiver inventory.",
-         "SFP / transceiver / port-module items", sec("SFP/tranciver"), "transceiver_portfolio", "SFP Transceivers", ""),
+         "SFP / transceiver / port-module items", [r for r in sec("SFP/tranciver") if any(k in r.desc.upper() for k in ["SFP", "TRANSCEIVER", "NIM", "EHWIC"])], "transceiver_portfolio", "SFP Transceivers", ""),
         ("ONT Inventory & Procurement Record", "ont stock, when will the onts arrive, eta and blocker for the ont.",
          "ONT items", sec("ONT"), "ont_profile", "Enterprise ONTs",
          "Interpretation warning: the sheet shows 1000 in the On-Hand column AND an ETA, so these may be incoming units. "
@@ -363,7 +363,7 @@ def build_group_docs(rows: List[InvRow], as_of: str, by_code) -> List[Document]:
         docs.append(group_doc(title, ctx, noun, items, as_of, by_code, dt, device, extra))
 
     # by optical reach, computed from the description (category labels in the sheet are inconsistent)
-    optics = sec("SFP/tranciver")
+    optics = [r for r in sec("SFP/tranciver") if any(k in r.desc.upper() for k in ["SFP", "TRANSCEIVER", "NIM", "EHWIC"])]
     for km in sorted({reach_km(r.desc) for r in optics if reach_km(r.desc)}):
         items = [r for r in optics if reach_km(r.desc) == km]
         label = f"{km:g} km"
@@ -687,7 +687,7 @@ Model: Huawei CloudEngine S5735-L24P4S-A1
 - Fixed Ports: 24 x 10/100/1000Base-T ports, 4 x GE SFP ports (Note: uplinks are 1GbE SFP, NOT 10G SFP+)
 - PoE Support: PoE+ supported
 - Available PoE Power Budget: 380 W
-- PoE Port Capacity: 24 ports at 802.3af (15.4 W per port) or 12 ports at 30 W per port)
+- PoE Port Capacity: 24 ports at 802.3af (15.4 W per port) or 12 ports at 802.3at (30 W per port)
 - Forwarding Performance: 42 Mpps
 - Switching Capacity: 56 Gbps / 336 Gbps
 - Power Supply: Built-in AC Power Module (380 W PoE budget)
@@ -969,13 +969,32 @@ def shape_lines(shape) -> List[str]:
 def load_cpe_policy_presentation(pptx_path: Path) -> List[Document]:
     from pptx import Presentation
 
-    docs = [Document(
-        page_content="[Enterprise CPE Selection Flowchart & Capped Performance - Slide 8 (transcribed path table)]\n"
-                     "Format: access path | CPE | performance | services delivered\n"
-                     + "\n".join(f"- {a} | {b} | {c} | delivers {d}" for a, b, c, d in SLIDE8_PATHS)
-                     + "\nNote: caps depend on the access path. For example SRX320 is 1 Gbps on direct fiber but 300 Mbps (a Juniper L3 switch) behind an ONT bridge, "
-                       "and the 1424 is 30 Mbps behind an ONT bridge.",
-        metadata={"source": pptx_path.name, "slide": 8, "doc_type": "selection_flowchart"})]
+    # Split slide 8 into one chunk per access path: group SLIDE8_PATHS by first field
+    from collections import OrderedDict
+    path_groups: dict[str, list[tuple[str, str, str, str]]] = OrderedDict()
+    for row in SLIDE8_PATHS:
+        path = row[0]
+        if path not in path_groups:
+            path_groups[path] = []
+        path_groups[path].append(row)
+
+    all_cpes = {row[1] for row in SLIDE8_PATHS}
+    docs = []
+    for path, rows in path_groups.items():
+        own_cpes = [row[1] for row in rows]
+        not_on_path = sorted(all_cpes - set(own_cpes))
+        lines = [
+            f"[Enterprise CPE Selection Flowchart & Capped Performance - Slide 8: {path}]",
+            f"Access Path: {path}",
+            "CPEs and performance caps on this access path:",
+        ]
+        for _, cpe, perf, svc in rows:
+            lines.append(f"- CPE: {cpe} | Performance: {perf} | Services delivered: {svc}")
+        lines.append(f"Not on this path (do not apply these caps to them): {', '.join(not_on_path)}.")
+        docs.append(Document(
+            page_content="\n".join(lines),
+            metadata={"source": pptx_path.name, "slide": 8, "path": path, "doc_type": "selection_flowchart"}
+        ))
 
     docs.append(Document(
         page_content="""[Enterprise CPE Policy & Phased-Out Replacement Rules - Slide 7]
