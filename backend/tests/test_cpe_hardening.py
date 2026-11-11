@@ -206,6 +206,35 @@ async def test_task3_llm_failure_never_leaks_exception():
 
 
 @pytest.mark.anyio
+async def test_cpe_phone_query_renders_text_blocks_as_markdown():
+    markdown = "- **GRP-2602W**\n- **WP820**"
+    mock_store = MagicMock()
+    mock_store.similarity_search.return_value = [
+        Document(page_content="Grandstream IP phone catalog", metadata={})
+    ]
+    mock_llm = MagicMock()
+
+    async def mock_ainvoke(messages):
+        return AIMessage(content=[
+            {"type": "text", "text": markdown, "id": "provider-message-id"},
+            {"type": "reasoning", "text": "hidden model reasoning"},
+        ])
+
+    mock_llm.ainvoke = mock_ainvoke
+    with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
+         patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
+         patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={}), \
+         patch("routers.cpe_chat.check_and_refresh_code_index", return_value={}), \
+         patch("routers.cpe_chat.save_cpe_turn") as save_turn:
+        result = await cpe_chat(CPEChatRequest(message="list pi phone"), owner_id="test-owner")
+
+    assert result.status == "success"
+    assert result.answer == markdown
+    mock_store.similarity_search.assert_called_once_with("list IP phone", k=16)
+    assert save_turn.call_args.args[2] == markdown
+
+
+@pytest.mark.anyio
 async def test_task3_guard_failure_falls_back_to_unguarded_answer():
     """If a post-processing guard raises an exception, log it and return unguarded answer."""
     mock_store = MagicMock()
@@ -263,6 +292,19 @@ def test_task4_guard_unsupported_specs_unit_tests():
     ctx3 = "Physical weight: 0.8 kg (1.8 lb) for desktop mount."
     res3 = _guard_unsupported_specs(ans3, ctx3)
     assert "Grounding Notice" not in res3
+
+
+def test_spec_guard_distinguishes_model_suffix_from_power_rating():
+    from routers.cpe_chat import _guard_unsupported_specs
+
+    answer = "The Grandstream GRP-2602W supports 18 W."
+    result = _guard_unsupported_specs(answer, "The catalog lists the GRP 2602W.")
+    assert "'18 W'" in result
+    assert "'2602W'" not in result
+    assert _guard_unsupported_specs(answer, "The GRP-2602W supports 18 W.") == answer
+    assert "Grounding Notice" in _guard_unsupported_specs(
+        "The device consumes 2602 W.", "The catalog lists the GRP-2602W."
+    )
 
 
 def test_task4_validate_item_codes_lookup_and_replacement():
