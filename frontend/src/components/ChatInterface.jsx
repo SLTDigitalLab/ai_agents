@@ -1247,9 +1247,93 @@ const ScrollToLatestPill = ({ onClick, color }) => (
     </motion.button>
 );
 
+const EnterpriseHardwareCard = ({ card, color }) => {
+    return (
+        <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="overflow-hidden rounded-2xl border border-gray-200/90 dark:border-gray-700/80 bg-white dark:bg-gray-900 shadow-sm hover:shadow-md transition-shadow"
+        >
+            <div className={`px-4 py-3 bg-gradient-to-r ${color} text-white flex items-center justify-between`}>
+                <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-white/20 backdrop-blur-sm flex items-center justify-center shrink-0">
+                        <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                        </svg>
+                    </div>
+                    <span className="font-semibold text-sm tracking-wide truncate">{card.name}</span>
+                </div>
+                {card.vendor && (
+                    <span className="text-[0.68rem] uppercase tracking-wider font-bold bg-white/20 backdrop-blur-sm px-2.5 py-0.5 rounded-full shrink-0">
+                        {card.vendor}
+                    </span>
+                )}
+            </div>
+
+            <div className="p-4 space-y-2.5 text-xs text-gray-700 dark:text-gray-300">
+                <div className="flex flex-wrap gap-1.5">
+                    {card.category && (
+                        <span className="inline-flex items-center rounded-full bg-blue-50 dark:bg-blue-900/30 px-2.5 py-0.5 font-medium text-blue-700 dark:text-blue-300 border border-blue-100 dark:border-blue-800">
+                            {card.category}
+                        </span>
+                    )}
+                    {card.item_code && (
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 dark:bg-emerald-900/30 px-2.5 py-0.5 font-medium text-emerald-700 dark:text-emerald-300 border border-emerald-100 dark:border-emerald-800 font-mono">
+                            Item: {card.item_code}
+                        </span>
+                    )}
+                    {card.warehouse && (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 dark:bg-gray-800 px-2.5 py-0.5 font-medium text-gray-600 dark:text-gray-300">
+                            🏢 {card.warehouse}
+                        </span>
+                    )}
+                </div>
+
+                {card.specs && (
+                    <p className="text-gray-600 dark:text-gray-300 leading-relaxed font-light">
+                        {card.specs}
+                    </p>
+                )}
+
+                {card.source && (
+                    <p className="text-[0.65rem] text-gray-400 dark:text-gray-500 pt-1 border-t border-gray-100 dark:border-gray-800">
+                        Source: {card.source}
+                    </p>
+                )}
+            </div>
+        </motion.div>
+    );
+};
+
+const EnterpriseHardwareCards = ({ cards, color }) => {
+    if (!cards || cards.length === 0) return null;
+    return (
+        <motion.section
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            className="mt-5 mb-2"
+        >
+            <div className="mb-2.5">
+                <p className="text-[0.7rem] uppercase tracking-[0.18em] font-bold text-gray-400 dark:text-gray-500">
+                    Enterprise Hardware References
+                </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {cards.map((card, idx) => (
+                    <EnterpriseHardwareCard key={idx} card={card} color={color} />
+                ))}
+            </div>
+        </motion.section>
+    );
+};
+
 const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const { instance, accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
+    const isCpe = agentConfig.id === 'cpe';
+    const threadStorageKey = 'thread_' + agentConfig.id + (isCpe ? '_' + user.homeAccountId : '');
     const navigate = useNavigate();
 
     // Department + job title resolved from Azure AD (Graph /me). Best-effort:
@@ -1288,13 +1372,12 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         setIsLoadingHistory(true);
 
         const loadAgentState = async () => {
-            const storageKey = `thread_${agentConfig.id}`;
-            const storedThreadId = sessionStorage.getItem(storageKey);
+            const storedThreadId = sessionStorage.getItem(threadStorageKey);
             const isExistingSession = !!storedThreadId;
 
             const currentThreadId = storedThreadId || uuidv4();
             if (!isExistingSession) {
-                sessionStorage.setItem(storageKey, currentThreadId);
+                sessionStorage.setItem(threadStorageKey, currentThreadId);
             }
 
             setThreadId(currentThreadId);
@@ -1302,9 +1385,17 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             if (isExistingSession) {
                 try {
                     const headers = await getChatAuthHeaders(instance, accounts[0]);
-                    const response = await fetch(`${API_URL}/api/v1/chat/${agentConfig.id}/${currentThreadId}`, {
-                        headers,
-                    });
+                    const historyUrl = isCpe
+                        ? API_URL + '/api/v1/cpe/history/' + encodeURIComponent(currentThreadId)
+                        : `${API_URL}/api/v1/chat/${agentConfig.id}/${currentThreadId}`;
+                    const response = await fetch(historyUrl, { headers });
+                    if (isCpe && response.status === 404) {
+                        const newThreadId = uuidv4();
+                        sessionStorage.setItem(threadStorageKey, newThreadId);
+                        setThreadId(newThreadId);
+                        setIsLoadingHistory(false);
+                        return;
+                    }
                     if (!response.ok) throw new Error("Failed to fetch history");
 
                     const data = await response.json();
@@ -1325,6 +1416,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                 formType,
                                 // Evidence saved with the answer, so pictures survive a reload.
                                 evidence: Array.isArray(msg.evidence) ? msg.evidence : [],
+                                hardwareCards: isCpe && Array.isArray(msg.hardware_cards) ? msg.hardware_cards : [],
                             };
                         });
                         setMessages(mappedMessages);
@@ -1363,7 +1455,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         };
 
         loadAgentState();
-    }, [agentConfig.id, agentConfig.title, user.name, instance, accounts]);
+    }, [agentConfig.id, agentConfig.title, user.name, instance, accounts, isCpe, threadStorageKey]);
 
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -1515,7 +1607,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const handleClearChat = () => {
         if (!agentConfig?.id || isLoading || isLoadingHistory) return;
         const newThreadId = uuidv4();
-        sessionStorage.setItem(`thread_${agentConfig.id}`, newThreadId);
+        sessionStorage.setItem(threadStorageKey, newThreadId);
         setThreadId(newThreadId);
         setFeedbackMap({});
         setLastFailedMessage(null);
@@ -1549,6 +1641,32 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         let botMessageAdded = false;
 
         try {
+            if (isCpe) {
+                const response = await fetch(API_URL + '/api/v1/cpe/chat', {
+                    method: 'POST',
+                    headers: await getChatAuthHeaders(instance, accounts[0], {
+                        'Content-Type': 'application/json',
+                    }),
+                    body: JSON.stringify({ message: maskedText, thread_id: threadId }),
+                    signal: controller.signal,
+                });
+                if (!response.ok) throw new Error('CPE chat failed: HTTP ' + response.status);
+
+                const data = await response.json();
+                if (data.thread_id && data.thread_id !== threadId) {
+                    sessionStorage.setItem(threadStorageKey, data.thread_id);
+                    setThreadId(data.thread_id);
+                }
+                setMessages(prev => [...prev, {
+                    type: 'bot',
+                    text: data.answer,
+                    hardwareCards: Array.isArray(data.hardware_cards) ? data.hardware_cards : [],
+                    timestamp: Date.now(),
+                }]);
+                botMessageAdded = true;
+                return;
+            }
+
             // Ask LifeStore uses a dedicated MCP endpoint that returns a single JSON
             // object (answer + product list), not a token stream. Handle it separately.
             if (agentConfig.id === 'lifestore') {
@@ -1993,6 +2111,10 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                             color={agentConfig.color}
                                                             display={msg.productCardDisplay}
                                                         />
+                                                    )}
+
+                                                    {isCpe && (
+                                                        <EnterpriseHardwareCards cards={msg.hardwareCards} color={agentConfig.color} />
                                                     )}
 
                                                     {/* Standalone HITL Buttons Component */}
