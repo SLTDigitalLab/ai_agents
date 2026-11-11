@@ -242,6 +242,21 @@ export const AGENTS = {
         buttonColor: "bg-teal-600 hover:bg-teal-700",
         idlePrompt: "Ask me anything about Embryo.",
         disclaimer: "Information is sourced from the Embryo website and may change. Please verify critical details on the official website."
+    },
+    askcpe: {
+        id: "cpe",
+        title: "ASK CPE",
+        subtitle: "Enterprise Customer Premises Equipment, NTU hardware specifications, Peliyagoda stock, and replacement matrix.",
+        color: "from-blue-900 to-indigo-600",
+        buttonColor: "bg-indigo-600 hover:bg-indigo-700",
+        idlePrompt: "Ask about enterprise routers, switches, Peliyagoda inventory, or replacement policies.",
+        disclaimer: "Verify critical enterprise network designs and inventory with the Enterprise Network Planning team.",
+        suggestions: [
+            "Check Peliyagoda stock for ONE421 and ONE521 routers",
+            "What replaces a Cisco 1941 under the 2025 CPE Plan?",
+            "Compare PoE budget for Huawei S5735-L8P4S vs L24P4S",
+            "What WAN speeds does the OneAccess 1424 support?"
+        ]
     }
 };
 
