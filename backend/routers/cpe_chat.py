@@ -235,6 +235,8 @@ _UNIT_MAP = {
     "port": "port", "ports": "port",
 }
 
+_GRANDSTREAM_MODEL_PATTERN = re.compile(r"\b(?:GRP|GXP|GXV)[ \t\-\u2010-\u2015]*\d+[A-Z]*\b", re.IGNORECASE)
+
 _SPEC_PAIR_PATTERN = re.compile(
     r"\b(\d+(?:,\d{3})*(?:\.\d+)?)\s*(mbps|gbps|gb/s|mb/s|w\b|watts?\b|kg\b|kilograms?\b|lbs?\b|pounds?\b|mm\b|mpps\b|gb\b|vpn\s*tunnels?\b|tunnels?\b|sessions?\b|ports?\b)",
     re.IGNORECASE,
@@ -409,7 +411,8 @@ def _validate_item_codes(answer: str) -> str:
 def _extract_spec_pairs(text: str) -> set[tuple[float | int, str, str]]:
     """Extract (number, normalized_unit, original_str) pairs from text."""
     pairs = set()
-    for m in _SPEC_PAIR_PATTERN.finditer(text):
+    spec_text = _GRANDSTREAM_MODEL_PATTERN.sub(" ", text)
+    for m in _SPEC_PAIR_PATTERN.finditer(spec_text):
         val_str = m.group(1).replace(",", "")
         val = float(val_str) if "." in val_str else int(val_str)
         unit_raw = re.sub(r"\s+", " ", m.group(2).lower())
@@ -575,7 +578,8 @@ async def cpe_chat(request: CPEChatRequest, owner_id: str = Depends(require_cpe_
         raise HTTPException(status_code=404, detail=f"Thread '{thread_id}' not found.")
 
     # Multi-turn contextual query expansion (resolves pronouns like 'it', 'its', 'the router')
-    retrieval_query = await asyncio.to_thread(contextualize_cpe_query, query, thread_id, memory)
+    retrieval_input = re.sub(r"\bpi(?=[ -]+phones?\b)", "IP", query, flags=re.IGNORECASE)
+    retrieval_query = await asyncio.to_thread(contextualize_cpe_query, retrieval_input, thread_id, memory)
 
     # Broad retrieval k: ensure complete multi-vendor portfolios are always captured
     retrieval_k = max(request.limit, 16)
@@ -671,11 +675,11 @@ async def cpe_chat(request: CPEChatRequest, owner_id: str = Depends(require_cpe_
         "3. NO DATASHEET IN CORPUS (VENDOR BOUNDARIES): Note that NO technical datasheets exist in the corpus for Juniper SRX series routers (only stock & replacement policy) or Cisco C1121X (only stock & replacement policy). For Grandstream IP phones/IADs, there is no separate datasheet; use only what the Matrix sheets say. For any query asking for deep technical specs (such as VPN tunnel capacity or firewall sessions on Juniper SRX), you MUST state that no datasheet is available in the corpus and abstain.\n"
         "4. INVENTORY, AVAILABILITY & ITEM CODE LOOKUPS:\n"
         "   - For ANY query asking for the stock, inventory, availability, inventory status, procurement status, or item code of any equipment/model/description:\n"
-        "     * ALWAYS state its verified SLT Item Code (e.g. CPEDAT..., NWK...).\n"
-        "     * ALWAYS explicitly report all three inventory quantities: On-Hand Quantity, Repaired in Main Stores, and Quantity in Regions (even if zero, explicitly report 0, e.g. '0 repaired in Main Stores, 0 in regions').\n"
+        "     * Report an SLT item code only when the retrieved inventory record documents it for that model.\n"
+        "     * Report the documented on-hand quantity, repaired quantity in Main Stores, and quantity in regions. Show documented zeros and identify missing quantities as unspecified.\n"
         "     * When asked for the item code or stock of a specific equipment item/description, provide directly and exclusively the exact matching Item Code for that specific item. Do NOT volunteer or mention other distinct item codes or unrelated product variants unless explicitly asked to compare or list alternatives.\n"
         "   - C1121X CONFLICT RULE: ALWAYS cite the item code NWKEAC084. If the context has a CONFLICT line for item code NWKEAC084 (22 under Cisco Routers vs 114 under SD-WAN), report both listings with their item code NWKEAC084, flag the conflict, and never add them together into 136.\n"
-        "5. LIST QUESTIONS & COMPUTED TOTALS: For list questions (e.g. 'list all sd-wan edge devices with stock', 'list all ip phones we have'), include every item in the matching list record and use its computed totals. CRITICAL FOR 'WITH STOCK' LIST QUERIES: 'with stock' means 'including their stock counts'. You MUST list ALL catalog items (including zero-stock items like NWKEAC085, NWKEAC059, NWKEAC078, NWKSRG264, NWKSRG267) along with their stock counts; NEVER filter to only items with on-hand > 0 unless the user explicitly asks 'which items have stock on hand > 0' or 'which items are in stock right now'. Never add items from memory. Standardize Grandstream model names using hyphens (GRP-2636P, GRP-2604P, GRP-2602P, GRP-2602W, GRP-2614, GRP-2615, GXP-2160, GXP-2140, GXP-1782, GXV-3350, WP820).\n"
+        "5. LIST QUESTIONS & COMPUTED TOTALS: For list questions (e.g. 'list all sd-wan edge devices with stock', 'list all ip phones we have'), include every item in the matching list record and use its computed totals. CRITICAL FOR 'WITH STOCK' LIST QUERIES: 'with stock' means 'including their stock counts'. You MUST list ALL catalog items (including zero-stock items like NWKEAC085, NWKEAC059, NWKEAC078, NWKSRG264, NWKSRG267) along with their stock counts; NEVER filter to only items with on-hand > 0 unless the user explicitly asks 'which items have stock on hand > 0' or 'which items are in stock right now'. Never add items from memory. For a model-only list, omit stock fields unless requested; if stock is requested and missing across the list, explain the gap once. Standardize Grandstream model names using hyphens (GRP-2636P, GRP-2604P, GRP-2602P, GRP-2602W, GRP-2614, GRP-2615, GXP-2160, GXP-2140, GXP-1782, GXV-3350, WP820).\n"
         "6. HARDWARE ATTRIBUTES & PORT MULTIPLICATION: Highlight key port counts, PoE power budgets, and device roles. Always separate port count and speed with an 'x' (e.g. '24 x 10/100/1000BASE-T ports' and '4 x GE SFP ports'). NEVER fuse port count and speed (do NOT write '2410/100/1000', '810/100/1000', or '410GE').\n"
         "7. PoE SUPPORT & 'VERIFY VARIANT': If a specification or matrix field states 'Verify variant' (such as for PoE on ONE421 or ONE521), you MUST state that it is variant-dependent and unconfirmed in the matrix. NEVER confirm PoE support or say 'Yes' without an explicit datasheet PoE wattage/port specification (such as ONE2501 120W PoE or Huawei S5735-L 124W/380W or Huawei S5331-H24P4XC Ultra PoE). S5735-L8T4X-A1 explicitly has NO PoE. For Juniper SRX 300, cite that the CPE Matrix explicitly states 'No' for PoE.\n"
         "8. CONFLICTING SOURCES & DISCREPANCIES (CRITICAL): Whenever the retrieved context mentions different values or contradictory claims (e.g., OneAccess 1424 speed: 22 Mbps datasheet vs 2 Mbps slides/matrix; ONE521 throughput: 250 Mbps matrix vs 1 Gbps / 500 Mbps slides; Cisco ISR 4321 retirement status; C1121X dual inventory listings): You MUST include a dedicated bullet titled 'Source Discrepancy / Conflict:' citing conflicting figures alongside their sources.\n"
@@ -698,7 +702,7 @@ async def cpe_chat(request: CPEChatRequest, owner_id: str = Depends(require_cpe_
         "18. CAUTION LINES: If a record has a CAUTION line (ETA, LC, PO, approval), repeat it: receipt of the stock is not confirmed.\n"
         "19. VERIFY VARIANT (ALL FIELDS): 'Verify variant' means unconfirmed. Never say the device 'has' it.\n"
         "20. RETIREMENT (INVENTORY VS PLAN DECK): Pay strict attention to whether retirement is asked about the INVENTORY (CPE LIST.xlsx) or the PLAN DECK / PRESENTATION:\n"
-        "    - INVENTORY RETIREMENT ('marked to be retired in the inventory'): Look ONLY at the Inventory Status column in the inventory spreadsheet. For IP phones in the inventory, ONLY 3 models are marked to be retired: GXP 1782 (CPEDAT068), GXV 3350 (CPEDAT071S), and WP820 (CPEDAT070). Grandstream GXP 2160 is NOT marked to be retired in the inventory (its inventory status is active / fast moving); NEVER mention or include GXP 2160 in any way (not even in notes) when asked which items are marked to be retired in the inventory.\n"
+        "    - INVENTORY RETIREMENT ('marked to be retired in the inventory'): Look ONLY at the Inventory Status column in the inventory spreadsheet. For IP phones, report retirement status and item codes from the retrieved inventory records. Grandstream GXP 2160 is NOT marked to be retired in the inventory (its inventory status is active / fast moving); NEVER mention or include GXP 2160 in any way (not even in notes) when asked which items are marked to be retired in the inventory.\n"
         "    - PLAN DECK / PRESENTATION RETIREMENT ('according to the plan deck / presentation'): Slide 5 (Data CPEs: OneAccess 1432, Huawei S5300/S5230, ZTE 5250, Cisco 891/1921/1941/4221/4231/4331/4431/4451, Huawei 5331/5332) and Slide 6 (Voice CPEs: Grandstream IP phones including GXP 2160, IADs, Wi-Fi APs).\n"
         "    - For general 'is X retiring' questions without specifying source, report both the inventory status and the plan-deck lists, and flag any disagreement between inventory and presentation.\n"
         "21. SLIDE 8 CAPS: Attribute a cap only to the access path named in the record, and don't apply a direct-fiber cap to a service-switch path."
@@ -725,7 +729,9 @@ async def cpe_chat(request: CPEChatRequest, owner_id: str = Depends(require_cpe_
         llm = get_chat_model()
         llm_timeout_s = float(os.getenv("LLM_TIMEOUT_S", "60"))
         response = await asyncio.wait_for(llm.ainvoke(messages), timeout=llm_timeout_s)
-        answer_text = str(response.content)
+        answer_text = response.text.strip()
+        if not answer_text:
+            raise ValueError("CPE model returned no displayable text.")
         llm_ms = round((time.perf_counter() - t_llm_start) * 1000, 2)
     except Exception as exc:
         llm_ms = round((time.perf_counter() - t_llm_start) * 1000, 2)
