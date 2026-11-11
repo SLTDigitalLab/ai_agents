@@ -20,7 +20,7 @@ from core.llm_slm import get_slm_embedding_model
 from services.ingestion import ingestion_service as _shared_ingestion_service
 
 log = logging.getLogger(__name__)
-print("Yumna")
+
 
 class SLMIngestionService:
     """OneDrive → Qdrant ingestion using Ollama embeddings (768d collection)."""
