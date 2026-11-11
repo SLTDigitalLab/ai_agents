@@ -45,10 +45,18 @@ docker compose -f docker-compose.prod.yml ps backend frontend
 
 # 7. Health checks
 echo "🩺 Testing backend health..."
-if curl -fsS http://127.0.0.1:8100/health > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8100/docs > /dev/null 2>&1; then
-    echo "✅ Backend is healthy and responding on 127.0.0.1:8100"
+if curl -fsS http://127.0.0.1:8100/ > /dev/null 2>&1 || curl -fsS http://127.0.0.1:8100/api/docs > /dev/null 2>&1; then
+    echo "✅ Backend API is healthy and responding on 127.0.0.1:8100"
 else
     echo "⚠️ Backend health check warning. Check logs with: docker logs slt_backend"
+fi
+
+echo "🩺 Testing Ask CPE Agent health..."
+if curl -fsS http://127.0.0.1:8100/api/v1/cpe/health 2>&1 | grep -q '"status":"healthy"'; then
+    echo "✅ Ask CPE is healthy (Qdrant cpe_docs & Postgres active)"
+else
+    echo "⚠️ Initializing cpe_docs collection..."
+    docker exec slt_backend python /app/scripts/ingest_cpe_curated.py > /dev/null 2>&1 || true
 fi
 
 echo "🩺 Testing frontend..."
