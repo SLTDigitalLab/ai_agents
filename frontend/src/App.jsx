@@ -24,7 +24,7 @@ const msalInstance = new PublicClientApplication(msalConfig);
 const RootRedirect = () => {
   const { inProgress } = useMsal();
   if (inProgress !== InteractionStatus.None) return null;
-  return <Navigate to="/askcpe" replace />;
+  return <Navigate to="/workmateai" replace />;
 };
 
 // ── Stagger animation variants ──────────────────────────
