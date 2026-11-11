@@ -243,16 +243,6 @@ export const AGENTS = {
         idlePrompt: "Ask me anything about Embryo.",
         disclaimer: "Information is sourced from the Embryo website and may change. Please verify critical details on the official website."
     }
-    // 20. Ask CPE (Enterprise Customer Premises Equipment)
-    askcpe: {
-        id: "cpe",
-        title: "ASK CPE",
-        subtitle: "Enterprise CPE Selection & Inventory Advisor. Query verified hardware options, replacement matrix, on-hand stock, and technical specifications.",
-        color: "from-blue-900 to-indigo-600",
-        buttonColor: "bg-indigo-600 hover:bg-indigo-700",
-        idlePrompt: "Ask about Cisco replacements, OneAccess routers, Huawei switches, stock availability, or PoE budgets.",
-        disclaimer: "Stock counts reflect the Peliyagoda Main Stores inventory (as of 19/10/2026). Verify allocations with the stores team."
-    }
 };
 
 
