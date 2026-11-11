@@ -1,0 +1,48 @@
+name: Deploy LifeStore Production
+
+on:
+  push:
+    branches:
+      - codex/visual-rag-production
+      - deploy/lifestore-enterprise-prod
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force clean rebuild without cache'
+        required: false
+        default: 'false'
+        type: boolean
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Production VM
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST || '152.42.230.223' }}
+          username: ${{ secrets.PROD_USER || 'root' }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          password: ${{ secrets.PROD_PASSWORD }}
+          port: ${{ secrets.PROD_PORT || 22 }}
+          command_timeout: 30m
+          script: |
+            set -euo pipefail
+            echo "========================================================"
+            echo "🚀 Deploying commit: ${{ github.sha }}"
+            echo "========================================================"
+
+            cd /opt/Ask_SLT
+
+            # Ensure script has execute permissions
+            chmod +x scripts/deploy_prod.sh 2>/dev/null || true
+
+            # Execute production deployment script
+            bash scripts/deploy_prod.sh "${{ github.ref_name }}"
