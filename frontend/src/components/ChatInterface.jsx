@@ -1330,27 +1330,6 @@ const EnterpriseHardwareCards = ({ cards, color }) => {
     );
 };
 
-const maskPII = (text = '') => {
-    return text
-        // Email addresses
-        .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[EMAIL]')
-
-        // Sri Lankan mobile numbers: +947XXXXXXXX / 947XXXXXXXX / 07XXXXXXXX
-        .replace(/\b(?:\+?94|0)?7\d{8}\b/g, '[PHONE]')
-
-        // Sri Lankan NIC: old 123456789V / new 12 digits
-        .replace(/\b(?:\d{9}[VXvx]|\d{12})\b/g, '[NIC]')
-
-        // Credit/debit-card-like long numbers
-        .replace(/\b(?:\d[ -]*?){13,19}\b/g, '[CARD_NUMBER]')
-
-        // Common API keys / JWT / bearer-token-like secrets
-        .replace(
-            /\b(?:bearer\s+)?(eyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+|sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,})\b/gi,
-            '[SECRET]'
-        );
-};
-
 const parseEvidencePayload = (text = '') => {
     const openIndex = text.indexOf(EVIDENCE_OPEN);
 
