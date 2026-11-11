@@ -1074,6 +1074,11 @@ def validate_docs(all_docs: List[Document], by_code) -> List[str]:
 def build_all_docs(data_dir: Path) -> List[Document]:
     all_docs: List[Document] = []
     inv_path = data_dir / "CPE LIST.xlsx"
+    if not inv_path.exists():
+        print(f"[*] Note: '{inv_path}' not found on filesystem.")
+        print("[*] Falling back to verified curated CPE dataset (inventory, hardware profiles, replacement rules, flowchart paths)...")
+        from scripts.ingest_cpe_curated import build_curated_docs
+        return build_curated_docs()
     rows, as_of, by_code = parse_inventory(inv_path)
     all_docs += build_inventory_docs(rows, as_of, by_code)
 
@@ -1129,7 +1134,7 @@ def run_cpe_ingestion(dry_run: bool = False, in_place: bool = False, data_dir: P
 
     qdrant_url = getattr(settings, "QDRANT_URL", "http://slt_qdrant:6333")
     client, connected_url = None, None
-    for candidate in [qdrant_url, "http://slt_qdrant:6333", "http://localhost:6335", "http://localhost:6333"]:
+    for candidate in [qdrant_url, "http://db_qdrant:6333", "http://slt_qdrant:6333", "http://localhost:6335", "http://localhost:6333"]:
         try:
             c = QdrantClient(url=candidate, timeout=5, check_compatibility=False)
             c.get_collections()

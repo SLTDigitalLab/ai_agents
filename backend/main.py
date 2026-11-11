@@ -16,7 +16,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat, workmate_chat, cpe_chat
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat, cpe_chat
+try:
+    from routers import workmate_chat
+except ImportError:
+    workmate_chat = None
 from services.ingestion import router as ingestion_router
 from core.config import settings
 from core.checkpointer import close_sync_pools, aclose_async_pools
@@ -121,7 +125,8 @@ app.include_router(ingestion_router)
 app.include_router(contact.router)  # Contact Us email form
 app.include_router(lifestore_mcp_chat.router)  # Ask LifeStore MCP chat (/api/v1/lifestore/*)
 app.include_router(cpe_chat.router)  # Ask CPE chat (/api/v1/cpe/*)
-app.include_router(workmate_chat.router)  # Copilot/Workmate chat (/api/v1/workmate/*)
+if workmate_chat is not None:
+    app.include_router(workmate_chat.router)  # Copilot/Workmate chat (/api/v1/workmate/*)
 
 @app.get("/")
 def read_root():
