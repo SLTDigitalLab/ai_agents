@@ -57,6 +57,8 @@ services:
       - ./backend:/app
       - ./mcp_lifestore:/app/mcp_lifestore:ro
       - ./data/evidence:/app/storage/evidence
+      # Docling / hi_res layout models, kept so rebuilds don't re-download them
+      - ./data/hf_cache:/root/.cache/huggingface
     restart: always
 
   frontend:
