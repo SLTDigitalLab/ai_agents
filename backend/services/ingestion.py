@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import re
 import uuid
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile
@@ -35,6 +36,45 @@ from core.config import (
 log = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# File types sent to Docling when DOCUMENT_PARSER=hybrid. Only digital PDFs:
+# for DOCX the unstructured path's table grid kept tables whole while Docling
+# split them across chunks, and PPTX came out the same with either parser.
+DOCLING_EXTENSIONS = (".pdf",)
+
+# DOCUMENT_PARSER=docling sends every type Docling reads (for comparison).
+DOCLING_ONLY_EXTENSIONS = (".pdf", ".docx", ".pptx", ".png", ".jpg", ".jpeg")
+
+# A PDF page with fewer extractable characters than this counts as scanned.
+MIN_TEXT_CHARS_PER_PAGE = 50
+
+
+@lru_cache(maxsize=1)
+def _get_docling_converter():
+    """Build the Docling converter once — it loads layout/table models.
+
+    Imported lazily so the default 'unstructured' mode never needs Docling
+    installed or its models downloaded.
+    """
+    from docling.document_converter import DocumentConverter, PdfFormatOption
+    from docling.datamodel.base_models import InputFormat
+    from docling.datamodel.pipeline_options import PdfPipelineOptions, TesseractCliOcrOptions
+
+    pdf_options = PdfPipelineOptions(do_ocr=True, do_table_structure=True)
+    pdf_options.ocr_options = TesseractCliOcrOptions(
+        lang=["eng", "sin"],
+        tesseract_cmd=pytesseract.pytesseract.tesseract_cmd,
+    )
+    return DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)}
+    )
+
+
+@lru_cache(maxsize=1)
+def _get_docling_chunker():
+    from docling.chunking import HybridChunker
+
+    return HybridChunker()
 
 class IngestionService:
     def __init__(self):
@@ -1093,8 +1133,73 @@ class IngestionService:
 
         return sub_chunks
 
+    def _has_text_layer(self, file_path: Path) -> bool:
+        """True if most pages of a PDF carry real text (not a scanned image).
+
+        Scanned PDFs stay on unstructured hi_res: in testing Docling's OCR
+        dropped table rows that hi_res kept.
+        """
+        import fitz  # PyMuPDF
+
+        with fitz.open(file_path) as pdf:
+            if pdf.page_count == 0:
+                return False
+            text_pages = sum(
+                1 for page in pdf if len(page.get_text().strip()) >= MIN_TEXT_CHARS_PER_PAGE
+            )
+            return text_pages >= 0.8 * pdf.page_count
+
+    def _use_docling(self, file_path: Path) -> bool:
+        mode = settings.DOCUMENT_PARSER.lower().strip()
+        ext = file_path.suffix.lower()
+        if mode == "docling":
+            return ext in DOCLING_ONLY_EXTENSIONS
+        if mode != "hybrid" or ext not in DOCLING_EXTENSIONS:
+            return False
+        if ext == ".pdf" and not self._has_text_layer(file_path):
+            log.info(f"   📠 {file_path.name} looks scanned — using unstructured hi_res.")
+            return False
+        return True
+
+    def _load_with_docling(self, file_path: Path) -> list[Document]:
+        """Parse with Docling and chunk along its section/table structure.
+
+        Table cells are written as "row, column = value" sentences and each
+        chunk is prefixed with its section headings (HybridChunker.contextualize),
+        so every value stays next to its labels and its section context.
+        """
+        from docling_core.types.doc import DocItemLabel
+
+        dl_doc = _get_docling_converter().convert(str(file_path)).document
+        chunker = _get_docling_chunker()
+
+        docs = []
+        for chunk in chunker.chunk(dl_doc=dl_doc):
+            # Skip table-of-contents chunks: Docling splits a TOC page into many
+            # dot-leader fragments that only add noise to retrieval.
+            if chunk.meta.doc_items and all(item.label == DocItemLabel.DOCUMENT_INDEX for item in chunk.meta.doc_items):
+                continue
+            text = chunker.contextualize(chunk=chunk)
+            if not text.strip():
+                continue
+            metadata = {"source": str(file_path), "parser": "docling"}
+            pages = sorted(
+                {prov.page_no for item in chunk.meta.doc_items for prov in item.prov}
+            )
+            if pages:
+                metadata["page_number"] = pages[0]
+            if chunk.meta.headings:
+                metadata["section"] = " > ".join(chunk.meta.headings)
+                # Same key the unstructured path stamps; used as the chunk title.
+                metadata["title"] = chunk.meta.headings[-1]
+            docs.append(Document(page_content=text, metadata=metadata))
+        return docs
+
     def _load_and_chunk_file(self, file_path: Path) -> list[Document]:
         """Use unstructured's native semantic chunking by headers and sections.
+
+        With DOCUMENT_PARSER=hybrid, digital PDFs are parsed by Docling first
+        (see _use_docling); everything else uses the ladder below.
 
         Strategy ladder:
           1. "fast"    — pulls embedded text layer. Seconds per PDF,
@@ -1105,6 +1210,21 @@ class IngestionService:
                          "fast" yields no/minimal text (scanned PDFs).
         """
         ext = file_path.suffix.lower()
+
+        # Hybrid mode: digital PDFs go to Docling (docling mode:
+        # every PDF/DOCX/PPTX/image, scanned or not). Its chunks are already
+        # sized by HybridChunker and its tables are already written row by row,
+        # so they skip the table/re-split pass below. Any failure or empty
+        # result falls through to the unstructured ladder so ingestion never breaks.
+        if self._use_docling(file_path):
+            try:
+                docs = self._load_with_docling(file_path)
+                if sum(len(d.page_content) for d in docs) >= MIN_TEXT_CHARS_PER_PAGE:
+                    log.info(f"   📑 Docling parsed {file_path.name} into {len(docs)} chunks.")
+                    return docs
+                log.warning(f"Docling produced almost no text for {file_path.name}; using unstructured")
+            except Exception as e:
+                log.warning(f"Docling failed for {file_path.name}: {e}; using unstructured")
 
         # Excel: read with pandas. Unstructured partitions every cell and
         # spams "No features in text" for empty cells, which is both slow

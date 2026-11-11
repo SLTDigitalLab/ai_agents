@@ -84,6 +84,16 @@ class Settings(BaseSettings):
     EVIDENCE_URL_PREFIX: str = "/api/v1/evidence/images"
     EVIDENCE_RENDER_ZOOM: float = 1.75
     EVIDENCE_MAX_ITEMS_PER_ANSWER: int = 3
+
+    # Document parser used by ingestion. 'unstructured' keeps the original
+    # fast -> hi_res ladder for every file. 'hybrid' sends digital PDFs to
+    # Docling (keeps table labels and section structure) and leaves scanned
+    # PDFs, images, DOCX and PPTX on unstructured, which did as well or better
+    # on those in testing. 'docling' sends every PDF, DOCX, PPTX and
+    # image to Docling, scanned or not (for comparison against hybrid).
+    # Excel always uses the pandas reader.
+    DOCUMENT_PARSER: str = "unstructured"  # 'unstructured', 'hybrid' or 'docling'
+
     # Visual descriptions are created during ingestion and searched separately
     # for diagram questions. Disable to omit visual evidence during rollback.
     VISUAL_RAG_ENABLED: bool = True
