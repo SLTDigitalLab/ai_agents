@@ -17,13 +17,13 @@ What changed from V3
   against the source files. Interpretations are labelled as such.
 * Ingest-time guard: every item code in every record must exist in the inventory, records that carry
   an item_code must match the device they describe, and CPEDAT074/075 may never appear next to an ONT.
-* Safer indexing: builds a new collection, then swaps the alias `cpe_docs` to it. Use --in-place for
-  the old drop-and-rebuild behaviour.
+* Builds a new collection and switches the cpe_docs alias after validating the point count.
+  Previous collections stay available for rollback.
 
 Usage (inside the backend container):
-    python /app/scripts/ingest_cpe_knowledgebase.py --dry-run     # build + validate, write dump, no Qdrant
-    python /app/scripts/ingest_cpe_knowledgebase.py               # build, validate, index, swap alias
-    python /app/scripts/ingest_cpe_knowledgebase.py --in-place    # old behaviour (drop collection, rebuild)
+    python /app/scripts/ingest_cpe_knowledgebase.py --dry-run
+    python /app/scripts/ingest_cpe_knowledgebase.py
+    python /app/scripts/ingest_cpe_knowledgebase.py --curated
 """
 
 import argparse
@@ -31,6 +31,7 @@ import json
 import re
 import sys
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -41,7 +42,6 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 COLLECTION_NAME = "cpe_docs"          # the name the application queries (an alias after the first V4 run)
 CPE_DATA_DIR = BACKEND_DIR / "data" / "cpe"
@@ -912,6 +912,8 @@ PDF_DEVICE = {
 
 
 def load_pdf_datasheet(pdf_path: Path) -> List[Document]:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
     docs = []
     splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
     device = PDF_DEVICE.get(pdf_path.stem, pdf_path.stem)
@@ -1074,11 +1076,8 @@ def validate_docs(all_docs: List[Document], by_code) -> List[str]:
 def build_all_docs(data_dir: Path) -> List[Document]:
     all_docs: List[Document] = []
     inv_path = data_dir / "CPE LIST.xlsx"
-    if not inv_path.exists():
-        print(f"[*] Note: '{inv_path}' not found on filesystem.")
-        print("[*] Falling back to verified curated CPE dataset (inventory, hardware profiles, replacement rules, flowchart paths)...")
-        from scripts.ingest_cpe_curated import build_curated_docs
-        return build_curated_docs()
+    if not inv_path.is_file():
+        raise FileNotFoundError(f"Missing inventory workbook: {inv_path}. Use --curated to seed the bundled snapshot.")
     rows, as_of, by_code = parse_inventory(inv_path)
     all_docs += build_inventory_docs(rows, as_of, by_code)
 
@@ -1110,91 +1109,90 @@ def build_all_docs(data_dir: Path) -> List[Document]:
     return all_docs
 
 
-def run_cpe_ingestion(dry_run: bool = False, in_place: bool = False, data_dir: Path = CPE_DATA_DIR, dump: Optional[Path] = None):
-    print("=" * 70)
-    print("RE-INDEXING CPE KNOWLEDGE BASE (V4 - generated from the source files)")
-    print(f"Source directory: {data_dir}")
-    print("=" * 70)
-    all_docs = build_all_docs(data_dir)
-    print(f"\n[Total Ingestable Documents]: {len(all_docs)}")
+def run_cpe_ingestion(
+    dry_run: bool = False,
+    data_dir: Path = CPE_DATA_DIR,
+    dump: Optional[Path] = None,
+    curated: bool = False,
+):
+    print(f"CPE document source: {'bundled inventory snapshot' if curated else data_dir}")
+    if curated:
+        from scripts.ingest_cpe_curated import build_curated_docs
+
+        all_docs = build_curated_docs()
+    else:
+        all_docs = build_all_docs(data_dir)
+    if not all_docs:
+        raise ValueError("No CPE documents to index.")
+    print(f"CPE documents validated: {len(all_docs)}")
 
     if dump:
-        with open(dump, "w", encoding="utf-8") as f:
-            for d in all_docs:
-                f.write(json.dumps({"text": d.page_content, "metadata": d.metadata}, ensure_ascii=False) + "\n")
-        print(f"[+] Wrote dump to {dump}")
+        with dump.open("w", encoding="utf-8") as file:
+            for document in all_docs:
+                json.dump({"text": document.page_content, "metadata": document.metadata}, file, ensure_ascii=False)
+                file.write("\n")
     if dry_run:
-        print("[dry-run] Qdrant not touched.")
+        print("Dry run complete. No embeddings generated or Qdrant changes made.")
         return all_docs
 
     from qdrant_client import QdrantClient
-    from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
+    from qdrant_client.models import CreateAlias, CreateAliasOperation, DeleteAlias, DeleteAliasOperation
+    from langchain_qdrant import FastEmbedSparse, QdrantVectorStore, RetrievalMode
     from core.config import settings
     from core.llm import get_ingestion_embedding_model
 
-    qdrant_url = getattr(settings, "QDRANT_URL", "http://slt_qdrant:6333")
-    client, connected_url = None, None
-    for candidate in [qdrant_url, "http://db_qdrant:6333", "http://slt_qdrant:6333", "http://localhost:6335", "http://localhost:6333"]:
+    qdrant_url = settings.QDRANT_URL
+    client = QdrantClient(url=qdrant_url, timeout=60, check_compatibility=False)
+    try:
+        existing = {item.name for item in client.get_collections().collections}
+        if COLLECTION_NAME in existing:
+            raise RuntimeError(
+                f"{COLLECTION_NAME!r} is a physical collection. Back it up and migrate it to an alias before seeding."
+            )
+
+        target = f"{COLLECTION_NAME}_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+        store = QdrantVectorStore.from_documents(
+            documents=all_docs,
+            embedding=get_ingestion_embedding_model(),
+            sparse_embedding=FastEmbedSparse(model_name="Qdrant/bm25"),
+            url=qdrant_url,
+            collection_name=target,
+            retrieval_mode=RetrievalMode.HYBRID,
+            check_compatibility=False,
+            timeout=60,
+        )
         try:
-            c = QdrantClient(url=candidate, timeout=5, check_compatibility=False)
-            c.get_collections()
-            client, connected_url = c, candidate
-            print(f"[+] Connected to Qdrant at {candidate}")
-            break
-        except Exception:
-            continue
-    if not client:
-        raise RuntimeError("Failed to connect to Qdrant on any known candidate URL.")
+            count = client.count(target, exact=True).count
+            if count != len(all_docs):
+                raise RuntimeError(f"Indexed {count} points instead of {len(all_docs)}. The alias was not changed.")
 
-    embedding_model = get_ingestion_embedding_model()
-    sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
-    start = time.time()
+            previous = next(
+                (alias.collection_name for alias in client.get_aliases().aliases if alias.alias_name == COLLECTION_NAME),
+                None,
+            )
+            operations = []
+            if previous:
+                operations.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=COLLECTION_NAME)))
+            operations.append(CreateAliasOperation(create_alias=CreateAlias(collection_name=target, alias_name=COLLECTION_NAME)))
+            client.update_collection_aliases(change_aliases_operations=operations)
+            print(f"Indexed {count} documents. {COLLECTION_NAME} now points to {target}.")
+            if previous:
+                print(f"Previous collection retained for rollback: {previous}")
+        finally:
+            store.client.close()
+    finally:
+        client.close()
 
-    if in_place:
-        try:
-            client.delete_collection(COLLECTION_NAME)
-            print(f"[+] Dropped old collection '{COLLECTION_NAME}'.")
-        except Exception:
-            pass
-        target = COLLECTION_NAME
-    else:
-        target = f"{COLLECTION_NAME}_{int(time.time())}"
-
-    QdrantVectorStore.from_documents(
-        documents=all_docs, embedding=embedding_model, sparse_embedding=sparse_embeddings,
-        url=connected_url, collection_name=target, retrieval_mode=RetrievalMode.HYBRID,
-        check_compatibility=False, timeout=60)
-    count = client.count(target, exact=True).count
-    if count < len(all_docs):
-        raise RuntimeError(f"Indexed {count} points but expected {len(all_docs)}; leaving the live index untouched.")
-    print(f"[+] Indexed {count} documents into '{target}' in {time.time() - start:.1f}s")
-
-    if not in_place:
-        from qdrant_client.models import CreateAlias, CreateAliasOperation, DeleteAlias, DeleteAliasOperation
-        existing = {c.name for c in client.get_collections().collections}
-        aliases = {a.alias_name for a in client.get_aliases().aliases}
-        ops = []
-        if COLLECTION_NAME in aliases:
-            ops.append(DeleteAliasOperation(delete_alias=DeleteAlias(alias_name=COLLECTION_NAME)))
-        elif COLLECTION_NAME in existing:
-            client.delete_collection(COLLECTION_NAME)     # first V4 run only: replace the old real collection
-            print(f"[+] Replaced the old real collection '{COLLECTION_NAME}' with an alias (first run).")
-        ops.append(CreateAliasOperation(create_alias=CreateAlias(collection_name=target, alias_name=COLLECTION_NAME)))
-        client.update_collection_aliases(change_aliases_operations=ops)
-        print(f"[+] Alias '{COLLECTION_NAME}' now points to '{target}'.")
-        old = sorted(n for n in existing if n.startswith(COLLECTION_NAME + "_") and n != target)
-        for name in old[:-1]:                                   # keep the previous build as a rollback
-            client.delete_collection(name)
-            print(f"[+] Removed old build '{name}'.")
-    print("=" * 70)
     return all_docs
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--dry-run", action="store_true", help="build and validate only; do not touch Qdrant")
-    ap.add_argument("--in-place", action="store_true", help="drop and rebuild the collection (old behaviour)")
-    ap.add_argument("--data-dir", type=Path, default=CPE_DATA_DIR)
-    ap.add_argument("--dump", type=Path, default=None, help="write the generated documents to a .jsonl file")
-    a = ap.parse_args()
-    run_cpe_ingestion(dry_run=a.dry_run, in_place=a.in_place, data_dir=a.data_dir, dump=a.dump)
+    parser = argparse.ArgumentParser(description="Validate and index Ask CPE documents in Qdrant.")
+    parser.add_argument("--dry-run", action="store_true", help="validate documents without generating embeddings or writing to Qdrant")
+    parser.add_argument("--curated", action="store_true", help="use the bundled inventory snapshot instead of source documents")
+    parser.add_argument("--data-dir", type=Path, default=CPE_DATA_DIR)
+    parser.add_argument("--dump", type=Path, help="write the generated documents to a JSONL file")
+    args = parser.parse_args()
+    if args.curated and args.data_dir != CPE_DATA_DIR:
+        parser.error("--curated and --data-dir cannot be combined")
+    run_cpe_ingestion(dry_run=args.dry_run, data_dir=args.data_dir, dump=args.dump, curated=args.curated)

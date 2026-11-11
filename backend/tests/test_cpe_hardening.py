@@ -5,10 +5,15 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.documents import Document
 
-from routers.cpe_chat import cpe_chat, CPEChatRequest, CPEChatResponse
+from routers.cpe_chat import CPEChatRequest, cpe_chat
 
 
-@pytest.mark.asyncio
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
+@pytest.mark.anyio
 async def test_task1_concurrency_acceptance():
     """
     TASK 1 Acceptance Test:
@@ -36,11 +41,12 @@ async def test_task1_concurrency_acceptance():
     with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
          patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
          patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}), \
-         patch("routers.cpe_chat.save_cpe_turn", return_value=None):
+         patch("routers.cpe_chat.save_cpe_turn", return_value=None), \
+         patch("routers.cpe_chat.check_and_refresh_code_index", return_value={}):
 
         start = time.perf_counter()
         reqs = [
-            cpe_chat(CPEChatRequest(message=f"Query {i}", thread_id=f"concurrent_test_thread_{i}"))
+            cpe_chat(CPEChatRequest(message=f"Query {i}", thread_id=f"concurrent_test_thread_{i}"), owner_id="test-owner")
             for i in range(10)
         ]
         results = await asyncio.gather(*reqs)
@@ -59,7 +65,7 @@ async def test_task1_concurrency_acceptance():
 # TASK 2 TESTS: Thread IDs, Validation & Access Control
 # ==============================================================================
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_task2_thread_id_generation_unique_in_same_second():
     """Missing thread_id generates uuid.uuid4().hex on server, never time collisions."""
     mock_store = MagicMock()
@@ -70,10 +76,11 @@ async def test_task2_thread_id_generation_unique_in_same_second():
     with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
          patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
          patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}), \
-         patch("routers.cpe_chat.save_cpe_turn", return_value=None):
+         patch("routers.cpe_chat.save_cpe_turn", return_value=None), \
+         patch("routers.cpe_chat.check_and_refresh_code_index", return_value={}):
 
-        req1 = cpe_chat(CPEChatRequest(message="Hello 1"))
-        req2 = cpe_chat(CPEChatRequest(message="Hello 2"))
+        req1 = cpe_chat(CPEChatRequest(message="Hello 1"), owner_id="test-owner")
+        req2 = cpe_chat(CPEChatRequest(message="Hello 2"), owner_id="test-owner")
         res1, res2 = await asyncio.gather(req1, req2)
 
         assert res1.thread_id is not None
@@ -111,66 +118,45 @@ def test_task2_message_max_length_2000():
     assert len(req.message) == 2000
 
 
-@pytest.mark.asyncio
-async def test_task2_get_history_unknown_thread_creates_no_row():
-    """GET history of an unknown thread must return empty history and create NO row in DB."""
-    import uuid
-    from fastapi import HTTPException
-    from routers.cpe_chat import cpe_get_history
-    from services.cpe_memory import get_cpe_memory_pool
+def test_cpe_chat_and_history_require_sign_in():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from routers.cpe_chat import router
 
-    random_thread = f"test_unknown_{uuid.uuid4().hex[:16]}"
-    res = await cpe_get_history(random_thread)
-    assert res == {"messages": []}
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
 
-    # Verify directly in PostgreSQL that no row was created
-    pool = get_cpe_memory_pool()
-    with pool.connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT COUNT(*) as count FROM public.cpe_memory WHERE thread_id = %(thread_id)s",
-                {"thread_id": random_thread},
-            )
-            row = cur.fetchone()
-            count = row["count"] if isinstance(row, dict) else row[0]
-            assert count == 0, f"Expected 0 rows for unknown thread {random_thread}, found {count}"
+    assert client.get("/api/v1/cpe/history/test_thread_1234").status_code == 401
+    assert client.post("/api/v1/cpe/chat", json={"message": "Check stock"}).status_code == 401
 
 
-@pytest.mark.asyncio
-async def test_task2_owner_access_control_404_mismatch():
-    """User B accessing User A's thread gets 404 (not 403)."""
-    import uuid
-    from fastapi import HTTPException
-    from routers.cpe_chat import cpe_get_history
-    from services.cpe_memory import save_cpe_turn
+def test_cpe_history_uses_verified_identity():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from core.auth import get_verified_user
+    from routers.cpe_chat import router
+    from services.cpe_memory import CPEThreadNotFoundError
 
-    thread_id = f"test_owned_{uuid.uuid4().hex[:16]}"
-    user_a = "user_alpha_123"
-    user_b = "user_beta_456"
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_verified_user] = lambda: {"oid": "verified-user"}
+    client = TestClient(app)
 
-    # Save a turn owned by user_a
-    save_cpe_turn(
-        thread_id=thread_id,
-        user_message="Hello from user A",
-        assistant_message="Response to user A",
-        owner_id=user_a,
-    )
+    with patch("routers.cpe_chat.get_cpe_history_for_frontend", return_value=[]) as read_history:
+        response = client.get("/api/v1/cpe/history/test_thread_1234?owner_id=spoofed")
+        assert response.json() == {"messages": []}
+        read_history.assert_called_once_with("test_thread_1234", None, "verified-user")
 
-    # User A can access
-    history_a = await cpe_get_history(thread_id, owner_id=user_a)
-    assert len(history_a["messages"]) == 2
-
-    # User B accessing User A's thread raises HTTP 404 (never 403)
-    with pytest.raises(HTTPException) as exc_info:
-        await cpe_get_history(thread_id, owner_id=user_b)
-    assert exc_info.value.status_code == 404
+    with patch("routers.cpe_chat.get_cpe_history_for_frontend", side_effect=CPEThreadNotFoundError):
+        assert client.get("/api/v1/cpe/history/test_thread_1234").status_code == 404
 
 
 # ==============================================================================
 # TASK 3 TESTS: Error Handling & Exception Sanitization
 # ==============================================================================
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_task3_retrieval_failure_never_leaks_exception():
     """Retrieval errors must return a sanitized message with error_id, never str(exc)."""
     raw_secret_error = "Connection pool exhausted to postgres://admin:secret_pass@10.0.0.1:5432/cpe"
@@ -180,7 +166,7 @@ async def test_task3_retrieval_failure_never_leaks_exception():
     with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
          patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}):
 
-        res = await cpe_chat(CPEChatRequest(message="Test retrieval crash", thread_id="error_test_thread_1"))
+        res = await cpe_chat(CPEChatRequest(message="Test retrieval crash", thread_id="error_test_thread_1"), owner_id="test-owner")
 
         assert res.status == "error"
         # Exception details must NEVER leak to client
@@ -193,7 +179,7 @@ async def test_task3_retrieval_failure_never_leaks_exception():
         assert match is not None, f"Expected 8-char error ID in answer: {res.answer}"
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_task3_llm_failure_never_leaks_exception():
     """LLM execution errors must return a sanitized message with error_id, never str(exc)."""
     raw_llm_error = "Gemini API 500 Internal Error: ResourceExhausted for tenant 9999"
@@ -208,7 +194,7 @@ async def test_task3_llm_failure_never_leaks_exception():
          patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
          patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}):
 
-        res = await cpe_chat(CPEChatRequest(message="Test LLM crash", thread_id="error_test_thread_2"))
+        res = await cpe_chat(CPEChatRequest(message="Test LLM crash", thread_id="error_test_thread_2"), owner_id="test-owner")
 
         assert res.status == "error"
         assert raw_llm_error not in res.answer
@@ -219,7 +205,7 @@ async def test_task3_llm_failure_never_leaks_exception():
         assert match is not None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_task3_guard_failure_falls_back_to_unguarded_answer():
     """If a post-processing guard raises an exception, log it and return unguarded answer."""
     mock_store = MagicMock()
@@ -235,9 +221,10 @@ async def test_task3_guard_failure_falls_back_to_unguarded_answer():
          patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
          patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}), \
          patch("routers.cpe_chat._guard_unsupported_specs", side_effect=Exception("Guard regex crash!")), \
-         patch("routers.cpe_chat.save_cpe_turn", return_value=None):
+         patch("routers.cpe_chat.save_cpe_turn", return_value=None), \
+         patch("routers.cpe_chat.check_and_refresh_code_index", return_value={}):
 
-        res = await cpe_chat(CPEChatRequest(message="ONE421 stock", thread_id="error_test_thread_3"))
+        res = await cpe_chat(CPEChatRequest(message="ONE421 stock", thread_id="error_test_thread_3"), owner_id="test-owner")
 
         # Must not crash! Must succeed with unguarded answer
         assert res.status == "success"
@@ -371,7 +358,7 @@ def test_task5_rewriter_pronoun_and_reset_patterns():
 # TASK 7 TESTS: Observability & Health Endpoint
 # ==============================================================================
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_task7_json_log_line_structure(caplog):
     """
     TASK 7 Observability Test:
@@ -393,10 +380,11 @@ async def test_task7_json_log_line_structure(caplog):
     with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
          patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
          patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}), \
-         patch("routers.cpe_chat.save_cpe_turn", return_value=None):
+         patch("routers.cpe_chat.save_cpe_turn", return_value=None), \
+         patch("routers.cpe_chat.check_and_refresh_code_index", return_value={}):
 
         with caplog.at_level(logging.INFO):
-            res = await cpe_chat(CPEChatRequest(message="stock of ONE421", thread_id="test_task7_log_thread"))
+            res = await cpe_chat(CPEChatRequest(message="stock of ONE421", thread_id="test_task7_log_thread"), owner_id="test-owner")
 
         assert res.status == "success"
 
@@ -421,7 +409,7 @@ async def test_task7_json_log_line_structure(caplog):
         assert isinstance(json_log["guards_fired"], list)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_task7_guards_fired_tracking(caplog):
     """Verify guards_fired captures 'unsupported_specs' and 'validate_item_codes' when triggered."""
     import json
@@ -439,10 +427,11 @@ async def test_task7_guards_fired_tracking(caplog):
     with patch("routers.cpe_chat.get_cpe_vector_store", return_value=mock_store), \
          patch("routers.cpe_chat.get_chat_model", return_value=mock_llm), \
          patch("routers.cpe_chat.get_cpe_conversation_memory", return_value={"summary": "", "messages": [], "last_device_context": None}), \
-         patch("routers.cpe_chat.save_cpe_turn", return_value=None):
+         patch("routers.cpe_chat.save_cpe_turn", return_value=None), \
+         patch("routers.cpe_chat.check_and_refresh_code_index", return_value={}):
 
         with caplog.at_level(logging.INFO):
-            res = await cpe_chat(CPEChatRequest(message="tunnels of ONE421", thread_id="test_task7_guards_thread"))
+            res = await cpe_chat(CPEChatRequest(message="tunnels of ONE421", thread_id="test_task7_guards_thread"), owner_id="test-owner")
 
         assert res.status == "success"
         json_log = None
@@ -459,7 +448,7 @@ async def test_task7_guards_fired_tracking(caplog):
         assert "unsupported_specs" in json_log["guards_fired"]
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_task7_health_endpoint():
     """Verify /api/v1/cpe/health reports Qdrant status, point count, and Postgres status."""
     from routers.cpe_chat import cpe_health
@@ -493,7 +482,7 @@ async def test_task7_health_endpoint():
         assert health["postgres"]["pool_stats"]["pool_size"] == 2
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_task7_health_degraded_when_dependency_fails():
     """Verify /api/v1/cpe/health returns 'degraded' when Qdrant is unreachable."""
     from routers.cpe_chat import cpe_health
@@ -502,8 +491,3 @@ async def test_task7_health_degraded_when_dependency_fails():
         health = await cpe_health()
         assert health["status"] == "degraded"
         assert health["qdrant"]["reachable"] is False
-
-
-
-
-

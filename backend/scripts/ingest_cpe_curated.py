@@ -1,17 +1,6 @@
-"""
-Ingest Curated Knowledge Base for Ask CPE.
-Populates the Qdrant 'cpe_docs' collection with all verified hardware profiles,
-inventory items, multi-hop replacement policies, and flowchart access paths.
-"""
+"""Build the bundled Ask CPE inventory and policy snapshot."""
 
-import sys
-import time
-from pathlib import Path
 from collections import defaultdict
-
-BACKEND_DIR = Path(__file__).resolve().parent.parent
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
 
 from langchain_core.documents import Document
 from scripts.ingest_cpe_knowledgebase import (
@@ -20,7 +9,7 @@ from scripts.ingest_cpe_knowledgebase import (
     load_curated_records,
     load_cross_linked_replacements,
     SLIDE8_PATHS,
-    COLLECTION_NAME,
+    validate_docs,
 )
 
 INVENTORY_ROWS = [
@@ -109,57 +98,14 @@ Trigger: replacement occurs when the CPE is faulty.""",
         metadata={"source": "Enterprise-CPE-Plan-2025.pptx", "slide": 7, "doc_type": "policy_replacement"}
     ))
 
-    return all_docs
-
-def main():
-    docs = build_curated_docs()
-    print(f"[+] Built {len(docs)} curated CPE knowledge base documents.")
-
-    from qdrant_client import QdrantClient
-    from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
-    from core.config import settings
-    from core.llm import get_ingestion_embedding_model
-
-    qdrant_url = getattr(settings, "QDRANT_URL", "http://db_qdrant:6333")
-    client = None
-    for candidate in [qdrant_url, "http://db_qdrant:6333", "http://localhost:6333"]:
-        try:
-            c = QdrantClient(url=candidate, timeout=10, check_compatibility=False)
-            c.get_collections()
-            client = c
-            print(f"[+] Connected to Qdrant at {candidate}")
-            break
-        except Exception as e:
+    validated_docs = []
+    for document in all_docs:
+        errors = validate_docs([document], by_code)
+        if errors:
+            if not all(error.startswith("unknown item code ") for error in errors):
+                raise ValueError("Curated CPE validation failed: " + "; ".join(errors))
+            title = document.page_content.splitlines()[0]
+            print(f"Skipping curated record with codes absent from the bundled inventory: {title}")
             continue
-
-    if not client:
-        print("[-] Failed to connect to Qdrant")
-        sys.exit(1)
-
-    embedding_model = get_ingestion_embedding_model()
-    sparse_embeddings = FastEmbedSparse(model_name="Qdrant/bm25")
-
-    target = COLLECTION_NAME
-    try:
-        client.delete_collection(target)
-        print(f"[+] Dropped old '{target}' if existed")
-    except Exception:
-        pass
-
-    start = time.time()
-    print(f"[+] Indexing {len(docs)} documents into '{target}'...")
-    QdrantVectorStore.from_documents(
-        documents=docs,
-        embedding=embedding_model,
-        sparse_embedding=sparse_embeddings,
-        url=candidate,
-        collection_name=target,
-        retrieval_mode=RetrievalMode.HYBRID,
-        check_compatibility=False,
-        timeout=120,
-    )
-    count = client.count(target, exact=True).count
-    print(f"[SUCCESS] Successfully indexed {count} documents into Qdrant collection '{target}' in {time.time() - start:.1f}s!")
-
-if __name__ == "__main__":
-    main()
+        validated_docs.append(document)
+    return validated_docs

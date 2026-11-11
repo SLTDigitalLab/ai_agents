@@ -127,7 +127,7 @@ def _conversation(
     owner_id: Optional[str] = None,
 ):
     """Read or mutate conversation row in one transaction, locking on write.
-    
+
     Read paths do NOT insert rows. Unknown threads return empty history.
     """
     ensure_cpe_memory_table()
@@ -138,57 +138,27 @@ def _conversation(
                 key = {"agent_id": _AGENT_ID, "thread_id": thread_id}
                 if write:
                     cur.execute("""
-                        SELECT owner_id, summary, messages, last_device_context
-                        FROM public.cpe_memory
-                        WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
-                        FOR UPDATE
-                    """, key)
-                    row = cur.fetchone()
-                    if row:
-                        row_owner = row.get("owner_id")
-                        if row_owner and owner_id and row_owner != owner_id:
-                            raise CPEThreadNotFoundError(f"Thread '{thread_id}' not found for user.")
-                        conversation = {
-                            "owner_id": row_owner,
-                            "summary": row.get("summary") or "",
-                            "messages": row.get("messages") or [],
-                            "last_device_context": row.get("last_device_context"),
-                        }
-                    else:
-                        cur.execute("""
-                            INSERT INTO public.cpe_memory (agent_id, thread_id, owner_id)
-                            VALUES (%(agent_id)s, %(thread_id)s, %(owner_id)s)
-                        """, {**key, "owner_id": owner_id})
-                        conversation = {
-                            "owner_id": owner_id,
-                            "summary": "",
-                            "messages": [],
-                            "last_device_context": None,
-                        }
-                else:
-                    cur.execute("""
-                        SELECT owner_id, summary, messages, last_device_context
-                        FROM public.cpe_memory
-                        WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
-                    """, key)
-                    row = cur.fetchone()
-                    if not row:
-                        conversation = {
-                            "owner_id": None,
-                            "summary": "",
-                            "messages": [],
-                            "last_device_context": None,
-                        }
-                    else:
-                        row_owner = row.get("owner_id")
-                        if row_owner and owner_id and row_owner != owner_id:
-                            raise CPEThreadNotFoundError(f"Thread '{thread_id}' not found for user.")
-                        conversation = {
-                            "owner_id": row_owner,
-                            "summary": row.get("summary") or "",
-                            "messages": row.get("messages") or [],
-                            "last_device_context": row.get("last_device_context"),
-                        }
+                        INSERT INTO public.cpe_memory (agent_id, thread_id, owner_id)
+                        VALUES (%(agent_id)s, %(thread_id)s, %(owner_id)s)
+                        ON CONFLICT (agent_id, thread_id) DO NOTHING
+                    """, {**key, "owner_id": owner_id})
+
+                query = """
+                    SELECT owner_id, summary, messages, last_device_context
+                    FROM public.cpe_memory
+                    WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
+                """
+                cur.execute(query + (" FOR UPDATE" if write else ""), key)
+                row = cur.fetchone()
+                if row and row["owner_id"] != owner_id:
+                    raise CPEThreadNotFoundError(f"Thread '{thread_id}' not found for user.")
+
+                conversation = {
+                    "owner_id": row["owner_id"] if row else None,
+                    "summary": (row.get("summary") or "") if row else "",
+                    "messages": (row.get("messages") or []) if row else [],
+                    "last_device_context": row.get("last_device_context") if row else None,
+                }
 
                 yield conversation
 
@@ -198,12 +168,10 @@ def _conversation(
                             summary = %(summary)s,
                             messages = %(messages)s,
                             last_device_context = %(last_device_context)s,
-                            owner_id = COALESCE(%(owner_id)s, owner_id),
                             updated_at = NOW()
                         WHERE agent_id = %(agent_id)s AND thread_id = %(thread_id)s
                     """, {
                         **key,
-                        "owner_id": owner_id,
                         "summary": conversation["summary"],
                         "messages": Jsonb(conversation["messages"]),
                         "last_device_context": (
@@ -503,4 +471,3 @@ def contextualize_cpe_query(
 
     logger.info("[Ask CPE Query Rewriter] Final query: '%s'", clean_query)
     return clean_query
-

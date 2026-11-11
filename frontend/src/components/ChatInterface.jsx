@@ -26,7 +26,7 @@ const EVIDENCE_CLOSE = '[[/EVIDENCE_JSON]]';
 
 // Product agents skip client-side PII masking so SKU/model numbers in
 // queries are not corrupted. Mirrors PII_MASK_EXEMPT_AGENTS in the backend.
-const PII_MASK_EXEMPT_AGENTS = ['lifestore', 'enterprise', 'cpe'];
+const PII_MASK_EXEMPT_AGENTS = ['lifestore', 'enterprise'];
 
 // ── Ask LifeStore product cards ─────────────────────────────────────────
 // The LifeStore MCP endpoint returns a structured `products` array. These
@@ -1247,7 +1247,6 @@ const ScrollToLatestPill = ({ onClick, color }) => (
     </motion.button>
 );
 
-// ── Enterprise CPE Hardware Cards ───────────────────────────────────────
 const EnterpriseHardwareCard = ({ card, color }) => {
     return (
         <motion.div
@@ -1330,595 +1329,11 @@ const EnterpriseHardwareCards = ({ cards, color }) => {
     );
 };
 
-const parseEvidencePayload = (text = '') => {
-    const openIndex = text.indexOf(EVIDENCE_OPEN);
-
-    if (openIndex === -1) {
-        return { text, evidence: null };
-    }
-
-    const closeIndex = text.indexOf(EVIDENCE_CLOSE, openIndex + EVIDENCE_OPEN.length);
-
-    // If evidence JSON is still streaming, hide the partial block from UI
-    if (closeIndex === -1) {
-        return {
-            text: text.slice(0, openIndex).trimEnd(),
-            evidence: null,
-        };
-    }
-
-    const before = text.slice(0, openIndex);
-    const jsonText = text.slice(openIndex + EVIDENCE_OPEN.length, closeIndex);
-    const after = text.slice(closeIndex + EVIDENCE_CLOSE.length);
-
-    try {
-        const payload = JSON.parse(jsonText);
-        const evidence = Array.isArray(payload?.items) ? payload.items : [];
-
-        return {
-            text: `${before}${after}`.trimEnd(),
-            evidence,
-        };
-    } catch (error) {
-        console.error('Failed to parse evidence payload:', error);
-        return {
-            text: `${before}${after}`.trimEnd(),
-            evidence: null,
-        };
-    }
-};
-
-const resolveEvidenceUrl = (url) => {
-    if (!url) return '';
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-
-    const normalizedPath = url.startsWith('/') ? url : `/${url}`;
-    return `${API_URL}${normalizedPath}`;
-};
-
-const ImagePreviewModal = ({ image, onClose }) => {
-    if (!image) return null;
-
-    return (
-        <div
-            className="fixed inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-            onClick={onClose}
-        >
-            <button
-                type="button"
-                onClick={onClose}
-                className="absolute top-4 right-4 w-10 h-10 rounded-full bg-white/90 text-gray-700 text-2xl leading-none shadow-lg hover:bg-white"
-                aria-label="Close image preview"
-            >
-                ×
-            </button>
-
-            <motion.div
-                initial={{ opacity: 0, scale: 0.96 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="max-w-[95vw] max-h-[92vh]"
-                onClick={(e) => e.stopPropagation()}
-            >
-                <img
-                    src={image.url}
-                    alt={image.alt || 'Evidence preview'}
-                    className="max-w-[95vw] max-h-[92vh] object-contain rounded-2xl bg-white shadow-2xl"
-                />
-            </motion.div>
-        </div>
-    );
-};
-
-// Greeting pool for the idle landing screen.
-const TIME_GREETINGS = {
-    morning: ["Good morning, {n}", "Rise and shine, {n}", "Morning, {n}"],
-    afternoon: ["Good afternoon, {n}", "Hi, {n}", "Hey, {n}"],
-    evening: ["Good evening, {n}", "Evening, {n}", "Hi, {n}"],
-    night: ["Burning the midnight oil, {n}?", "Still up, {n}?", "Late night, {n}?"],
-};
-const ANYTIME_GREETINGS = [
-    "Welcome back, {n}",
-    "Back at it, {n}",
-    "{n} returns",
-    "Ready when you are, {n}",
-    "Hello, {n}",
-    "Hi, {n}",
-    "Hello again, {n}",
-];
-const pickGreeting = (firstName) => {
-    const hour = new Date().getHours();
-    let bucket;
-    if (hour >= 5 && hour < 12) bucket = 'morning';
-    else if (hour >= 12 && hour < 17) bucket = 'afternoon';
-    else if (hour >= 17 && hour < 22) bucket = 'evening';
-    else bucket = 'night';
-    const pool = [...TIME_GREETINGS[bucket], ...ANYTIME_GREETINGS];
-    const picked = pool[Math.floor(Math.random() * pool.length)];
-    return picked.replace('{n}', firstName);
-};
-
-// Strip unmatched ** bold markers so stray asterisks don't render literally.
-const sanitizeMarkdownBold = (text) => {
-    if (!text) return text;
-    const positions = [];
-    const regex = /\*\*/g;
-    let m;
-    while ((m = regex.exec(text)) !== null) positions.push(m.index);
-    if (positions.length % 2 === 0) return text;
-    const last = positions[positions.length - 1];
-    return text.slice(0, last) + text.slice(last + 2);
-};
-
-// Utility function to append incoming text chunks to the current message text
-const appendChunkSmartly = (current, incoming) => {
-    return (current || "") + (incoming || "");
-};
-
-// Agent gradient class → RGB triplet, for luminous glow effects.
-const AGENT_RGB = {
-    cyan: '6, 182, 212', purple: '147, 51, 234', blue: '37, 99, 235',
-    gray: '107, 114, 128', sky: '14, 165, 233', rose: '225, 29, 72',
-    emerald: '16, 185, 129', indigo: '79, 70, 229', orange: '234, 88, 12',
-    fuchsia: '192, 38, 211',
-};
-const getAgentRgb = (colorStr) => {
-    const m = colorStr?.match(/from-(\w+)-/);
-    return (m && AGENT_RGB[m[1]]) || '120, 120, 120';
-};
-
-const formatTime = (ts) => {
-    if (!ts) return '';
-    try {
-        return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch {
-        return '';
-    }
-};
-
-// Rotating status phrases shown while awaiting the first streamed token.
-const THINKING_PHRASES = [
-    "Understanding your question",
-    "Reviewing relevant information",
-    "Analyzing details",
-    "Consulting knowledge base",
-    "Preparing your response",
-    "Finalizing answer",
-];
-const PHRASE_INTERVAL_MS = 2200;
-
-const ThinkingIndicator = () => {
-    const [phraseIdx, setPhraseIdx] = useState(0);
-
-    useEffect(() => {
-        const id = setInterval(() => {
-            setPhraseIdx(prev => Math.min(prev + 1, THINKING_PHRASES.length - 1));
-        }, PHRASE_INTERVAL_MS);
-        return () => clearInterval(id);
-    }, []);
-
-    return (
-        <div className="flex justify-start">
-            <div className="bg-gray-50/80 dark:bg-gray-800/60 backdrop-blur-md border border-gray-100/60 dark:border-gray-700/60 rounded-2xl rounded-tl-md px-6 py-4 shadow-sm flex gap-3 items-center">
-                <div className="flex gap-1.5 items-center">
-                    <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600 animate-bounce" />
-                    <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600 animate-bounce [animation-delay:150ms]" />
-                    <div className="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600 animate-bounce [animation-delay:300ms]" />
-                </div>
-                <AnimatePresence mode="wait">
-                    <motion.span
-                        key={phraseIdx}
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -4 }}
-                        transition={{ duration: 0.2, ease: 'easeOut' }}
-                        className="text-sm text-gray-500 dark:text-gray-400 font-light"
-                    >
-                        {THINKING_PHRASES[phraseIdx]}
-                    </motion.span>
-                </AnimatePresence>
-            </div>
-        </div>
-    );
-};
-
-// ── Source UI Components ──────────────────────────────────────
-
-const SourceBadge = ({ name, url, color }) => (
-    <motion.a
-        href={url}
-        target="_blank"
-        rel="noopener noreferrer"
-        whileHover={{ scale: 1.05, y: -2 }}
-        whileTap={{ scale: 0.95 }}
-        className={`flex items-center gap-2 px-3 py-1.5 rounded-full bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 shadow-sm transition-all hover:shadow-md hover:border-gray-200 dark:hover:border-gray-600 group`}
-    >
-        <div className={`p-1 rounded-full bg-gradient-to-br ${color} text-white`}>
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
-                <path d="M3 3.5A1.5 1.5 0 014.5 2h6.879a1.5 1.5 0 011.06.44l4.122 4.12A1.5 1.5 0 0117 7.622V16.5a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 013 16.5v-13z" />
-            </svg>
-        </div>
-        <span className="text-xs font-medium text-gray-600 dark:text-gray-300 group-hover:text-gray-900 dark:group-hover:text-gray-100 truncate max-w-[150px]">
-            {name}
-        </span>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3 text-gray-300 dark:text-gray-600 group-hover:text-gray-500 dark:group-hover:text-gray-400">
-            <path fillRule="evenodd" d="M5.22 14.78a.75.75 0 001.06 0l7.22-7.22v5.69a.75.75 0 001.5 0v-7.5a.75.75 0 00-.75-.75h-7.5a.75.75 0 000 1.5h5.69l-7.22 7.22a.75.75 0 000 1.06z" clipRule="evenodd" />
-        </svg>
-    </motion.a>
-);
-
-const SourcesSection = ({ sources, color }) => {
-    if (!sources || sources.length === 0) return null;
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-4 pt-3 border-t border-gray-100/60 dark:border-gray-800/60"
-        >
-            <div className="flex items-center gap-2 mb-2.5">
-                <div className={`w-1 h-3.5 rounded-full bg-gradient-to-b ${color}`} />
-                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400 dark:text-gray-500">Sources</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-                {sources.map((src, i) => (
-                    <SourceBadge key={i} name={src.name} url={src.url} color={color} />
-                ))}
-            </div>
-        </motion.div>
-    );
-};
-
-// ── Relevant Evidence (cropped PDF images / extracted tables) ───────────
-const EvidenceImageCard = ({ item, onImageClick }) => {
-    const imageUrl = resolveEvidenceUrl(item.url);
-    const imageAlt = item.title || item.source || 'Evidence image';
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
-        >
-            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
-                <p className="text-xs font-bold text-gray-700">
-                    {item.title || 'Image reference'}
-                </p>
-                <p className="text-[0.68rem] text-gray-400 mt-0.5">
-                    {item.source}
-                    {item.page ? ` — Page ${item.page}` : ''}
-                </p>
-            </div>
-
-            <div className="p-3 bg-white">
-                <button
-                    type="button"
-                    onClick={() => onImageClick?.({ url: imageUrl, alt: imageAlt })}
-                    className="block w-full cursor-zoom-in"
-                    title="Click to preview image"
-                >
-                    <img
-                        src={imageUrl}
-                        alt={imageAlt}
-                        className="w-full max-h-[420px] object-contain rounded-xl border border-gray-100 bg-gray-50"
-                        loading="lazy"
-                    />
-                </button>
-            </div>
-
-            {item.link && item.link !== '#' && (
-                <div className="px-4 pb-3">
-                    <a
-                        href={item.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs font-semibold text-blue-500 hover:underline"
-                    >
-                        Open original source
-                    </a>
-                </div>
-            )}
-        </motion.div>
-    );
-};
-
-const EvidenceTableCard = ({ item }) => (
-    <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden"
-    >
-        <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
-            <p className="text-xs font-bold text-gray-700">
-                {item.title || 'Table reference'}
-            </p>
-            <p className="text-[0.68rem] text-gray-400 mt-0.5">
-                {item.source}
-                {item.page ? ` — Page ${item.page}` : ''}
-            </p>
-        </div>
-
-        <div className="p-3 max-h-[420px] overflow-auto">
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                components={{
-                    table: ({ node, ...props }) => (
-                        <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white">
-                            <table className="w-full text-xs text-left border-collapse" {...props} />
-                        </div>
-                    ),
-                    th: ({ node, ...props }) => (
-                        <th className="bg-gray-50 px-3 py-2 font-semibold border-b border-gray-200 text-gray-700 border-r last:border-r-0" {...props} />
-                    ),
-                    td: ({ node, ...props }) => (
-                        <td className="px-3 py-2 border-b border-gray-100 border-r border-gray-100 last:border-r-0 text-gray-600" {...props} />
-                    ),
-                    tr: ({ node, ...props }) => (
-                        <tr className="even:bg-gray-50/50" {...props} />
-                    ),
-                    p: ({ node, ...props }) => (
-                        <p className="whitespace-pre-wrap text-xs text-gray-600 mb-0" {...props} />
-                    ),
-                }}
-            >
-                {item.content || ''}
-            </ReactMarkdown>
-        </div>
-
-        {item.link && item.link !== '#' && (
-            <div className="px-4 pb-3">
-                <a
-                    href={item.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-xs font-semibold text-blue-500 hover:underline"
-                >
-                    Open original source
-                </a>
-            </div>
-        )}
-    </motion.div>
-);
-
-const EvidenceSection = ({ evidence, color, onImageClick }) => {
-    const items = Array.isArray(evidence)
-        ? evidence.filter(item => item?.type === 'image' || item?.type === 'table')
-        : [];
-
-    if (items.length === 0) return null;
-
-    return (
-        <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-4 pt-3 border-t border-gray-100/60"
-        >
-            <div className="flex items-center gap-2 mb-2.5">
-                <div className={`w-1 h-3.5 rounded-full bg-gradient-to-b ${color}`} />
-                <span className="text-[0.7rem] uppercase tracking-wider font-bold text-gray-400">
-                    Relevant Evidence
-                </span>
-            </div>
-
-            <div className="space-y-3">
-                {items.map((item, i) => (
-                    item.type === 'image'
-                        ? <EvidenceImageCard key={i} item={item} onImageClick={onImageClick} />
-                        : <EvidenceTableCard key={i} item={item} />
-                ))}
-            </div>
-        </motion.div>
-    );
-};
-
-// ── Copy-to-clipboard helper used by message and code-block buttons ─────────
-const useCopy = () => {
-    const [copied, setCopied] = useState(false);
-    const timeoutRef = useRef(null);
-    const copy = async (text) => {
-        try {
-            await navigator.clipboard.writeText(text);
-            setCopied(true);
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
-            timeoutRef.current = setTimeout(() => setCopied(false), 1500);
-        } catch (err) {
-            console.error('Copy failed:', err);
-        }
-    };
-    useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
-    return { copied, copy };
-};
-
-// ── Copy Message Button (for bot bubbles) ──────────────────────────────────
-const CopyMessageButton = ({ text }) => {
-    const { copied, copy } = useCopy();
-    return (
-        <button
-            type="button"
-            onClick={() => copy(text)}
-            disabled={copied}
-            title={copied ? "Copied" : "Copy message"}
-            className={`p-1.5 rounded-md transition-all duration-200 ${copied
-                ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                : 'text-gray-300 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-gray-800/60'
-                }`}
-        >
-            {copied ? (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
-                </svg>
-            ) : (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                    <path d="M7 3a2 2 0 012-2h6a2 2 0 012 2v6a2 2 0 01-2 2h-1V7a3 3 0 00-3-3H7V3z" />
-                    <path d="M3 7a2 2 0 012-2h6a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                </svg>
-            )}
-        </button>
-    );
-};
-
-// ── Code Block with Copy button (used inside ReactMarkdown) ────────────────
-const CodeBlock = ({ children, ...props }) => {
-    const text = React.Children.toArray(children).map(c => typeof c === 'string' ? c : (c?.props?.children ?? '')).join('');
-    const { copied, copy } = useCopy();
-    return (
-        <div className="relative group/code my-2">
-            <button
-                type="button"
-                onClick={() => copy(text)}
-                title={copied ? "Copied" : "Copy code"}
-                className={`absolute top-2 right-2 px-2 py-1 rounded-md text-[0.7rem] font-medium transition-all duration-200 opacity-0 group-hover/code:opacity-100 ${copied
-                    ? 'bg-emerald-500 text-white'
-                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-100 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
-                    }`}
-            >
-                {copied ? 'Copied' : 'Copy'}
-            </button>
-            <code className="block bg-gray-50 dark:bg-gray-900 p-3 pr-16 rounded-xl text-sm font-mono overflow-x-auto border border-gray-100 dark:border-gray-800 shadow-inner text-gray-700 dark:text-gray-200" {...props}>
-                {children}
-            </code>
-        </div>
-    );
-};
-
-// ── Feedback Buttons Component ──────────────────────────────────────
-const FeedbackButtons = ({ messageIndex, agentId, threadId, userId, userName, existingRating, onFeedback }) => {
-    const [rating, setRating] = useState(existingRating || null);
-    const [submitting, setSubmitting] = useState(false);
-
-    useEffect(() => {
-        setRating(existingRating || null);
-    }, [existingRating]);
-
-    const handleFeedback = async (newRating) => {
-        if (submitting) return;
-
-        // Toggle off if same rating clicked
-        const finalRating = rating === newRating ? null : newRating;
-
-        setSubmitting(true);
-        try {
-            if (!finalRating) {
-                // Remove feedback from database
-                const res = await fetch(`${API_URL}/api/v1/feedback`, {
-                    method: 'DELETE',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        agent_id: agentId,
-                        thread_id: threadId,
-                        message_index: messageIndex,
-                        rating: newRating,
-                        user_id: userId,
-                    }),
-                });
-                if (res.ok) {
-                    setRating(null);
-                    onFeedback?.(messageIndex, null);
-                }
-            } else {
-                // Submit or update feedback
-                const res = await fetch(`${API_URL}/api/v1/feedback`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        agent_id: agentId,
-                        thread_id: threadId,
-                        message_index: messageIndex,
-                        rating: finalRating,
-                        user_id: userId,
-                        user_name: userName || null,
-                    }),
-                });
-                if (res.ok) {
-                    setRating(finalRating);
-                    onFeedback?.(messageIndex, finalRating);
-                }
-            }
-        } catch (err) {
-            console.error('Feedback submission failed:', err);
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    return (
-        <>
-            <button
-                onClick={() => handleFeedback('up')}
-                disabled={submitting}
-                className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'up'
-                    ? 'text-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-500/10'
-                    }`}
-                title="Helpful"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                    <path d="M1 8.998a1 1 0 011-1h.764a1.483 1.483 0 00-.076.506v5.996a1.483 1.483 0 00.076.506H2a1 1 0 01-1-1V8.998zM5.25 7.726a2 2 0 01.944-1.697l3.476-2.14a1.5 1.5 0 012.33 1.25v2.363h2.5a2 2 0 011.96 2.4l-.782 3.908A2 2 0 0113.72 15.5H5.25V7.726z" />
-                </svg>
-            </button>
-            <button
-                onClick={() => handleFeedback('down')}
-                disabled={submitting}
-                className={`p-1.5 rounded-md transition-all duration-200 ${rating === 'down'
-                    ? 'text-red-400 bg-red-50 dark:bg-red-500/10'
-                    : 'text-gray-300 dark:text-gray-600 hover:text-red-400 hover:bg-red-50/50 dark:hover:bg-red-500/10'
-                    }`}
-                title="Not helpful"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                    <path d="M19 11.002a1 1 0 01-1 1h-.764a1.483 1.483 0 00.076-.506V5.5a1.483 1.483 0 00-.076-.506H18a1 1 0 011 1v5.008zM14.75 12.274a2 2 0 01-.944 1.697l-3.476 2.14a1.5 1.5 0 01-2.33-1.25V12.5h-2.5a2 2 0 01-1.96-2.4l.782-3.908A2 2 0 016.28 4.5h8.47v7.774z" />
-                </svg>
-            </button>
-        </>
-    );
-};
-
-// ── New Chat Button (Gemini-style pencil icon, expands to label on hover) ─
-const NewChatButton = ({ onClick, disabled }) => (
-    <motion.button
-        onClick={onClick}
-        disabled={disabled}
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.9 }}
-        whileHover={{ scale: disabled ? 1 : 1.04 }}
-        whileTap={{ scale: disabled ? 1 : 0.96 }}
-        title="New chat"
-        className="group/new flex items-center gap-1.5 pl-2 pr-2 py-1.5 rounded-full bg-white/90 backdrop-blur-md border border-gray-200/80 text-gray-500 hover:text-gray-800 hover:border-gray-300 shadow-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed text-xs font-medium overflow-hidden"
-    >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4 shrink-0">
-            <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
-            <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0010 3H4.75A2.75 2.75 0 002 5.75v9.5A2.75 2.75 0 004.75 18h9.5A2.75 2.75 0 0017 15.25V10a.75.75 0 00-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5z" />
-        </svg>
-        <span className="max-w-0 group-hover/new:max-w-[100px] overflow-hidden whitespace-nowrap transition-all duration-300 ease-out">
-            <span className="pr-1">New chat</span>
-        </span>
-    </motion.button>
-);
-
-// ── Scroll-to-latest pill ──────────────────────────────────────────────
-const ScrollToLatestPill = ({ onClick, color }) => (
-    <motion.button
-        type="button"
-        onClick={onClick}
-        initial={{ opacity: 0, y: 10, scale: 0.9 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: 10, scale: 0.9 }}
-        transition={{ duration: 0.2, ease: 'easeOut' }}
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        title="Scroll to latest"
-        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-tr ${color} text-white text-xs font-medium shadow-lg hover:shadow-xl transition-shadow`}
-    >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5">
-            <path fillRule="evenodd" d="M10 3a.75.75 0 01.75.75v10.638l3.96-4.158a.75.75 0 111.08 1.04l-5.25 5.5a.75.75 0 01-1.08 0l-5.25-5.5a.75.75 0 111.08-1.04l3.96 4.158V3.75A.75.75 0 0110 3z" clipRule="evenodd" />
-        </svg>
-        Latest
-    </motion.button>
-);
-
 const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const { instance, accounts } = useMsal();
     const user = accounts[0] || { name: "User" };
+    const isCpe = agentConfig.id === 'cpe';
+    const threadStorageKey = 'thread_' + agentConfig.id + (isCpe ? '_' + user.homeAccountId : '');
     const navigate = useNavigate();
 
     // Department + job title resolved from Azure AD (Graph /me). Best-effort:
@@ -1957,13 +1372,12 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         setIsLoadingHistory(true);
 
         const loadAgentState = async () => {
-            const storageKey = `thread_${agentConfig.id}`;
-            const storedThreadId = sessionStorage.getItem(storageKey);
+            const storedThreadId = sessionStorage.getItem(threadStorageKey);
             const isExistingSession = !!storedThreadId;
 
             const currentThreadId = storedThreadId || uuidv4();
             if (!isExistingSession) {
-                sessionStorage.setItem(storageKey, currentThreadId);
+                sessionStorage.setItem(threadStorageKey, currentThreadId);
             }
 
             setThreadId(currentThreadId);
@@ -1971,9 +1385,17 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
             if (isExistingSession) {
                 try {
                     const headers = await getChatAuthHeaders(instance, accounts[0]);
-                    const response = await fetch(`${API_URL}/api/v1/chat/${agentConfig.id}/${currentThreadId}`, {
-                        headers,
-                    });
+                    const historyUrl = isCpe
+                        ? API_URL + '/api/v1/cpe/history/' + encodeURIComponent(currentThreadId)
+                        : `${API_URL}/api/v1/chat/${agentConfig.id}/${currentThreadId}`;
+                    const response = await fetch(historyUrl, { headers });
+                    if (isCpe && response.status === 404) {
+                        const newThreadId = uuidv4();
+                        sessionStorage.setItem(threadStorageKey, newThreadId);
+                        setThreadId(newThreadId);
+                        setIsLoadingHistory(false);
+                        return;
+                    }
                     if (!response.ok) throw new Error("Failed to fetch history");
 
                     const data = await response.json();
@@ -1992,9 +1414,9 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                 type: msg.type === 'human' ? 'user' : 'bot',
                                 text,
                                 formType,
-                                hardwareCards: msg.hardware_cards || [],
                                 // Evidence saved with the answer, so pictures survive a reload.
                                 evidence: Array.isArray(msg.evidence) ? msg.evidence : [],
+                                hardwareCards: isCpe && Array.isArray(msg.hardware_cards) ? msg.hardware_cards : [],
                             };
                         });
                         setMessages(mappedMessages);
@@ -2033,7 +1455,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         };
 
         loadAgentState();
-    }, [agentConfig.id, agentConfig.title, user.name, instance, accounts]);
+    }, [agentConfig.id, agentConfig.title, user.name, instance, accounts, isCpe, threadStorageKey]);
 
     const [input, setInput] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -2185,7 +1607,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const handleClearChat = () => {
         if (!agentConfig?.id || isLoading || isLoadingHistory) return;
         const newThreadId = uuidv4();
-        sessionStorage.setItem(`thread_${agentConfig.id}`, newThreadId);
+        sessionStorage.setItem(threadStorageKey, newThreadId);
         setThreadId(newThreadId);
         setFeedbackMap({});
         setLastFailedMessage(null);
@@ -2219,42 +1641,34 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
         let botMessageAdded = false;
 
         try {
-            // Ask LifeStore uses a dedicated MCP endpoint that returns a single JSON
-            // object (answer + product list), not a token stream. Handle it separately.
-                        // Ask CPE uses dedicated endpoint returning technical answer + hardware cards
-            if (agentConfig.id === 'cpe') {
-                const cpeResponse = await fetch(`${API_URL}/api/v1/cpe/chat`, {
+            if (isCpe) {
+                const response = await fetch(API_URL + '/api/v1/cpe/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message: maskedText,
-                        thread_id: threadId,
+                    headers: await getChatAuthHeaders(instance, accounts[0], {
+                        'Content-Type': 'application/json',
                     }),
+                    body: JSON.stringify({ message: maskedText, thread_id: threadId }),
+                    signal: controller.signal,
                 });
+                if (!response.ok) throw new Error('CPE chat failed: HTTP ' + response.status);
 
-                if (!cpeResponse.ok) {
-                    throw new Error(`CPE service error: ${cpeResponse.statusText}`);
+                const data = await response.json();
+                if (data.thread_id && data.thread_id !== threadId) {
+                    sessionStorage.setItem(threadStorageKey, data.thread_id);
+                    setThreadId(data.thread_id);
                 }
-
-                const cpeData = await cpeResponse.json();
-                const botReply = cpeData.answer || cpeData.response || "No response received.";
-                const hardwareCards = cpeData.hardware_cards || [];
-
-                if (cpeData.thread_id && cpeData.thread_id !== threadId) {
-                    setThreadId(cpeData.thread_id);
-                }
-
-                setMessages((prev) => [
-                    ...prev,
-                    {
-                        type: 'bot',
-                        text: botReply,
-                        hardwareCards: hardwareCards,
-                    },
-                ]);
+                setMessages(prev => [...prev, {
+                    type: 'bot',
+                    text: data.answer,
+                    hardwareCards: Array.isArray(data.hardware_cards) ? data.hardware_cards : [],
+                    timestamp: Date.now(),
+                }]);
+                botMessageAdded = true;
                 return;
             }
 
+            // Ask LifeStore uses a dedicated MCP endpoint that returns a single JSON
+            // object (answer + product list), not a token stream. Handle it separately.
             if (agentConfig.id === 'lifestore') {
                 const mcpResponse = await fetch(`${API_URL}/api/v1/lifestore/mcp-chat`, {
                     method: 'POST',
@@ -2420,7 +1834,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
     const lastRenderedIdx = (() => {
         for (let i = messages.length - 1; i >= 0; i--) {
             const m = messages[i];
-            if (m.type === 'user' || m.text || m.formType || (m.hardwareCards && m.hardwareCards.length > 0)) return i;
+            if (m.type === 'user' || m.text || m.formType) return i;
         }
         return -1;
     })();
@@ -2691,19 +2105,16 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                         <SourcesSection sources={sources} color={agentConfig.color} />
                                                     )}
 
-                                                                                                        {Array.isArray(msg.hardwareCards) && msg.hardwareCards.length > 0 && (
-                                                        <EnterpriseHardwareCards
-                                                            cards={msg.hardwareCards}
-                                                            color={agentConfig.color}
-                                                        />
-                                                    )}
-
-{Array.isArray(msg.productCards) && msg.productCards.length > 0 && (
+                                                    {Array.isArray(msg.productCards) && msg.productCards.length > 0 && (
                                                         <ProductCards
                                                             products={msg.productCards}
                                                             color={agentConfig.color}
                                                             display={msg.productCardDisplay}
                                                         />
+                                                    )}
+
+                                                    {isCpe && (
+                                                        <EnterpriseHardwareCards cards={msg.hardwareCards} color={agentConfig.color} />
                                                     )}
 
                                                     {/* Standalone HITL Buttons Component */}

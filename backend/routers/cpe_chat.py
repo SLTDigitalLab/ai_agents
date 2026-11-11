@@ -20,12 +20,13 @@ import uuid
 from datetime import date
 from typing import Any, List, Optional
 from pydantic import BaseModel, Field, field_validator
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from qdrant_client import QdrantClient
 from langchain_qdrant import QdrantVectorStore, FastEmbedSparse, RetrievalMode
 from langchain_core.messages import SystemMessage, HumanMessage
 
+from core.auth import get_verified_user
 from core.config import settings
 from core.llm import get_ingestion_embedding_model, get_chat_model
 from services.cpe_memory import (
@@ -325,7 +326,7 @@ def _get_tokens_4plus(text: str) -> set[str]:
 
 def _validate_item_codes(answer: str) -> str:
     """Validate item codes in the generated answer against cached CODE_INDEX.
-    
+
     (a) Code must exist in CODE_INDEX, otherwise append a note.
     (b) The model named in the same line/sentence must match the code's description.
         On mismatch: if exactly one inventory item matches the model, replace code and log warning.
@@ -419,7 +420,7 @@ def _extract_spec_pairs(text: str) -> set[tuple[float | int, str, str]]:
 
 def _guard_unsupported_specs(answer: str, context: str) -> str:
     """Extract number+unit pairs and require the same number+unit pair in context.
-    
+
     If not found in context, append a soft note without deleting text.
     Does not flag stock quantities.
     """
@@ -450,17 +451,28 @@ def _guard_unsupported_specs(answer: str, context: str) -> str:
     return answer
 
 
-# TODO: Enforce owner_id when auth dependency (e.g. Depends(get_current_user)) is attached to /api/v1/cpe endpoints.
-# The frontend ChatInterface currently accesses /api/v1/cpe without Authorization bearer headers.
-# Once auth is enabled:
-# 1. Inject current_user: Optional[dict] = Depends(get_current_user_optional)
-# 2. Extract owner_id = current_user.get("oid") or current_user.get("sub")
-# 3. Pass owner_id to get_cpe_conversation_memory, save_cpe_turn, and get_cpe_history_for_frontend.
-# 4. On owner mismatch, cpe_memory raises CPEThreadNotFoundError which maps to HTTP 404 (not 403).
+def require_cpe_owner(user: dict = Depends(get_verified_user)) -> str:
+    owner_id = user.get("oid") or user.get("sub")
+    if not isinstance(owner_id, str) or not owner_id:
+        raise HTTPException(status_code=401, detail="User identity is missing.")
+    return owner_id
+
+
+async def persist_cpe_turn(
+    thread_id: str,
+    query: str,
+    answer: str,
+    cards: list[dict],
+    owner_id: str,
+) -> None:
+    try:
+        await asyncio.to_thread(save_cpe_turn, thread_id, query, answer, cards, owner_id)
+    except CPEThreadNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="CPE thread not found.") from exc
 
 
 @router.get("/history/{thread_id}")
-async def cpe_get_history(thread_id: str, owner_id: Optional[str] = None):
+async def cpe_get_history(thread_id: str, owner_id: str = Depends(require_cpe_owner)):
     """Retrieve full conversation history for this CPE thread."""
     if not _THREAD_ID_PATTERN.match(thread_id):
         raise HTTPException(
@@ -498,8 +510,8 @@ def _check_cpe_health() -> dict[str, Any]:
             "alias_target": alias_target,
             "points_count": col_info.points_count,
         }
-    except Exception as exc:
-        qdrant_info = {"reachable": False, "error": str(exc)}
+    except Exception:
+        qdrant_info = {"reachable": False, "error": "Service unavailable"}
 
     postgres_info: dict[str, Any] = {"reachable": False}
     try:
@@ -516,8 +528,8 @@ def _check_cpe_health() -> dict[str, Any]:
             "reachable": True,
             "pool_stats": pool_stats,
         }
-    except Exception as exc:
-        postgres_info = {"reachable": False, "error": str(exc)}
+    except Exception:
+        postgres_info = {"reachable": False, "error": "Service unavailable"}
 
     is_healthy = qdrant_info.get("reachable", False) and postgres_info.get("reachable", False)
     return {
@@ -535,7 +547,7 @@ async def cpe_health():
 
 @router.post("/chat", response_model=CPEChatResponse)
 @router.post("/mcp-chat", response_model=CPEChatResponse)
-async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
+async def cpe_chat(request: CPEChatRequest, owner_id: str = Depends(require_cpe_owner)):
     """
     Handle CPE queries: technical specs, Peliyagoda inventory, hardware comparisons.
     Maintains full PostgreSQL multi-turn memory and contextual retrieval.
@@ -564,7 +576,6 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
 
     # Multi-turn contextual query expansion (resolves pronouns like 'it', 'its', 'the router')
     retrieval_query = await asyncio.to_thread(contextualize_cpe_query, query, thread_id, memory)
-    logger.info("[CPE Chat] Original Query: '%s' | Rewritten Query: '%s' | Thread: %s", query, retrieval_query, thread_id)
 
     # Broad retrieval k: ensure complete multi-vendor portfolios are always captured
     retrieval_k = max(request.limit, 16)
@@ -613,7 +624,7 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
             })
         )
         fallback_answer = "I searched the Enterprise CPE database, but no matching hardware, inventory, or datasheets were found for your query."
-        await asyncio.to_thread(save_cpe_turn, thread_id, query, fallback_answer, [])
+        await persist_cpe_turn(thread_id, query, fallback_answer, [], owner_id)
         return CPEChatResponse(
             status="success",
             answer=fallback_answer,
@@ -771,7 +782,7 @@ async def cpe_chat(request: CPEChatRequest, owner_id: Optional[str] = None):
     cards_dicts = [card.model_dump() for card in selected_cards]
 
     # 6. Atomically persist conversation turn in PostgreSQL off the event loop
-    await asyncio.to_thread(save_cpe_turn, thread_id, query, answer_text, cards_dicts, owner_id)
+    await persist_cpe_turn(thread_id, query, answer_text, cards_dicts, owner_id)
 
     total_ms = round((time.perf_counter() - start_time) * 1000, 2)
     logger.info(

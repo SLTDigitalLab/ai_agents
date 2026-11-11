@@ -18,7 +18,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat, cpe_chat
+from routers import admin, chat, orders, enterprise, admin_dashboard, feedback, finance, kb_retrieval, contact, lifestore_mcp_chat
+from routers import cpe_chat
 from routers.helpdesk import router as helpdesk_router
 from routers.voice_agent import realtime
 from services.ingestion import router as ingestion_router
@@ -127,7 +128,7 @@ app.include_router(helpdesk_router)  # Helpdesk ticket storage/viewing
 app.include_router(ingestion_router)
 app.include_router(contact.router)  # Contact Us email form
 app.include_router(lifestore_mcp_chat.router)  # Ask LifeStore MCP chat (/api/v1/lifestore/*)
-app.include_router(cpe_chat.router)  # Ask CPE agent (/api/v1/cpe/*)
+app.include_router(cpe_chat.router)
 app.include_router(realtime.router)  # Workmate live voice agent (/api/v1/realtime/*)
 
 @app.get("/")
