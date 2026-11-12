@@ -6,7 +6,6 @@
  * Sub-components (all in ./components/voice_agent/):
  *   VoiceOrb        — animated orb with rings & glow
  *   ListeningWave   — animated bar equaliser
- *   TranscriptPanel — scrollable transcript with header
  *   CallControls    — Start / Connecting / End Call button
  *   UserMenu        — avatar + logout dropdown
  *
@@ -27,9 +26,9 @@ import { getApiIdToken } from '../apiAuth';
 
 import { PHASE, API_URL, WS_URL, SYSTEM_PROMPT } from '../components/voice_agent/constants';
 import { float32ToPcm16Base64, pcm16Base64ToFloat32 } from '../components/voice_agent/AudioHelpers';
+import { languageInstruction, resolveToolResponseLanguage, resolveVoiceLanguage } from '../components/voice_agent/languageDetection';
 import VoiceOrb       from '../components/voice_agent/VoiceOrb';
 import ListeningWave  from '../components/voice_agent/ListeningWave';
-import TranscriptPanel from '../components/voice_agent/TranscriptPanel';
 import CallControls   from '../components/voice_agent/CallControls';
 import UserMenu       from '../components/voice_agent/UserMenu';
 import LumaAvatarStage from '../components/voice_agent/LumaAvatarStage';
@@ -63,7 +62,6 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
     const [phase,         setPhase]         = useState(PHASE.IDLE);
     const [isSpeaking,    setIsSpeaking]    = useState(false);
     const [isListening,   setIsListening]   = useState(false);
-    const [transcript,    setTranscript]    = useState([]);
     const [statusText,    setStatusText]    = useState('Ready to connect');
     const [errorMessage,  setErrorMessage]  = useState('');
     const [showUserMenu,  setShowUserMenu]  = useState(false);
@@ -90,6 +88,13 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
     const openAiSpeechFinishedRef = useRef(false);
     const geminiTurnCompleteRef = useRef(false);
     const geminiSpeechEndTimerRef = useRef(null);
+    const geminiPlaybackAnalyserRef = useRef(null);
+    const geminiPlaybackSamplesRef = useRef(null);
+    const activeTurnLanguageRef = useRef('en-US');
+    const voiceLanguagePreferenceRef = useRef('auto');
+    const hasCompletedInputTranscriptRef = useRef(false);
+    const connectionStartingRef = useRef(false);
+    const activeAudioTurnRef = useRef(null);
 
     const publishLumaSpeech = useCallback((patch) => {
         const previous = lumaSpeechRef.current || {
@@ -101,8 +106,26 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
     }, []);
 
     const stopLumaSpeech = useCallback(() => {
-        publishLumaSpeech({ active: false, text: '', duration: 0, getTime: () => 0 });
+        publishLumaSpeech({ active: false, filler: false, text: '', duration: 0, getTime: () => 0 });
     }, [publishLumaSpeech]);
+
+    const getGeminiPlaybackLevel = useCallback(() => {
+        const analyser = geminiPlaybackAnalyserRef.current;
+        const samples = geminiPlaybackSamplesRef.current;
+        if (!analyser || !samples) return 0;
+        analyser.getByteTimeDomainData(samples);
+        let sum = 0;
+        // Sampling every fourth value is sufficient for a smooth envelope and
+        // keeps this function inexpensive when called from the Three.js loop.
+        for (let index = 0; index < samples.length; index += 4) {
+            const normalized = (samples[index] - 128) / 128;
+            sum += normalized * normalized;
+        }
+        const rms = Math.sqrt(sum / Math.ceil(samples.length / 4));
+        // Remove decoder/background noise then map ordinary speech energy into
+        // a stable blendshape range. This is deliberately not a phoneme claim.
+        return Math.min(1, Math.max(0, (rms - 0.012) * 9));
+    }, []);
 
 
 
@@ -136,7 +159,9 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
             try { source.stop(); } catch { /* already stopped */ }
         });
         activeAudioSourcesRef.current = [];
-        if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+        geminiPlaybackAnalyserRef.current?.disconnect();
+        geminiPlaybackAnalyserRef.current = null;
+        geminiPlaybackSamplesRef.current = null;
         if (audioContextRef.current)    { audioContextRef.current.close(); audioContextRef.current = null; }
         nextPlayTimeRef.current = 0;
         stopLumaSpeech();
@@ -226,6 +251,9 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
 
             case 'input_audio_buffer.speech_started':
                 assistantTurnActiveRef.current = false;
+                // The next completed transcript, not a previous turn's
+                // function argument, chooses the language of this response.
+                hasCompletedInputTranscriptRef.current = false;
                 stopLumaSpeech();
                 setIsListening(true);  setStatusText('Listening...'); break;
             case 'input_audio_buffer.speech_stopped':
@@ -233,7 +261,8 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
 
             case 'conversation.item.input_audio_transcription.completed':
                 if (msg.transcript?.trim()) {
-                    setTranscript(prev => [...prev, { role: 'user', text: msg.transcript.trim() }]);
+                    activeTurnLanguageRef.current = resolveVoiceLanguage(msg.transcript);
+                    hasCompletedInputTranscriptRef.current = true;
                     setStatusText('Speak to Workmate AI');
                 }
                 break;
@@ -248,43 +277,16 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
                     text: assistantResponseRef.current,
                     duration: Math.max(0.5, assistantResponseRef.current.length / 12),
                 });
-                setTranscript(prev => {
-                    const last = prev[prev.length - 1];
-                    if (last?.role === 'assistant' && last?.partial)
-                        return [...prev.slice(0, -1), { ...last, text: last.text + msg.delta }];
-                    return [...prev, { role: 'assistant', text: msg.delta, partial: true }];
-                });
                 break;
 
             case 'response.audio_transcript.done':
-                setTranscript(prev => {
-                    const last = prev[prev.length - 1];
-                    if (last?.role === 'assistant' && last?.partial)
-                        return [...prev.slice(0, -1), { role: 'assistant', text: last.text }];
-                    return prev;
-                });
                 setIsSpeaking(false);
                 setStatusText('Speak to Workmate AI');
                 break;
 
             case 'filler':
-                    // play filler text via browser TTS so user hears it
-                    // while the agent pipeline runs in the background
-                    if ('speechSynthesis' in window) {
-                        window.speechSynthesis.cancel(); // stop any previous
-                        const utter = new SpeechSynthesisUtterance(msg.text);
-                        // match voice language
-                        const langMap = { en: 'en-US', si: 'si-LK', ta: 'ta-IN' };
-                        utter.lang = langMap[msg.lang] || 'en-US';
-                        utter.rate = 1.05;
-                        utter.pitch = 1.0;
-                        // try to find a voice that matches — fallback to default
-                        const voices = window.speechSynthesis.getVoices();
-                        const match = voices.find(v => v.lang.startsWith(utter.lang.split('-')[0]));
-                        if (match) utter.voice = match;
-                        window.speechSynthesis.speak(utter);
-                    }
-                    break;
+                // Only authenticated backend task events can schedule fillers.
+                break;
 
             case 'response.function_call_arguments.done':
     if (msg.name === 'ask_workmate_ai') {
@@ -308,12 +310,27 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
             });
             const data = res.ok ? await res.json() : {};
             const result = data.response || 'I could not find an answer to that.';
+            // A provider can translate function arguments to English. The
+            // completed user transcription is therefore authoritative for
+            // Tamil/Sinhala output; do not let an English tool argument
+            // overwrite this turn's language.
+            const language = voiceLanguagePreferenceRef.current !== 'auto'
+                ? voiceLanguagePreferenceRef.current
+                : resolveToolResponseLanguage(
+                activeTurnLanguageRef.current,
+                hasCompletedInputTranscriptRef.current,
+                args.question,
+            );
             sendOpenAIEvent({
                 type: 'conversation.item.create',
                 item: {
                     type: 'function_call_output',
                     call_id: msg.call_id,
-                    output: result,
+                    output: JSON.stringify({
+                        output: result,
+                        response_language: language,
+                        instruction: languageInstruction(language),
+                    }),
                 },
             });
             sendOpenAIEvent({ type: 'response.create' });
@@ -338,15 +355,19 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
     }, [configureOpenAISession, publishLumaSpeech, sendOpenAIEvent, stopLumaSpeech, user.name, user.username]);
 
     //  Gemini audio playback
-    const playGeminiAudioChunk = useCallback((base64Data) => {
+    const playGeminiAudioChunk = useCallback((base64Data, turnId) => {
     if (!audioContextRef.current) return;
+    if (turnId) {
+        activeAudioTurnRef.current = turnId;
+        if (import.meta.env.DEV) console.debug('voice audio playback', { audio_playback_turn_id: turnId });
+    }
     const ctx     = audioContextRef.current;
     const float32 = pcm16Base64ToFloat32(base64Data);
     const buffer  = ctx.createBuffer(1, float32.length, 24000);
     buffer.copyToChannel(float32, 0);
     const source  = ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(ctx.destination);
+    source.connect(geminiPlaybackAnalyserRef.current || ctx.destination);
     const startTime = Math.max(ctx.currentTime, nextPlayTimeRef.current);
     // A new PCM packet means the provider is still extending this response.
     // Never let an end timer from a previous packet cut its timeline short.
@@ -356,6 +377,10 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
         geminiSpeechEndTimerRef.current = null;
     }
     source.start(startTime);
+    if (turnId && geminiWsRef.current?.readyState === WebSocket.OPEN) {
+        // Correlation metadata only: no transcript, audio, or user data.
+        geminiWsRef.current.send(JSON.stringify({ type: 'audio_playback_started', turn_id: turnId }));
+    }
     nextPlayTimeRef.current = startTime + buffer.duration;
     setIsSpeaking(true);
 
@@ -370,6 +395,7 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
     const responseEnd = Math.max(prior?.endsAt || startTime, startTime + buffer.duration);
     publishLumaSpeech({
         active: true,
+        filler: false,
         text: assistantResponseRef.current,
         startedAt: responseStart,
         endsAt: responseEnd,
@@ -377,6 +403,7 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
         // AudioContext time is the real playback/scheduling clock for Gemini
         // PCM. Queued chunks are therefore kept in sync without timeouts.
         getTime: () => Math.max(0, Math.min(responseEnd - responseStart, ctx.currentTime - responseStart)),
+        getAudioLevel: getGeminiPlaybackLevel,
     });
 
     // track this source so it can be stopped on interruption
@@ -384,7 +411,7 @@ const VoiceAgentPage = ({ avatarExperience = false }) => {
     source.onended = () => {
         activeAudioSourcesRef.current = activeAudioSourcesRef.current.filter(s => s !== source);
     };
-}, [publishLumaSpeech, stopLumaSpeech]);
+}, [getGeminiPlaybackLevel, publishLumaSpeech, stopLumaSpeech]);
 
 
 const stopAllAudio = useCallback(() => {
@@ -423,9 +450,12 @@ const stopAllAudio = useCallback(() => {
 
     //  Start conversation
     const startConversation = async () => {
+        // Protect against double clicks and React event re-entry. An active
+        // WebSocket/peer connection is also a hard stop for duplicate calls.
+        if (connectionStartingRef.current || geminiWsRef.current || pcRef.current) return;
+        connectionStartingRef.current = true;
         setPhase(PHASE.CONNECTING);
         setStatusText('Connecting...');
-        setTranscript([]);
         setErrorMessage('');
 
         try {
@@ -446,6 +476,8 @@ const stopAllAudio = useCallback(() => {
             setErrorMessage(err.message || 'Failed to start voice session');
             setPhase(PHASE.ERROR);
             cleanupAll();
+        } finally {
+            connectionStartingRef.current = false;
         }
     };
 
@@ -505,6 +537,12 @@ const stopAllAudio = useCallback(() => {
         const ctx = new AudioContext({ sampleRate: 16000 });
         audioContextRef.current  = ctx;
         nextPlayTimeRef.current  = ctx.currentTime;
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.58;
+        analyser.connect(ctx.destination);
+        geminiPlaybackAnalyserRef.current = analyser;
+        geminiPlaybackSamplesRef.current = new Uint8Array(analyser.fftSize);
 
         setStatusText('Connecting...');
         const ws = new WebSocket(`${WS_URL}/api/v1/realtime/ws/voice`);
@@ -522,6 +560,8 @@ const stopAllAudio = useCallback(() => {
                             user_id: user.username || '',
                             user_name: user.name || '',
                             auth_token: apiIdTokenRef.current,
+                            language_preference: voiceLanguagePreferenceRef.current === 'auto'
+                                ? null : voiceLanguagePreferenceRef.current,
                         }));
                         setStatusText('Verifying voice session...');
                         break;
@@ -531,14 +571,34 @@ const stopAllAudio = useCallback(() => {
                         await startMicCapture(ctx, ws);
                         break;
                     case 'audio':
-                        window.speechSynthesis.cancel();
-                        playGeminiAudioChunk(msg.data);
+                        playGeminiAudioChunk(msg.data, msg.turn_id);
+                        break;
+                    case 'filler_audio_started':
+                        assistantResponseRef.current = msg.text || '';
+                        assistantTurnActiveRef.current = true;
+                        break;
+                    case 'filler_audio':
+                        playGeminiAudioChunk(msg.data, msg.turn_id);
+                        break;
+                    case 'filler_audio_complete':
+                        assistantTurnActiveRef.current = false;
+                        geminiTurnCompleteRef.current = true;
+                        finishGeminiSpeechWhenPlaybackEnds();
+                        break;
+                    case 'stop_filler_audio':
+                        stopAllAudio();
+                        assistantResponseRef.current = '';
+                        assistantTurnActiveRef.current = false;
+                        break;
+                    case 'filler_task_started':
+                        setStatusText('Luma is checking...');
+                        break;
+                    case 'filler_task_stopped':
                         break;
                     case 'transcript':
                         if (msg.role === 'user') {
                             assistantTurnActiveRef.current = false;
                             setIsListening(false);
-                            setTranscript(prev => [...prev, { role: 'user', text: msg.text }]);
                         } else {
                             if (!assistantTurnActiveRef.current) {
                                 assistantResponseRef.current = '';
@@ -552,22 +612,10 @@ const stopAllAudio = useCallback(() => {
                                 // few seconds of visemes.
                                 publishLumaSpeech({ text: assistantResponseRef.current });
                             }
-                            setTranscript(prev => {
-                                const last = prev[prev.length - 1];
-                                if (last?.role === 'assistant' && last?.partial)
-                                    return [...prev.slice(0, -1), { ...last, text: last.text + msg.text }];
-                                return [...prev, { role: 'assistant', text: msg.text, partial: true }];
-                            });
                         }
                         setStatusText('Speak to Workmate AI');
                         break;
                     case 'turn_complete':
-                        setTranscript(prev => {
-                            const last = prev[prev.length - 1];
-                            if (last?.role === 'assistant' && last?.partial)
-                                return [...prev.slice(0, -1), { role: 'assistant', text: last.text }];
-                            return prev;
-                        });
                         // WebSocket ordering guarantees every audio packet for
                         // this turn was received before this marker. End Luma
                         // against AudioContext's scheduled playback clock, not
@@ -598,7 +646,7 @@ const stopAllAudio = useCallback(() => {
                         }
                         break;
                     case 'error':
-                        setErrorMessage(msg.message || 'Connection error');
+                        setErrorMessage(msg.message || 'Voice service is unavailable. Please start a new call.');
                         setPhase(PHASE.ERROR);
                         cleanupGemini();
                         break;
@@ -715,7 +763,7 @@ const stopAllAudio = useCallback(() => {
             </div>
 
             {/*  Main area  */}
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+            <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden">
 
                 {/* Top bar */}
                 <div className="relative flex items-center justify-between px-6 py-3 border-b border-gray-200 dark:border-white/[0.06] shrink-0">
@@ -749,8 +797,9 @@ const stopAllAudio = useCallback(() => {
                     <img src={sltLogo} alt="SLTMobitel" className="h-7 sm:h-10 w-auto object-contain opacity-90 dark:opacity-80" />
                 </div>
 
-                {/*  Centre stage  */}
-                <div className="flex-1 flex flex-col items-center justify-center px-6 pb-6 min-h-0 gap-0">
+                <div className="flex-1 min-h-0 flex overflow-hidden">
+                    {/*  Centre stage  */}
+                    <div className="flex-1 min-w-0 flex flex-col items-center justify-center px-6 pb-6 min-h-0 gap-0">
 
                     {/* Greeting — only on idle */}
                     <AnimatePresence>
@@ -824,16 +873,7 @@ const stopAllAudio = useCallback(() => {
                         <CallControls phase={phase} onStart={startConversation} onEnd={endConversation} />
                     </div>
 
-                    {/* Transcript */}
-                    <AnimatePresence>
-                        {transcript.length > 0 && (
-                            <TranscriptPanel
-                                transcript={transcript}
-                                onClear={() => setTranscript([])}
-                            />
-                        )}
-                    </AnimatePresence>
-
+                    </div>
                 </div>
 
                 {/* Attribution docked at the bottom, matching the chat interface */}

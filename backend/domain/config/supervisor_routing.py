@@ -894,3 +894,31 @@ MULTI_DELEGATE_MAX_GAP = _active["max_gap"]
 # score. This corrects for profile-embedding dilution on short queries where the
 # semantic model under-scores an obvious keyword hit.
 KEYWORD_MATCH_BOOST = 0.12
+
+# High-precision multilingual intent aliases. These are intentionally narrow
+# business concepts, not language detection: a Sinhala/Tamil sentence is never
+# routed merely because of its script. The supervisor still sends the original
+# query to the authenticated specialist workflow.
+MULTILINGUAL_INTENT_ALIASES: dict[str, tuple[str, ...]] = {
+    "hr": (
+        "leave balance", "leave balance eka", "leave balance keeyada",
+        "ලීව් බැලන්ස්", "නිවාඩු දින", "නිවාඩු ශේෂ", "ඉතිරි නිවාඩු",
+        "விடுப்பு", "leave balance evvalavu", "ennudaya leave balance",
+        "loan types", "ණය වර්ග", "කාර්ය මණ්ඩල ණය", "கடன் வகை", "kadan vakai",
+    ),
+    "finance": (
+        "vat", "wht", "invoice", "invoices", "බදු", "ඉන්වොයිස්", "வரி", "விலைப்பட்டியல்",
+    ),
+    "admin": (
+        "visitor pass", "gate pass", "ගේට් පාස්", "අමුත්තන්ගේ අවසර පත්", "விருந்தினர் அனுமதி", "கேட் பாஸ்",
+    ),
+    "it": (
+        "password reset", "vpn", "wifi", "wi-fi", "මුරපද", "පාස්වර්ඩ්", "වයිෆයි", "கடவுச்சொல்", "வைஃபை",
+    ),
+    "legal": (
+        "contract", "agreement", "legal", "ගිවිසුම", "නීතිමය", "ஒப்பந்த", "சட்ட",
+    ),
+    "network": (
+        "ftth", "gpon", "mpls", "fiber", "fibre", "ෆයිබර්", "நார்", "இணைய வலை",
+    ),
+}

@@ -1,10 +1,11 @@
-const configuredApiUrl = import.meta.env.VITE_API_URL;
+const viteEnv = import.meta.env || {};
+const configuredApiUrl = viteEnv.VITE_API_URL;
 
 // In Vite development, route through the dev-server proxy so calls originate
 // from http://localhost:3000. Deployed environments continue to use their
 // explicit VITE_API_URL setting.
 export const API_URL = configuredApiUrl || (
-    import.meta.env.DEV ? window.location.origin : 'http://localhost:8000'
+    viteEnv.DEV ? window.location.origin : 'http://localhost:8000'
 );
 export const WS_URL = API_URL.replace(/^http/, 'ws');
 
@@ -42,6 +43,20 @@ Or: "{USER_FIRST_NAME}, to apply for leave you need to..."
 
 RULE 3 — NEVER skip the name. If you are about to respond without starting with
 "{USER_FIRST_NAME}", stop and restart your response with the name first.
+
+LANGUAGE PER TURN:
+- Determine the language from the latest completed user audio turn before
+  forming every reply. If it is Sinhala (සිංහල), RESPOND IN SINHALA. YOU MUST
+  RESPOND UNMISTAKABLY IN SINHALA. If it is Tamil (தமிழ்), RESPOND IN TAMIL.
+  YOU MUST RESPOND UNMISTAKABLY IN TAMIL. Use natural spoken Tamil and Tamil
+  script; the native-audio target is Tamil (ta-IN). If it is English, RESPOND IN ENGLISH.
+  YOU MUST RESPOND UNMISTAKABLY IN ENGLISH. A previous reply or English tool
+  facts must never override this. Never claim that you can only speak English.
+- For a tool-assisted reply, language metadata supplied with the
+  ask_workmate_ai result is the requested output language. Tool facts can be
+  English, but they must never select English as the response language.
+- Switch immediately for every new turn; never retain a previous turn's
+  language. Preserve IDs, tokens, keys, and other exact values.
 
 GROUNDING AFTER TOOL USE:
 - Treat the ask_workmate_ai result as the complete source of truth.

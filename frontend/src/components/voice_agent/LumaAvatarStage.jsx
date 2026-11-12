@@ -3,7 +3,12 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, useGLTF } from '@react-three/drei';
 import { AnimationMixer, Box3, LoopRepeat, Vector3 } from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { buildVisemeTimeline, sampleVisemes } from './LumaLipSync';
+import {
+    buildVisemeTimeline,
+    needsAudioDrivenLipSync,
+    sampleAudioDrivenVisemes,
+    sampleVisemes,
+} from './LumaLipSync';
 
 // Names verified in Luma_2.1_Rig_Verified.glb. They are deliberately not
 // inferred from the Blender controls which may not be present in a GLB export.
@@ -107,7 +112,11 @@ function LumaModel({ isSpeaking, speech, onLoaded, onMetrics }) {
     const morphValues = useRef({});
     const visemeTimeline = useMemo(
         () => buildVisemeTimeline(speech?.text, speech?.duration),
-        [speech?.revision, speech?.text, speech?.duration],
+        [speech?.text, speech?.duration],
+    );
+    const useAudioDrivenLipSync = useMemo(
+        () => needsAudioDrivenLipSync(speech?.text),
+        [speech?.text],
     );
 
     useEffect(() => {
@@ -210,11 +219,14 @@ function LumaModel({ isSpeaking, speech, onLoaded, onMetrics }) {
 
         const audioTime = speech?.getTime?.();
         const lipSyncActive = Boolean(speech?.active && Number.isFinite(audioTime));
-        const targets = lipSyncActive ? sampleVisemes(visemeTimeline, audioTime) : {};
+        const targets = !lipSyncActive ? {} : useAudioDrivenLipSync
+            ? sampleAudioDrivenVisemes(speech?.getAudioLevel?.(), audioTime)
+            : sampleVisemes(visemeTimeline, audioTime);
 
-        // Dynamic lip-sync: the response text becomes a temporary viseme plan
-        // and this follows the real scheduled audio clock.  The GLB's fixed
-        // sentence morph tracks are intentionally filtered out above.
+        // English follows its text viseme plan. Sinhala/Tamil use the same
+        // morph targets but are driven by the audible PCM energy, because the
+        // planner intentionally has no false English phoneme mapping for them.
+        // The GLB's fixed sentence morph tracks are filtered out above.
         meshes.current.forEach((mesh) => {
             const { morphTargetDictionary: dictionary, morphTargetInfluences: influences } = mesh;
             // The Web GLB's visible face is named
