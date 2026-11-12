@@ -1,0 +1,3 @@
+# Optional local audio language classifier runtime. Install into the SAME
+# interpreter/venv that runs uvicorn. Model weights are provisioned separately.
+speechbrain==1.1.2

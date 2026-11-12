@@ -122,4 +122,35 @@ export function sampleVisemes(timeline, time) {
     return output;
 }
 
+// The existing planner is intentionally English-only. Sinhala and Tamil
+// characters would otherwise become a sequence of REST tokens. Keep English
+// visemes untouched and let the avatar choose its playback-audio fallback for
+// these scripts (or for text with no usable Latin phonemes at all).
+export function needsAudioDrivenLipSync(text) {
+    const source = String(text || '');
+    return /[\u0B80-\u0BFF\u0D80-\u0DFF]/.test(source) || !/[a-z]/i.test(source);
+}
+
+/**
+ * Language-independent fallback for models with jaw/vowel blendshapes.
+ * `level` comes from the audible PCM analyser, not packet arrival or text
+ * length. It deliberately conveys voiced mouth motion rather than claiming
+ * phoneme-level accuracy for scripts the text planner does not support.
+ */
+export function sampleAudioDrivenVisemes(level, time = 0) {
+    const output = Object.fromEntries(MORPH_NAMES.map((name) => [name, 0]));
+    const energy = Math.max(0, Math.min(1, Number(level) || 0));
+    if (energy < 0.035) return output;
+    const openness = Math.min(0.54, 0.12 + energy * 0.52);
+    // A subtle alternating vowel bias avoids a fixed open jaw, while timing
+    // remains locked to measured playback energy.
+    const vowelPhase = (Math.sin(time * 15.7) + 1) * 0.5;
+    output.Jaw_Open = openness;
+    output.Viseme_A = openness * (0.52 + (1 - vowelPhase) * 0.28);
+    output.Viseme_O = openness * (0.24 + vowelPhase * 0.22);
+    output.Mouth_O = output.Viseme_O * 0.55;
+    output.Mouth_Wide = output.Viseme_A * 0.18;
+    return output;
+}
+
 export const lumaMorphNames = MORPH_NAMES;

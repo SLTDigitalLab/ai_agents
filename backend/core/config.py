@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     PROJECT_ID: Optional[str] = None
     LOCATION: str = "us-central1"
     VOICE_CHAT_TIMEOUT_SECONDS: float = 30.0
+    # Local-only event metadata for investigating a single voice session.
+    # Raw transcripts, audio, credentials, and Workmate results are never logged.
+    VOICE_DIAGNOSTICS_ENABLED: bool = False
     
     # LLM and Embedding Configuration
     LLM_PROVIDER: str = "gemini" # 'gemini' (AI Studio), 'vertex' (Vertex AI), 'openai'

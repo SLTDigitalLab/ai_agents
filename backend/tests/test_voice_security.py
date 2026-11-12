@@ -104,7 +104,7 @@ class VoiceSecurityTests(unittest.TestCase):
 
         messages = []
         self.settings.LOCATION = 'test-region'
-        provider = Mock(return_value=Provider())
+        provider = AsyncMock(return_value=Provider())
         with patch.dict(sys.modules, {'websockets': SimpleNamespace(connect=provider)}), \
              patch.object(self.voice, '_get_vertex_access_token', return_value='synthetic'):
             with self.client.websocket_connect('/api/v1/realtime/ws/voice') as socket:
