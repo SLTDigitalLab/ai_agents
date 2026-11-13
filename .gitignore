@@ -55,3 +55,4 @@ mcp_lifestore/orders/
 /chrome-*/
 /avatar-check*.png
 /luma-*.png
+backend/evaluation/results/

@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from fastapi_mail import ConnectionConfig
 
 # backend/core/config.py → backend/core → backend → project root
@@ -60,6 +61,17 @@ class Settings(BaseSettings):
     ROUTING_EMBEDDING_PROVIDER: str = "openai"
     ROUTING_EMBEDDING_MODEL: str = "text-embedding-3-small"
     ROUTING_EMBEDDING_API_KEY: Optional[str] = None
+
+    # Keep the baseline until the paired evaluation passes. Shadow serves the
+    # baseline and records both decisions; it adds the candidate call's latency.
+    SUPERVISOR_ROUTING_BACKEND: Literal["legacy", "shadow", "decisions"] = "legacy"
+    SUPERVISOR_DECISIONS_MODEL: str = "gpt-6-luna"
+    SUPERVISOR_DECISIONS_API_KEY: Optional[str] = None  # falls back to OPENAI_API_KEY
+    SUPERVISOR_DECISIONS_TIMEOUT_SECONDS: float = Field(default=8.0, gt=0, le=60)
+    SUPERVISOR_DECISIONS_THRESHOLD: float = Field(default=0.80, gt=0.5, le=1)
+    SUPERVISOR_DECISIONS_UNCERTAIN_THRESHOLD: float = Field(default=0.40, ge=0, lt=0.5)
+    SUPERVISOR_MAX_CONCURRENCY: int = Field(default=3, ge=1, le=10)
+    SUPERVISOR_ROUTING_LOG_TEXT: bool = False  # optional masked query previews; never answers
 
     # Guardrail Classifier (cheap/fast model for input safety)
     # When GUARDRAIL_MODEL_ENABLED is False, the LLM classifier is skipped and
