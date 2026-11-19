@@ -1,11 +1,17 @@
 """API routes for helpdesk tickets, solved tickets, and categories."""
 
-from typing import Optional
+import asyncio
+import logging
+import re
+from typing import Literal, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field, field_validator
 
 from core.auth import get_verified_user
 from core.admin_auth import admin_email, require_admin
+from services import slt_crm_incidents as crm
 
 from services.helpdesk_tickets import (
     # helpdesk tickets
@@ -22,10 +28,17 @@ from services.helpdesk_tickets import (
     list_categories,
 )
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(
     prefix="/api/v1/helpdesk_dev", tags=["Helpdesk"],
     dependencies=[Depends(get_verified_user)],
 )
+
+# SLT logins are `<employeeNumber>@intranet.slt.com.lk`; the CRM's
+# SLTAPIUserID is that employee number (e.g. "016242").
+_SLT_LOGIN_DOMAIN = "intranet.slt.com.lk"
+_EMPLOYEE_NUMBER_RE = re.compile(r"^[a-z0-9]{1,20}$")
 
 
 def _owner_id(user: dict) -> str:
@@ -127,6 +140,105 @@ async def post_ticket(body: dict, user: dict = Depends(get_verified_user)):
         updated_sub_category=body.get("updated_sub_category"),
     )
     return ticket
+
+
+# ---------------------------------------------------------------------------
+# CRM incidents (helpdesk ticket form)
+# ---------------------------------------------------------------------------
+
+class IncidentForm(BaseModel):
+    # 255 = helpdesk_tickets.message column size (local copy for duplicate check).
+    description: str = Field(..., max_length=255)
+    incident_type: str = Field(..., max_length=100)
+    incident_sub_type: str = Field(..., max_length=100)
+    priority: Literal["Low", "Medium", "High"]
+
+    @field_validator("description", "incident_type", "incident_sub_type")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be empty")
+        return value
+
+
+def _employee_number(owner: str) -> str:
+    local, _, domain = owner.partition("@")
+    if domain != _SLT_LOGIN_DOMAIN or not _EMPLOYEE_NUMBER_RE.match(local):
+        raise HTTPException(
+            status_code=403,
+            detail="Tickets can only be raised from an SLT employee account.",
+        )
+    return local
+
+
+@router.post("/incidents")
+async def post_incident(form: IncidentForm, user: dict = Depends(get_verified_user)):
+    """Create an incident in SLT's CRM from the helpdesk ticket form, then keep
+    a local copy so the chat's duplicate check can see it.
+
+    The submitter is always the verified login; nothing about identity is
+    read from the body.
+    """
+    owner = _owner_id(user)
+    employee_number = _employee_number(owner)
+
+    try:
+        created = await crm.create_incident(
+            description=form.description,
+            incident_type=form.incident_type,
+            incident_sub_type=form.incident_sub_type,
+            priority=form.priority,
+            sltapi_user_id=employee_number,
+        )
+    except crm.CrmNotConfiguredError:
+        log.error("post_incident: CRM create endpoint not configured")
+        raise HTTPException(status_code=503, detail="Ticket creation is not available right now.")
+    except httpx.TimeoutException:
+        log.warning("post_incident: CRM timed out | user=%s", employee_number)
+        raise HTTPException(
+            status_code=504,
+            # The CRM may still have created the incident, so don't invite
+            # an immediate retry (that could create a duplicate).
+            detail=(
+                "The ticket system is taking longer than usual to respond. Your ticket "
+                "may still have been created, so please don't submit again right away. "
+                "Check with the Help Desk or try again in a few minutes."
+            ),
+        )
+    except (crm.CrmIncidentError, httpx.HTTPError) as exc:
+        log.error("post_incident: CRM failed | user=%s | %s", employee_number, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="The ticket system could not create your ticket. Please try again later.",
+        )
+
+    # The incident already exists in the CRM, so a local save failure must not
+    # turn into an error for the user (a retry would create a second incident).
+    try:
+        await asyncio.to_thread(
+            create_helpdesk_ticket,
+            user_id=owner,
+            message=form.description,
+            ticket_id=created.incident_id,
+            status="open",
+            main_category=form.incident_type,
+            sub_category=form.incident_sub_type,
+        )
+    except Exception as exc:
+        log.error(
+            "post_incident: CRM incident %s created but local save failed: %s",
+            created.incident_id, exc,
+        )
+
+    return {
+        "incident_id": created.incident_id,
+        "description": form.description,
+        "incident_type": form.incident_type,
+        "incident_sub_type": form.incident_sub_type,
+        "priority": form.priority,
+        "status": "Assigned",
+    }
 
 
 # ---------------------------------------------------------------------------

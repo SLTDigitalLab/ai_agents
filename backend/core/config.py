@@ -145,7 +145,15 @@ class Settings(BaseSettings):
 
     LIFESTORE_QDRANT_COLLECTION: str = "lifestore_docs"
 
-    N8N_HELPDESK_WEBHOOK_URL: Optional[str] = None 
+    N8N_HELPDESK_WEBHOOK_URL: Optional[str] = None
+
+    # SLT incident CRM (Siebel via IBM API Connect). The client id is shared
+    # with domain/helpdesk/tools/incident_status_tools.py's QueryIncident call.
+    SLT_INCIDENT_CREATE_API_URL: Optional[str] = None
+    SLT_INCIDENT_API_CLIENT_ID: Optional[str] = None
+    # Staging CRM replies took 30-45s (2026-11-19). Keep below the usual 60s
+    # reverse-proxy read timeout so the user gets our message, not a proxy 504.
+    SLT_INCIDENT_CREATE_TIMEOUT_SECONDS: float = 55.0
 
     class Config:
         env_file = ".env"

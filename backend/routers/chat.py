@@ -28,6 +28,7 @@ from domain.registry import (
 )
 from domain.guardrails import classify_intent
 from domain.archetypes.helpdesk_agent import INTERNAL_LLM_TAG
+from domain.helpdesk.pipeline.ticket_form import USER_TEXT_EVENT
 from domain.tools.rag_tools import clear_thread_evidence, consume_thread_evidence
 from schemas.chat import ChatRequest
 from services.sessions import record_session
@@ -629,6 +630,17 @@ async def chat(
             async for event in graph.astream_events(state, config, version="v2"):
                 # ── Extract tokens from stream events ────────
                 kind = event["event"]
+
+                # Fixed (non-LLM) text a node wants shown even when other
+                # text already streamed this turn, e.g. helpdesk's ticket
+                # form marker (domain/helpdesk/pipeline/ticket_form.py).
+                if kind == "on_custom_event" and event.get("name") == USER_TEXT_EVENT:
+                    text = (event.get("data") or {}).get("text") or ""
+                    if text:
+                        streamed_any_text = True
+                        streamed_response_text += text
+                        yield text
+                    continue
 
                 if kind == "on_chat_model_stream":
                     metadata = event.get("metadata") or {}

@@ -160,6 +160,22 @@ class ChatSecurityTests(unittest.TestCase):
             response = self.client.post('/api/v1/chat', json=self.body, headers=self.owner)
             self.assertIn(evidence, response.text)
 
+    def test_user_visible_custom_event_streams_after_llm_text(self):
+        # Helpdesk ticket form: fixed text sent via a custom event must reach
+        # the user even though LLM text already streamed this turn.
+        self.classifier.return_value = SimpleNamespace(action='PASS', reason='synthetic', sentiment='neutral')
+        async def events(*args, **kwargs):
+            yield {'event': 'on_chat_model_stream', 'metadata': {'langgraph_node': 'agent'},
+                   'data': {'chunk': SimpleNamespace(content='Checking for existing tickets.')}}
+            yield {'event': 'on_custom_event', 'name': 'user_visible_text',
+                   'data': {'text': '\n\n[[HELPDESK_TICKET_FORM]]{}[[/HELPDESK_TICKET_FORM]]'}}
+            yield {'event': 'on_custom_event', 'name': 'some_other_event', 'data': {'text': 'hidden'}}
+        self.graph.astream_events.side_effect = events
+        with patch.object(self.chat_router, '_select_evidence_for_answer', return_value=[]):
+            response = self.client.post('/api/v1/chat', json={**self.body, 'stream': False}, headers=self.owner)
+        self.assertEqual(response.json(), {'response': 'Checking for existing tickets.\n\n'
+                                           '[[HELPDESK_TICKET_FORM]]{}[[/HELPDESK_TICKET_FORM]]'})
+
     def test_evidence_is_saved_with_answer_and_returned_in_history(self):
         self.classifier.return_value = SimpleNamespace(action='PASS', reason='synthetic', sentiment='neutral')
         async def events(*args, **kwargs):

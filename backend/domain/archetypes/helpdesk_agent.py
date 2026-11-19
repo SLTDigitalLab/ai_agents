@@ -18,8 +18,9 @@ Flow:
                          helped -> else kb_search_agent -> search KB ->
                          validate_kb_answer -> present answer / clarify /
                          create ticket -> self_or_human_handler ->
-                         check_duplicates -> draft_ticket ->
-                         confirm_category_handler -> save_ticket
+                         check_duplicates -> show_ticket_form -> END
+                         (the form posts to /api/v1/helpdesk_dev/incidents,
+                         which creates the incident in SLT's CRM)
 
   ticket_status_agent -> loops over get_user_tickets for status questions
 
@@ -50,8 +51,11 @@ from domain.helpdesk.pipeline.kb_search import (
 )
 from domain.helpdesk.pipeline.self_or_human import self_or_human_handler, route_after_self_or_human
 from domain.helpdesk.pipeline.duplicates import check_duplicates, route_after_duplicate_check
+from domain.helpdesk.pipeline.ticket_form import show_ticket_form
+# draft_ticket is no longer in the graph (replaced by show_ticket_form). The
+# category/confirm/save handlers stay registered only so conversations that
+# were already mid-way through the old chat flow at deploy time can finish.
 from domain.helpdesk.pipeline.ticket_draft import (
-    draft_ticket,
     category_clarification_handler,
     confirm_category_handler,
     route_after_category_confirmation,
@@ -108,9 +112,11 @@ def build_helpdesk_workflow() -> StateGraph:
     # Ticket creation: checks for an existing open ticket first.
     workflow.add_node("check_duplicates", check_duplicates)
 
-    # Classifies the category and shows a draft ticket to review.
-    workflow.add_node("draft_ticket", draft_ticket)
+    # No duplicate → hand the user the ticket form (submitted outside chat to
+    # POST /api/v1/helpdesk_dev/incidents, which creates the CRM incident).
+    workflow.add_node("show_ticket_form", show_ticket_form)
 
+    # Legacy chat-based ticket steps (see import note above).
     # Low-confidence category → one follow-up question, then drafts.
     workflow.add_node("category_clarification_handler", category_clarification_handler)
 
@@ -200,18 +206,18 @@ def build_helpdesk_workflow() -> StateGraph:
         },
     )
 
-    # duplicate found -> END, else -> draft_ticket
+    # duplicate found -> END, else -> show_ticket_form
     workflow.add_conditional_edges(
         "check_duplicates",
         route_after_duplicate_check,
         {
-            "draft_ticket": "draft_ticket",
+            "show_ticket_form": "show_ticket_form",
             "__end__": END,
         },
     )
+    workflow.add_edge("show_ticket_form", END)
 
-    # Both end waiting for the user's confirmation reply.
-    workflow.add_edge("draft_ticket", END)
+    # Ends waiting for the user's confirmation reply.
     workflow.add_edge("category_clarification_handler", END)
 
     # confirmed -> save_ticket, still unclear -> END

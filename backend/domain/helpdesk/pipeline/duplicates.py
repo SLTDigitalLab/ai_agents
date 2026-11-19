@@ -83,15 +83,15 @@ async def check_duplicates(state: AgentState) -> dict:
     return {"helpdesk_ticket_phase": "no_duplicate"}
 
 
-# [ROUTER] No duplicate found → draft a new ticket; duplicate found →
+# [ROUTER] No duplicate found → show the ticket form; duplicate found →
 # check_duplicates already told the user, so just end.
 def route_after_duplicate_check(
     state: AgentState,
-) -> Literal["draft_ticket", "__end__"]:
-    """After check_duplicates: no duplicate → draft ticket, else END."""
+) -> Literal["show_ticket_form", "__end__"]:
+    """After check_duplicates: no duplicate → ticket form, else END."""
     phase = state.get("helpdesk_ticket_phase", "")
     if phase == "no_duplicate":
-        print("[router] no duplicate → drafting ticket")
-        return "draft_ticket"
+        print("[router] no duplicate → showing ticket form")
+        return "show_ticket_form"
     print("[router] duplicate found → ending")
     return "__end__"
