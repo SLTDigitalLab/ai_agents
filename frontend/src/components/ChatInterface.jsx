@@ -5,6 +5,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { v4 as uuidv4 } from 'uuid';
 import LifestoreForm from './forms/LifestoreForm';
 import EnterpriseForm from './forms/EnterpriseForm';
+import HelpdeskTicketForm from './forms/HelpdeskTicketForm';
+import { HELPDESK_FORM_OPEN, parseHelpdeskFormPayload } from '../helpdeskTicketForm';
 import embryoLogo from '../assets/embryo-removebg.png';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -2029,7 +2031,14 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
                                     // Separate hidden evidence metadata from the answer text.
                                     const parsedEvidence = parseEvidencePayload(msg.text || "");
-                                    const visibleText = parsedEvidence.text || "";
+                                    // Helpdesk ticket form marker → form below the text.
+                                    const parsedHelpdeskForm = parseHelpdeskFormPayload(parsedEvidence.text || "");
+                                    const visibleText = parsedHelpdeskForm.text || "";
+                                    // Nth form in this thread — stable across live view and
+                                    // history reload, so a submitted form stays submitted.
+                                    const helpdeskFormKey = parsedHelpdeskForm.form && threadId
+                                        ? `helpdesk_ticket:${threadId}:${messages.slice(0, index).filter(m => (m.text || '').includes(HELPDESK_FORM_OPEN)).length}`
+                                        : '';
                                     const evidence = msg.evidence?.length > 0
                                         ? msg.evidence
                                         : (parsedEvidence.evidence || []);
@@ -2126,6 +2135,13 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
 
                                                     {msg.formType === 'lifestore' && <LifestoreForm />}
                                                     {msg.formType === 'enterprise' && <EnterpriseForm />}
+                                                    {parsedHelpdeskForm.form && !isStreamingThisMsg && (
+                                                        <HelpdeskTicketForm
+                                                            key={helpdeskFormKey}
+                                                            prefillDescription={parsedHelpdeskForm.form.description}
+                                                            storageKey={helpdeskFormKey}
+                                                        />
+                                                    )}
                                                 </div>
                                             )}
 
@@ -2143,7 +2159,7 @@ const ChatInterface = forwardRef(({ agentConfig }, ref) => {
                                                             onFeedback={(idx, rating) => setFeedbackMap(prev => ({ ...prev, [idx]: rating }))}
                                                         />
                                                     )}
-                                                    {!msg.error && <CopyMessageButton text={msg.text} />}
+                                                    {!msg.error && <CopyMessageButton text={parseHelpdeskFormPayload(msg.text).text} />}
                                                     {isErrorMsg && lastFailedMessage && (
                                                         <button
                                                             type="button"
