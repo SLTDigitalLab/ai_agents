@@ -35,6 +35,7 @@ from domain.config.supervisor_routing import (
     KEYWORD_MATCH_BOOST,
     LOW_CONFIDENCE_THRESHOLD,
     MIN_ROUTE_MARGIN,
+    MULTILINGUAL_INTENT_ALIASES,
     MULTI_DELEGATE_MAX_AGENTS,
     MULTI_DELEGATE_MAX_GAP,
     MULTI_DELEGATE_SECONDARY_THRESHOLD,
@@ -340,6 +341,21 @@ def _matched_keywords(query: str, agent_id: str) -> list[str]:
     return matches
 
 
+def _multilingual_alias_route(query: str) -> str | None:
+    """Return a specialist for a narrow, language-independent business intent.
+
+    This deliberately matches only maintained concepts such as ``leave
+    balance`` and their Sinhala/Tamil equivalents. It is not a script-based
+    fallback, so unrelated multilingual requests still follow vector routing
+    and can remain out of scope.
+    """
+    normalized = re.sub(r"\s+", " ", query.casefold()).strip()
+    for agent_id, aliases in MULTILINGUAL_INTENT_ALIASES.items():
+        if any(alias.casefold() in normalized for alias in aliases):
+            return agent_id
+    return None
+
+
 async def _score_specialists(
     query: str,
     last_specialist_agent: str | None,
@@ -450,6 +466,23 @@ async def route_request(state: AgentState) -> dict:
             "pending_clarification": True,
             "clarification_options": list(SPECIALIST_BUILDERS.keys()),
             "original_query": query,
+        }
+
+    multilingual_alias_agent = _multilingual_alias_route(query)
+    if multilingual_alias_agent:
+        logger.info(
+            "Supervisor route | action=delegate | reason=multilingual_intent_alias | target=%s",
+            multilingual_alias_agent,
+        )
+        return {
+            "routing_action": "delegate",
+            "routed_agent_id": multilingual_alias_agent,
+            "routing_reason": f"multilingual_intent_alias:{multilingual_alias_agent}",
+            "routing_scores": {},
+            "delegation_query": query,
+            "pending_clarification": False,
+            "clarification_options": [],
+            "original_query": "",
         }
 
     scored = await _score_specialists(query, last_specialist_agent)

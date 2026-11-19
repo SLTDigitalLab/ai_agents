@@ -126,6 +126,31 @@ Use the running [API documentation](http://localhost:8000/api/docs) for request 
 
 ## Deployment and maintenance
 
+### Local voice language detection and fillers
+
+The Gemini Workmate voice proxy can identify English, Sinhala, and Tamil from
+microphone PCM using the local `TriLinSL/lid-ecapa-voxlingua107-si-ta-en`
+model. Install `backend/requirements-voice-lid.txt` in **the same Python
+environment that starts Uvicorn**. Provision the model's `hyperparams.yaml`,
+`embedding_model.ckpt`, `classifier.ckpt`, and `label_encoder.txt` under
+`backend/.audio_lid_cache/` before startup. This ignored directory contains
+model weights only; user audio is held in bounded memory and is not saved.
+The model warms in the background when a Gemini voice session starts so a
+first-turn Tamil or Sinhala audio check can finish within its bounded window.
+The model's distribution is Apache-2.0; consult its model card when deploying.
+
+Workmate lookup fillers target approximately 2.5 seconds, then 10 and 16
+seconds, and continue at wider intervals while the task runs. The scheduler
+requests speech one second ahead of each target so Gemini can begin generating
+audio. A bounded audio language check can correct an English transcript; it
+never holds the Workmate lookup or filler timer indefinitely. For Gemini Live
+calls, the existing Alnilam session speaks deterministic filler phrases while
+the Workmate tool runs. Filler PCM streams through the same browser audio queue
+and Luma avatar lip-sync as final answers. This consumes additional Gemini
+output during long lookups, but opens no second provider connection. Test
+actual audio output, language switching, and interruption in the deployment
+browser.
+
 See [Operations](docs/operations.md) for production startup, Nginx ports, optional services, collection naming, monthly refresh, and troubleshooting. Frontend build and lint commands are `npm run build` and `npm run lint` from `frontend/`.
 
 Developed by SLT Digital Lab.
