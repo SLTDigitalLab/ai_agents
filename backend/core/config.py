@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # only the deterministic regex pre-check runs (free, no model call).
     GUARDRAIL_MODEL_ENABLED: bool = True
     GUARDRAIL_PROVIDER: str = "openai"
-    GUARDRAIL_MODEL: str = "gpt-4.1-nano"
+    GUARDRAIL_MODEL: str = "gpt-5.6-luna"
     GUARDRAIL_API_KEY: Optional[str] = None  # falls back to provider key
 
     # Internal SLM (Ollama) — used by the Ask HR SLM demo agent only.
